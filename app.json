@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "DARKFANTASY",
+    "slug": "darkfantasy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "darkfantasy",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.aditya123473892.darkfantasy",
+      "adaptiveIcon": {
+        "backgroundColor": "#000000"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.aditya123473892.darkfantasy",
+      "supportsTablet": true
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
