@@ -5,12 +5,16 @@ import { Text, Wordmark } from '@/components/ui';
 import { RegisterForm } from '../components/RegisterForm';
 export function RegisterScreen(): React.JSX.Element {
   return (
-    <Screen scroll>
+    <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
       <Header title="Create account" back />
-<Wordmark large />
+      <Wordmark large />
       <View style={styles.copy}>
-<Text variant="title" center>Meet your next favorite person.</Text>
-<Text color="muted" center>A few details and you're in.</Text>
+        <Text variant="title" center>
+          Meet your next favorite person.
+        </Text>
+        <Text color="muted" center>
+          A few details and you're in.
+        </Text>
       </View>
       <RegisterForm />
       <View style={styles.footer}>

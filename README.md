@@ -1,6 +1,6 @@
 # DARKFANTASY Mobile
 
-A production-oriented Expo Router UI scaffold for a dating-style mobile app. It is frontend-only: all profiles, matches, conversations, and authentication responses are typed local fixtures. There are no live API calls or third-party runtime services.
+A production-oriented Expo Router UI scaffold for a dating-style mobile app. It is frontend-only: all profiles, connection requests, conversations, posts, and authentication responses are typed local fixtures. There are no live API calls or third-party runtime services.
 
 ## Stack
 
@@ -31,14 +31,15 @@ Mock login accepts the prefilled credentials. To test a generic auth failure, us
 ```text
 app/                         thin Expo Router route files and layouts
   (auth)/                    welcome, login, registration, reset, invite
-  (app)/(tabs)/              home, discover, create, activity, profile, chats
+  (app)/(tabs)/              home, discover, chats (Messages), activity (notifications + requests), profile
+  (app)/create              post composer, presented as a modal from Home and Profile
   (app)/chat|profile|settings
 src/
   features/                  feature-owned UI, hooks, schemas, stores, services
   components/ui|layout|feedback
   theme/                     all shared color, type, spacing, radius, shadow tokens
   services/api|storage       dormant Axios scaffold and SecureStore wrapper
-  mocks/                     typed local fixtures and bundled data-URI artwork
+  mocks/                     typed fixtures + db.ts, the in-memory mock backend behind every *.mock service
   config/                    typed env access and feature flags
   hooks/ utils/ types/
 assets/                      placeholder artwork and future licensed fonts
@@ -62,6 +63,19 @@ npm start -- --clear
 
 The Welcome screen automatically uses the enabled `invite_code` strategy and opens the already-built invite route/form. The email/password form, store, and service contract do not change. For a compile-time-only setup, change `AUTH_MODE` at the source in `src/config/featureFlags.ts`.
 
+## Data, requests, and chat architecture
+
+Every feature follows the auth pattern: a `Service` interface, a `*.mock.ts` implementation, and a single swap point in `services/index.ts` (`chat`, `requests`, `feed`, `activity`, `profile`). Screens only use TanStack Query hooks from each feature's `hooks/` folder. All mock services share `src/mocks/db.ts`, an in-memory backend that applies server-style rules: messages are scoped to their conversation, request state changes are validated, and sends are idempotent per `clientId`. Its state resets when the app reloads.
+
+- **Requests** live in the Activity tab (Notifications | Requests). There is no separate match page. Accepting a request creates the conversation, and the confirmation toast links straight to it. Sending a request to someone who has already requested you connects you both immediately.
+- **Chat**: `/chat/[id]` always loads by conversation ID. An unknown ID shows "Conversation not found" and never falls back to someone else's conversation. Unsent messages sit in a per-conversation outbox (`features/chat/store/outboxStore.ts`) as _sending_ or _failed_ until the server confirms them, so refetches never drop them. Failed messages can be retried or deleted. The mock confirms a send as **sent** only; _delivered_ and _read_ must come from the real backend.
+- **Privacy** preferences (distance, active status, read receipts) are stored on the device. Active status and read receipts are reciprocal.
+- Logging out clears the query cache and the outbox, so the next account starts clean.
+
+Mock test hooks: in a dev build, **Settings → Developer → Simulate offline** makes every mock request fail with a network error. Sending the chat message `/fail` makes that one send fail, which shows the retry UI.
+
+Backend work required for production chat: a realtime transport (WebSocket/SSE) for incoming messages and delivery/read receipts (the app polls the open conversation every 15 s as a fallback), push notifications, server-enforced privacy settings, and blocking/reporting endpoints.
+
 ## Connect the real backend later
 
 1. Create `src/features/auth/services/authService.real.ts` implementing every `AuthService` method. Map backend errors into the existing `AuthErrorCode` union.
@@ -75,7 +89,7 @@ The Welcome screen automatically uses the enabled `invite_code` strategy and ope
 ## Security notes and current limitations
 
 - This is a UI scaffold, not a production authentication system. Mock tokens are intentionally fake and never leave the device.
-- Social login, push notifications, image uploads, moderation/reporting, location, realtime messaging, and account deletion are visual placeholders.
+- Not implemented (need backend work): social login, push notifications, image upload for posts and profile photos, blocking/reporting, location, realtime message delivery, and self-serve account deletion (the app opens a support email instead).
 - SecureStore protects persisted session material, but the final backend must enforce authorization, expiry, rotation, revocation, and abuse controls.
 - Profile artwork is original geometric placeholder SVG/data-URI content; replace it only with properly licensed assets.
 - iOS requires macOS/Xcode for simulator or local native builds.

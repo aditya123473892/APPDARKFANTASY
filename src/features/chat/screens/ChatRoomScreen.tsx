@@ -1,78 +1,298 @@
-import { useMemo, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
-import { Header, KeyboardAvoidingScreen, Screen } from '@/components/layout';
-import { Avatar, Text } from '@/components/ui';
-import { mockChats, mockMessages, type Message } from '@/mocks/chats';
-import { mockUsers } from '@/mocks/users';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  FlatList,
+  Pressable,
+  StyleSheet,
+  View,
+  type ListRenderItem,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ErrorState } from '@/components/feedback/ErrorState';
+import { OfflineBanner } from '@/components/feedback/OfflineBanner';
+import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
+import { Avatar, EmptyState, Skeleton, Text } from '@/components/ui';
+import { useKeyboard } from '@/hooks/useKeyboard';
+import { isServiceError } from '@/services/errors';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/useTheme';
+import { formatPresence } from '@/utils/formatters';
 import { ChatInput } from '../components/ChatInput';
 import { DateDivider } from '../components/DateDivider';
 import { MessageBubble } from '../components/MessageBubble';
-import { TypingIndicator } from '../components/TypingIndicator';
-export function ChatRoomScreen(): React.JSX.Element {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const listRef = useRef<FlatList<Message>>(null);
-  const chat = mockChats.find((item) => item.id === id) ?? mockChats[0]!;
-  const user = mockUsers.find((item) => item.id === chat.participantId) ?? mockUsers[0]!;
-  const initial = useMemo(
-    () => mockMessages.filter((message) => message.chatId === chat.id),
-    [chat.id],
-  );
-  const [messages, setMessages] = useState(initial);
-  const send = (text: string): void => {
-    setMessages((items) => [
-      ...items,
-      {
-        id: `local-${Date.now()}`,
-        chatId: chat.id,
-        senderId: 'me',
-        text,
-        createdAt: new Date().toISOString(),
-        status: 'sent',
-      },
-    ]);
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-  };
+import {
+  useConversation,
+  useMarkConversationRead,
+  useMessages,
+  useMyId,
+  useSendMessage,
+  useVisiblePresence,
+} from '../hooks/useChat';
+import { buildRows, type ChatRow as Row } from '../utils/buildRows';
+
+function MessagesSkeleton(): React.JSX.Element {
   return (
-    <KeyboardAvoidingScreen>
-      <Screen padded={false}>
-        <View style={styles.header}>
-          <Header title="" back />
-          <View pointerEvents="none" style={styles.person}>
-            <Avatar uri={user.avatarUri} label={user.name} online={chat.online} size={40} />
-            <View>
-              <Text weight="bold">{user.name}</Text>
-              <Text variant="caption" color={chat.online ? 'primary' : 'muted'}>
-                {chat.online ? 'Online now' : 'Recently active'}
-              </Text>
-            </View>
-          </View>
-        </View>
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-          ListHeaderComponent={<DateDivider label="Today" />}
-          ListFooterComponent={chat.typing ? <TypingIndicator name={user.name} /> : null}
-          renderItem={({ item }) => <MessageBubble message={item} sent={item.senderId === 'me'} />}
+    <View style={styles.skeleton}>
+      {[0.55, 0.4, 0.68, 0.35, 0.5].map((width, index) => (
+        <Skeleton
+          key={index}
+          style={[
+            styles.skeletonBubble,
+            { width: `${width * 100}%` },
+            index % 2 ? styles.skeletonMine : null,
+          ]}
         />
-        <ChatInput onSend={send} />
-      </Screen>
-    </KeyboardAvoidingScreen>
+      ))}
+    </View>
   );
 }
+
+export function ChatRoomScreen(): React.JSX.Element {
+  const params = useLocalSearchParams<{ id: string }>();
+  const conversationId = typeof params.id === 'string' ? params.id : '';
+  const router = useRouter();
+  const goBack = useSafeBack('/chats');
+  const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboard();
+  const myId = useMyId();
+  const listRef = useRef<FlatList<Row>>(null);
+  const [showJump, setShowJump] = useState(false);
+
+  const conversationQuery = useConversation(conversationId);
+  const conversation = conversationQuery.data;
+  const notFound = !conversationId || isServiceError(conversationQuery.error, 'NOT_FOUND');
+  const messagesQuery = useMessages(conversationId, !notFound);
+  const { messages } = messagesQuery;
+  const { send, retry, discard } = useSendMessage(conversationId);
+  const presence = formatPresence(useVisiblePresence(conversation));
+
+  const latestIncomingId = useMemo(
+    () =>
+      [...messages].reverse().find((message) => !message.local && message.senderId !== myId)?.id,
+    [messages, myId],
+  );
+  useMarkConversationRead(conversation ? conversationId : '', latestIncomingId);
+
+  const rows = useMemo(() => buildRows(messages), [messages]);
+
+  const scrollToLatest = useCallback(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
+
+  const onSend = useCallback(
+    (text: string) => {
+      send(text);
+      requestAnimationFrame(scrollToLatest);
+    },
+    [scrollToLatest, send],
+  );
+
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // Inverted list: offset 0 is the newest message at the bottom.
+    setShowJump(event.nativeEvent.contentOffset.y > 480);
+  }, []);
+
+  const renderItem = useCallback<ListRenderItem<Row>>(
+    ({ item }) =>
+      item.type === 'divider' ? (
+        <DateDivider label={item.label} />
+      ) : (
+        <MessageBubble
+          message={item.message}
+          mine={item.message.senderId === myId}
+          first={item.first}
+          last={item.last}
+          onRetry={retry}
+          onDiscard={discard}
+        />
+      ),
+    [discard, myId, retry],
+  );
+
+  if (notFound) {
+    return (
+      <SafeAreaView style={[styles.root, { backgroundColor: theme.colors.background }]}>
+        <EmptyState
+          icon="chatbubble-ellipses-outline"
+          title="Conversation not found"
+          message="This conversation may have been removed, or the person is no longer available."
+          actionLabel="Back to messages"
+          onAction={() => router.replace('/chats')}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  const participant = conversation?.participant;
+  const initialLoading = messagesQuery.isPending && messages.length === 0;
+  const loadFailed = messagesQuery.isError && !messagesQuery.data;
+
+  return (
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      style={[styles.root, { backgroundColor: theme.colors.background }]}
+    >
+      <View style={[styles.header, { borderBottomColor: theme.colors.divider }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to messages"
+          hitSlop={6}
+          onPress={goBack}
+          style={({ pressed }) => [
+            styles.back,
+            pressed && { backgroundColor: theme.colors.surfacePressed },
+          ]}
+        >
+          <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
+        </Pressable>
+        {participant ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${participant.name}'s profile`}
+            onPress={() => router.push(`/profile/${participant.id}`)}
+            style={styles.person}
+          >
+            <Avatar
+              uri={participant.avatarUri}
+              label={participant.name}
+              online={presence === 'Online now'}
+              size={40}
+            />
+            <View style={styles.personCopy}>
+              <Text variant="subheading" numberOfLines={1}>
+                {participant.name}
+              </Text>
+              {presence ? (
+                <Text
+                  variant="caption"
+                  color={presence === 'Online now' ? 'success' : 'secondary'}
+                  numberOfLines={1}
+                >
+                  {presence}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        ) : (
+          <View style={styles.person}>
+            <Skeleton style={styles.headerAvatar} />
+            <Skeleton style={styles.headerName} />
+          </View>
+        )}
+      </View>
+
+      {messagesQuery.isRefetchError && messagesQuery.data ? (
+        <OfflineBanner message="Can't reach the server. We'll keep trying." />
+      ) : null}
+
+      <KeyboardAvoidingScreen>
+        <View style={styles.body}>
+          {initialLoading ? (
+            <MessagesSkeleton />
+          ) : loadFailed ? (
+            <ErrorState
+              onRetry={() => void messagesQuery.refetch()}
+              message="We couldn't load this conversation."
+            />
+          ) : messages.length === 0 && participant ? (
+            <EmptyState
+              icon="sparkles-outline"
+              title={`You and ${participant.name} are connected`}
+              message="Break the ice — mention something from their profile you genuinely liked."
+            />
+          ) : (
+            <FlatList
+              ref={listRef}
+              inverted
+              data={rows}
+              keyExtractor={(item) => item.key}
+              renderItem={renderItem}
+              contentContainerStyle={styles.list}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              onScroll={onScroll}
+              scrollEventThrottle={64}
+              // Keep the reader's place when new messages arrive, but follow along if they're at the bottom.
+              maintainVisibleContentPosition={{
+                minIndexForVisible: 0,
+                autoscrollToTopThreshold: 120,
+              }}
+              initialNumToRender={20}
+              windowSize={11}
+            />
+          )}
+          {showJump ? (
+            <Animated.View
+              entering={FadeIn.duration(150)}
+              exiting={FadeOut.duration(150)}
+              style={styles.jumpWrap}
+            >
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Jump to latest messages"
+                onPress={scrollToLatest}
+                style={[
+                  styles.jump,
+                  {
+                    backgroundColor: theme.colors.surfaceElevated,
+                    borderColor: theme.colors.border,
+                  },
+                ]}
+              >
+                <Ionicons name="arrow-down" size={20} color={theme.colors.text} />
+              </Pressable>
+            </Animated.View>
+          ) : null}
+        </View>
+        <ChatInput
+          onSend={onSend}
+          disabled={!conversation}
+          bottomInset={keyboardVisible ? 0 : insets.bottom}
+          placeholder={participant ? `Message ${participant.name}…` : 'Write a message…'}
+        />
+      </KeyboardAvoidingScreen>
+    </SafeAreaView>
+  );
+}
+
 const styles = StyleSheet.create({
-  header: { position: 'relative' },
-  person: {
-    position: 'absolute',
-    left: 72,
-    right: 60,
-    top: 8,
+  root: { flex: 1 },
+  header: {
+    minHeight: 60,
     flexDirection: 'row',
-    gap: 10,
     alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  list: { padding: 16, gap: 10 },
+  back: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  person: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 48 },
+  personCopy: { flex: 1 },
+  headerAvatar: { width: 40, height: 40, borderRadius: radius.full },
+  headerName: { width: 120 },
+  body: { flex: 1, width: '100%', maxWidth: spacing.contentMax + 120, alignSelf: 'center' },
+  list: { paddingHorizontal: spacing.screen, paddingVertical: spacing.md },
+  skeleton: { flex: 1, justifyContent: 'flex-end', padding: spacing.screen, gap: spacing.md },
+  skeletonBubble: { height: 40, borderRadius: radius.lg },
+  skeletonMine: { alignSelf: 'flex-end' },
+  jumpWrap: { position: 'absolute', right: spacing.lg, bottom: spacing.lg },
+  jump: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

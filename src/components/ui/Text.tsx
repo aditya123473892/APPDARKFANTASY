@@ -1,12 +1,13 @@
 import { forwardRef } from 'react';
 import { StyleSheet, Text as RNText, type TextProps as RNTextProps } from 'react-native';
 
+import { typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
-type TextVariant = 'display' | 'title' | 'heading' | 'body' | 'label' | 'caption';
+type TextVariant = 'display' | 'title' | 'heading' | 'subheading' | 'body' | 'label' | 'caption';
 type TextProps = RNTextProps & {
   variant?: TextVariant;
-  color?: 'default' | 'muted' | 'primary' | 'danger';
+  color?: 'default' | 'secondary' | 'muted' | 'primary' | 'danger' | 'success' | 'inverse';
   weight?: 'regular' | 'medium' | 'semibold' | 'bold';
   center?: boolean;
 };
@@ -18,16 +19,19 @@ export const Text = forwardRef<RNText, TextProps>(function Text(
   const { theme } = useTheme();
   const colorValue = {
     default: theme.colors.text,
+    secondary: theme.colors.textSecondary,
     muted: theme.colors.textMuted,
     primary: theme.colors.primary,
     danger: theme.colors.danger,
+    success: theme.colors.success,
+    inverse: theme.colors.onPrimary,
   }[color];
   return (
     <RNText
       ref={ref}
       allowFontScaling
+      maxFontSizeMultiplier={typography.maxFontScale}
       style={[
-        styles.base,
         styles[variant],
         {
           color: colorValue,
@@ -42,12 +46,12 @@ export const Text = forwardRef<RNText, TextProps>(function Text(
 });
 
 const styles = StyleSheet.create({
-  base: { fontFamily: undefined },
-  display: { fontSize: 38, lineHeight: 44, fontWeight: '800', letterSpacing: -1.2 },
-  title: { fontSize: 28, lineHeight: 35, fontWeight: '700', letterSpacing: -0.5 },
-  heading: { fontSize: 22, lineHeight: 29, fontWeight: '700' },
+  display: { fontSize: 34, lineHeight: 40, fontWeight: '700', letterSpacing: -0.8 },
+  title: { fontSize: 26, lineHeight: 32, fontWeight: '700', letterSpacing: -0.4 },
+  heading: { fontSize: 20, lineHeight: 26, fontWeight: '700', letterSpacing: -0.2 },
+  subheading: { fontSize: 17, lineHeight: 23, fontWeight: '600' },
   body: { fontSize: 15, lineHeight: 22, fontWeight: '400' },
-  label: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
-  caption: { fontSize: 11, lineHeight: 15, fontWeight: '500' },
+  label: { fontSize: 14, lineHeight: 19, fontWeight: '600' },
+  caption: { fontSize: 12, lineHeight: 16, fontWeight: '500' },
   center: { textAlign: 'center' },
 });

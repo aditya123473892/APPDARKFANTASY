@@ -1,47 +1,85 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Avatar, Badge, Text } from '@/components/ui';
-import type { Chat } from '@/mocks/chats';
-import type { User } from '@/features/auth/types';
+import { spacing } from '@/theme';
+import { useTheme } from '@/theme/useTheme';
 import { formatRelativeTime } from '@/utils/formatters';
+import type { Conversation } from '../types';
 
 export const ChatListItem = memo(function ChatListItem({
-  chat,
-  user,
+  conversation,
+  myId,
+  showPresence,
   onPress,
 }: {
-  chat: Chat;
-  user: User;
-  onPress: () => void;
+  conversation: Conversation;
+  myId: string;
+  showPresence: boolean;
+  onPress: (conversation: Conversation) => void;
 }): React.JSX.Element {
+  const { theme } = useTheme();
+  const { participant, lastMessage, unreadCount } = conversation;
+  const unread = unreadCount > 0;
+  const fromMe = lastMessage?.senderId === myId;
+  const preview = lastMessage
+    ? `${fromMe ? 'You: ' : ''}${lastMessage.text}`
+    : 'New connection — say hello 👋';
+  const online = showPresence && Boolean(conversation.presence?.online);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Chat with ${user.name}`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.root, { opacity: pressed ? 0.65 : 1 }]}
+      accessibilityLabel={`Conversation with ${participant.name}. ${unread ? `${unreadCount} unread. ` : ''}${preview}`}
+      onPress={() => onPress(conversation)}
+      style={({ pressed }) => [styles.root, pressed && { backgroundColor: theme.colors.surface }]}
     >
-      <Avatar uri={user.avatarUri} label={user.name} online={chat.online} size={58} />
+      <Avatar uri={participant.avatarUri} label={participant.name} online={online} size={56} />
       <View style={styles.content}>
         <View style={styles.row}>
-          <Text weight="bold">{user.name}</Text>
-          <Text variant="caption" color="muted">
-            {formatRelativeTime(chat.updatedAt)}
+          <Text
+            variant="subheading"
+            weight={unread ? 'bold' : 'semibold'}
+            numberOfLines={1}
+            style={styles.name}
+          >
+            {participant.name}
+          </Text>
+          <Text variant="caption" color={unread ? 'primary' : 'muted'}>
+            {formatRelativeTime(conversation.updatedAt)}
           </Text>
         </View>
         <View style={styles.row}>
-          <Text numberOfLines={1} color={chat.typing ? 'primary' : 'muted'} style={styles.preview}>
-            {chat.typing ? 'Typing…' : chat.lastMessage}
+          <Text
+            numberOfLines={1}
+            variant="label"
+            weight={unread ? 'semibold' : 'regular'}
+            color={unread ? 'default' : lastMessage ? 'secondary' : 'primary'}
+            style={styles.preview}
+          >
+            {preview}
           </Text>
-          {chat.unreadCount ? <Badge value={chat.unreadCount} /> : null}
+          {unread ? <Badge value={unreadCount} /> : null}
         </View>
       </View>
     </Pressable>
   );
 });
+
 const styles = StyleSheet.create({
-  root: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  content: { flex: 1, gap: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  root: {
+    minHeight: 80,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.screen,
+    paddingVertical: spacing.md,
+  },
+  content: { flex: 1, gap: spacing.xs },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  name: { flex: 1 },
   preview: { flex: 1 },
 });

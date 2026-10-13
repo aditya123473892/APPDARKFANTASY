@@ -1,84 +1,64 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui';
 import type { User } from '@/features/auth/types';
+import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
+
+/** Name, age, presence and the work/location line. Shared by "my profile" and other people's profiles. */
 export function ProfileHeader({
   user,
-  mine = false,
-  onSettings,
-  onMessage,
+  presence,
+  distance,
 }: {
   user: User;
-  mine?: boolean;
-  onSettings?: () => void;
-  onMessage?: () => void;
+  presence?: string | null;
+  distance?: string | null;
 }): React.JSX.Element {
   const { theme } = useTheme();
+  const meta: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [];
+  if (user.occupation) meta.push({ icon: 'briefcase-outline', text: user.occupation });
+  if (distance ?? user.location)
+    meta.push({ icon: 'location-outline', text: (distance ?? user.location)! });
   return (
     <View style={styles.root}>
-      <View style={styles.photoWrap}>
-        <Image
-          source={{ uri: user.avatarUri }}
-          contentFit="cover"
-          accessibilityLabel={`${user.name}'s profile photo`}
-          style={[styles.photo, { borderColor: theme.colors.primary }]}
-        />
-        <View
-          style={[
-            styles.status,
-            { backgroundColor: theme.colors.success, borderColor: theme.colors.background },
-          ]}
-        />
-      </View>
-      <View style={styles.nameRow}>
-        <Text variant="title">
-          {user.name}, {user.age}
-        </Text>
-        <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary} />
-      </View>
-      <Text color="muted" center>
-        {user.bio}
+      <Text variant="title" accessibilityRole="header">
+        {user.name}, {user.age}
       </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={mine ? 'Open settings' : `Message ${user.name}`}
-        onPress={mine ? onSettings : onMessage}
-        style={[styles.action, { backgroundColor: theme.colors.primarySoft }]}
-      >
-        <Ionicons
-          name={mine ? 'settings-outline' : 'chatbubble-outline'}
-          size={20}
-          color={theme.colors.primary}
-        />
-        <Text color="primary" weight="bold">
-          {mine ? 'Settings' : 'Message'}
-        </Text>
-      </Pressable>
+      {presence ? (
+        <View style={styles.row}>
+          <View
+            style={[
+              styles.dot,
+              {
+                backgroundColor:
+                  presence === 'Online now' ? theme.colors.success : theme.colors.textMuted,
+              },
+            ]}
+          />
+          <Text variant="caption" color={presence === 'Online now' ? 'success' : 'secondary'}>
+            {presence}
+          </Text>
+        </View>
+      ) : null}
+      {meta.length ? (
+        <View style={styles.meta}>
+          {meta.map((item) => (
+            <View key={item.icon} style={styles.row}>
+              <Ionicons name={item.icon} size={15} color={theme.colors.textSecondary} />
+              <Text variant="label" weight="regular" color="secondary">
+                {item.text}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
 const styles = StyleSheet.create({
-  root: { alignItems: 'center', gap: 10 },
-  photoWrap: { position: 'relative' },
-  photo: { width: 118, height: 118, borderRadius: 999, borderWidth: 3 },
-  status: {
-    position: 'absolute',
-    right: 6,
-    bottom: 7,
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    borderWidth: 3,
-  },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  action: {
-    minHeight: 44,
-    borderRadius: 999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 18,
-  },
+  root: { gap: spacing.xs + 2 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
+  meta: { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.lg, rowGap: spacing.xs },
+  dot: { width: 8, height: 8, borderRadius: 999 },
 });

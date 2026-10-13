@@ -1,60 +1,236 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Avatar, Text, ThreadLine, Toast } from '@/components/ui';
-import { currentUser } from '@/mocks/users';
-import { mockImages } from '@/mocks/images';
+import { useNavigation } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
+import { Avatar, Button, Text } from '@/components/ui';
+import { toast } from '@/components/ui/Toast';
+import { useAuthStore } from '@/features/auth/store/authStore';
+import { useCreatePost } from '@/features/feed/hooks/useFeed';
+import type { PostAudience } from '@/features/feed/types';
+import { useKeyboard } from '@/hooks/useKeyboard';
+import { describeError } from '@/services/errors';
 import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
 const LIMIT = 500;
-const tools: { icon: keyof typeof Ionicons.glyphMap; label: string }[] = [
-  { icon: 'image-outline', label: 'Add image' }, { icon: 'camera-outline', label: 'Open camera' },
-  { icon: 'happy-outline', label: 'Add GIF' }, { icon: 'stats-chart-outline', label: 'Add poll' }, { icon: 'location-outline', label: 'Add location' },
+const audiences: { value: PostAudience; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: 'everyone', label: 'Everyone', icon: 'globe-outline' },
+  { value: 'connections', label: 'Connections', icon: 'people-outline' },
 ];
 
 export function CreatePostScreen(): React.JSX.Element {
-  const router = useRouter(); const { theme } = useTheme();
-  const [value, setValue] = useState(''); const [audience, setAudience] = useState<'Everyone' | 'Matches only'>('Everyone'); const [posted, setPosted] = useState(false);
-  const [attachments, setAttachments] = useState<string[]>([]);
-  const enabled = value.trim().length > 0 && value.length <= LIMIT;
-  const submit = (): void => { if (!enabled) return; void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); setPosted(true); setValue(''); setTimeout(() => { setPosted(false); router.back(); }, 900); };
-  const countColor = value.length > LIMIT ? theme.colors.danger : value.length > LIMIT * 0.85 ? theme.colors.primary : theme.colors.textMuted;
-  return <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
-    <KeyboardAvoidingView style={styles.safe} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[styles.header, { borderBottomColor: theme.colors.divider }]}>
-        <Pressable onPress={() => router.back()} style={styles.headerAction}><Text>Cancel</Text></Pressable>
-        <Text variant="label">New post</Text>
-        <Pressable disabled={!enabled} onPress={submit} style={[styles.postButton, { backgroundColor: enabled ? theme.colors.primary : theme.colors.surfaceElevated }]}><Text variant="label" style={{ color: enabled ? theme.palette.white : theme.colors.textMuted }}>Post</Text></Pressable>
-      </View>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
-        <View style={styles.composer}>
-          <View style={styles.rail}><Avatar uri={currentUser.avatarUri} label="Your avatar" size={40} /><ThreadLine /></View>
-          <View style={styles.inputColumn}><Text variant="label">{currentUser.name}</Text><TextInput multiline autoFocus value={value} onChangeText={setValue} maxLength={LIMIT + 20} placeholder="What's on your mind?" placeholderTextColor={theme.colors.textMuted} selectionColor={theme.colors.primary} style={[styles.input, { color: theme.colors.textPrimary }]} />
-            <View style={styles.tools}>{tools.map((tool, index) => <Pressable key={tool.label} accessibilityLabel={tool.label} onPress={() => { if (index < 3) setAttachments((items) => [...items, mockImages[(items.length + index) % mockImages.length]!]); }} style={styles.tool}><Ionicons name={tool.icon} size={21} color={theme.colors.textSecondary} /></Pressable>)}</View>
-            {attachments.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.previews}>{attachments.map((uri, index) => <View key={`${uri}-${index}`}><Image source={{ uri }} contentFit="cover" accessibilityLabel={`Attachment ${index + 1}`} style={[styles.preview, { borderColor: theme.colors.border }]} /><Pressable accessibilityLabel={`Remove attachment ${index + 1}`} onPress={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))} style={[styles.remove, { backgroundColor: theme.colors.surfaceElevated }]}><Ionicons name="close" size={16} color={theme.colors.textPrimary} /></Pressable></View>)}</ScrollView> : null}
-          </View>
+  const navigation = useNavigation();
+  const close = useSafeBack('/home');
+  const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboard();
+  const me = useAuthStore((state) => state.user);
+  const [value, setValue] = useState('');
+  const [audience, setAudience] = useState<PostAudience>('everyone');
+  const createPost = useCreatePost();
+  const submitted = useRef(false);
+
+  const trimmed = value.trim();
+  const over = value.length > LIMIT;
+  const canPost = trimmed.length > 0 && !over && !createPost.isPending;
+  const dirty = trimmed.length > 0;
+
+  // Confirm before discarding a draft — covers the Cancel button, Android back, and swipe-to-dismiss.
+  useEffect(
+    () =>
+      navigation.addListener('beforeRemove', (event) => {
+        if (!dirty || submitted.current) return;
+        event.preventDefault();
+        Alert.alert('Discard this post?', "Your draft won't be saved.", [
+          { text: 'Keep editing', style: 'cancel' },
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => navigation.dispatch(event.data.action),
+          },
+        ]);
+      }),
+    [dirty, navigation],
+  );
+
+  const submit = (): void => {
+    if (!canPost) return;
+    createPost.mutate(
+      { body: trimmed, audience },
+      {
+        onSuccess: () => {
+          submitted.current = true;
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          toast.success('Your post is live');
+          close();
+        },
+        onError: (error) =>
+          toast.error(
+            describeError(error, "Couldn't publish your post. Your draft is still here."),
+          ),
+      },
+    );
+  };
+
+  const countColor = over ? 'danger' : value.length > LIMIT * 0.85 ? 'primary' : 'muted';
+
+  return (
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      style={[styles.safe, { backgroundColor: theme.colors.background }]}
+    >
+      <KeyboardAvoidingScreen>
+        <View style={[styles.header, { borderBottomColor: theme.colors.divider }]}>
+          <Button label="Cancel" variant="ghost" size="sm" fullWidth={false} onPress={close} />
+          <Text variant="subheading" accessibilityRole="header">
+            New post
+          </Text>
+          <Button
+            label="Post"
+            size="sm"
+            fullWidth={false}
+            disabled={!canPost}
+            loading={createPost.isPending}
+            onPress={submit}
+            style={styles.postButton}
+          />
         </View>
-        <Pressable style={styles.addThread}><View style={styles.miniAvatar}><Avatar uri={currentUser.avatarUri} label="Your avatar" size={24} /></View><Text color="muted">Add to thread</Text></Pressable>
-      </ScrollView>
-      <View style={[styles.footer, { borderTopColor: theme.colors.divider }]}>
-        <Pressable onPress={() => setAudience((v) => v === 'Everyone' ? 'Matches only' : 'Everyone')} style={styles.audience}><Ionicons name="globe-outline" size={18} color={theme.colors.primary} /><Text variant="label" color="primary">{audience}</Text></Pressable>
-        <Text variant="caption" style={{ color: countColor }}>{value.length}/{LIMIT}</Text>
-      </View>
-      {posted ? <View style={styles.toast}><Toast message="Posted" /></View> : null}
-    </KeyboardAvoidingView>
-  </SafeAreaView>;
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
+          <View style={styles.composer}>
+            {me ? <Avatar uri={me.avatarUri} label="Your photo" size={44} /> : null}
+            <View style={styles.inputColumn}>
+              <Text variant="label">{me?.name}</Text>
+              <TextInput
+                accessibilityLabel="Post text"
+                multiline
+                autoFocus
+                value={value}
+                onChangeText={setValue}
+                editable={!createPost.isPending}
+                maxLength={LIMIT + 50}
+                placeholder="What's on your mind?"
+                placeholderTextColor={theme.colors.textMuted}
+                selectionColor={theme.colors.primary}
+                cursorColor={theme.colors.primary}
+                maxFontSizeMultiplier={typography.maxFontScale}
+                style={[styles.input, { color: theme.colors.text }]}
+              />
+            </View>
+          </View>
+          {over ? (
+            <Text variant="caption" color="danger" style={styles.error}>
+              Posts can be up to {LIMIT} characters. Remove {value.length - LIMIT} to continue.
+            </Text>
+          ) : null}
+        </ScrollView>
+        <View
+          style={[
+            styles.footer,
+            {
+              borderTopColor: theme.colors.divider,
+              paddingBottom: (keyboardVisible ? 0 : insets.bottom) + spacing.sm,
+            },
+          ]}
+        >
+          <View
+            style={styles.audiences}
+            accessibilityRole="radiogroup"
+            accessibilityLabel="Who can see this post"
+          >
+            {audiences.map((item) => {
+              const selected = item.value === audience;
+              return (
+                <Pressable
+                  key={item.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
+                  onPress={() => setAudience(item.value)}
+                  style={[
+                    styles.audience,
+                    {
+                      backgroundColor: selected
+                        ? theme.colors.primarySoft
+                        : theme.colors.surfaceElevated,
+                      borderColor: selected ? theme.colors.primary : theme.colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={item.icon}
+                    size={15}
+                    color={selected ? theme.colors.primary : theme.colors.textSecondary}
+                  />
+                  <Text
+                    variant="caption"
+                    weight="semibold"
+                    color={selected ? 'primary' : 'secondary'}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text
+            variant="caption"
+            color={countColor}
+            accessibilityLabel={`${value.length} of ${LIMIT} characters`}
+          >
+            {value.length}/{LIMIT}
+          </Text>
+        </View>
+      </KeyboardAvoidingScreen>
+    </SafeAreaView>
+  );
 }
 const styles = StyleSheet.create({
-  safe: { flex: 1 }, header: { height: 56, borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg },
-  headerAction: { minWidth: 64, minHeight: spacing.touch, justifyContent: 'center' }, postButton: { minWidth: 64, minHeight: 36, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
-  body: { flexGrow: 1, padding: spacing.lg }, composer: { flexDirection: 'row', minHeight: 260 }, rail: { width: 40, alignItems: 'center', marginRight: spacing.md }, inputColumn: { flex: 1, gap: spacing.sm },
-  input: { minHeight: 140, fontSize: typography.size.md, lineHeight: typography.lineHeight.md, textAlignVertical: 'top', padding: 0 }, tools: { flexDirection: 'row', marginLeft: -spacing.md }, tool: { width: spacing.touch, height: spacing.touch, alignItems: 'center', justifyContent: 'center' },
-  previews: { gap: spacing.sm, paddingVertical: spacing.sm }, preview: { width: 112, height: 140, borderRadius: radius.md, borderWidth: 1 }, remove: { position: 'absolute', top: spacing.xs, right: spacing.xs, width: 28, height: 28, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },
-  addThread: { minHeight: spacing.touch, flexDirection: 'row', alignItems: 'center', gap: spacing.md }, miniAvatar: { width: 40, alignItems: 'center', opacity: 0.55 },
-  footer: { minHeight: 64, borderTopWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg }, audience: { minHeight: spacing.touch, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, toast: { position: 'absolute', left: spacing.lg, right: spacing.lg, bottom: 76 },
+  safe: { flex: 1 },
+  header: {
+    minHeight: 56,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+  },
+  postButton: { minWidth: 76 },
+  body: {
+    flexGrow: 1,
+    padding: spacing.screen,
+    width: '100%',
+    maxWidth: spacing.contentMax,
+    alignSelf: 'center',
+  },
+  composer: { flexDirection: 'row', gap: spacing.md },
+  inputColumn: { flex: 1, gap: spacing.xs },
+  input: {
+    minHeight: 160,
+    fontSize: typography.size.lg,
+    lineHeight: typography.lineHeight.lg + 2,
+    textAlignVertical: 'top',
+    padding: 0,
+  },
+  error: { marginTop: spacing.sm },
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.screen,
+    paddingTop: spacing.sm,
+    gap: spacing.md,
+  },
+  audiences: { flexDirection: 'row', gap: spacing.sm, flexShrink: 1 },
+  audience: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
 });

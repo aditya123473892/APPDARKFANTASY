@@ -6,17 +6,24 @@
     "orientation": "portrait",
     "scheme": "darkfantasy",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0B0F",
     "android": {
       "package": "com.aditya123473892.darkfantasy",
       "adaptiveIcon": {
-        "backgroundColor": "#000000"
-      }
+        "backgroundColor": "#0B0B0F"
+      },
+      "softwareKeyboardLayoutMode": "resize",
+      "allowBackup": false
     },
     "ios": {
       "bundleIdentifier": "com.aditya123473892.darkfantasy",
       "supportsTablet": true
     },
-    "plugins": ["expo-router", "expo-secure-store"],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["expo-splash-screen", { "backgroundColor": "#0B0B0F" }]
+    ],
     "experiments": {
       "typedRoutes": true
     }

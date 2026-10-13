@@ -1,31 +1,247 @@
-import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import { useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Avatar, Button, Text } from '@/components/ui';
-import type { User } from '@/features/auth/types';
-import { mockUsers } from '@/mocks/users';
-import { radius, spacing, typography } from '@/theme';
+import { useRouter } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ErrorState } from '@/components/feedback/ErrorState';
+import { OfflineBanner } from '@/components/feedback/OfflineBanner';
+import { Header, Screen } from '@/components/layout';
+import { EmptyState, IconButton, Input, Skeleton, Tabs } from '@/components/ui';
+import { useDiscoverProfiles } from '@/features/profile/hooks/useProfiles';
+import type { ProfileView } from '@/features/profile/types';
+import { useSendRequest } from '@/features/requests/hooks/useRequests';
+import { usePreferences } from '@/features/settings/store/preferencesStore';
+import { useDebounce } from '@/hooks/useDebounce';
+import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { ActionButtons } from '../components/ActionButtons';
-import { CardStack, type CardStackHandle } from '../components/CardStack';
+import { CardStack, type CardStackHandle, type SwipeAction } from '../components/CardStack';
+import { FilterSheet } from '../components/FilterSheet';
+import { ProfileCard } from '../components/ProfileCard';
 
-type Mode = 'People' | 'Swipe';
+type Mode = 'Browse' | 'Swipe';
+const GAP = spacing.md;
+
 export function DiscoverScreen(): React.JSX.Element {
-  const { theme } = useTheme(); const [query, setQuery] = useState(''); const [mode, setMode] = useState<Mode>('People'); const [liked, setLiked] = useState<Set<string>>(new Set()); const stack = useRef<CardStackHandle>(null);
-  const people = useMemo(() => mockUsers.filter((user) => `${user.name} ${user.bio}`.toLowerCase().includes(query.toLowerCase())), [query]);
-  const like = (id: string): void => { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLiked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); };
-  const row = ({ item }: { item: User }): React.JSX.Element => <View style={[styles.person, { borderBottomColor: theme.colors.divider }]}><Avatar uri={item.avatarUri} label={item.name} size={48} /><View style={styles.copy}><Text variant="label">{item.name}, {item.age}</Text><Text variant="caption" color="muted" numberOfLines={2}>{item.bio}</Text></View><Button label={liked.has(item.id) ? 'Liked' : 'Like'} variant="secondary" size="sm" onPress={() => like(item.id)} /></View>;
-  return <SafeAreaView edges={['top']} style={[styles.root, { backgroundColor: theme.colors.background }]}>
-    <View style={styles.header}><Text variant="title">Discover</Text><View style={[styles.toggle, { backgroundColor: theme.colors.surfaceElevated }]}>{(['People', 'Swipe'] as const).map((item) => <Pressable key={item} onPress={() => setMode(item)} style={[styles.toggleItem, mode === item && { backgroundColor: theme.colors.primarySoft }]}><Text variant="caption" color={mode === item ? 'primary' : 'muted'}>{item}</Text></Pressable>)}</View></View>
-    {mode === 'People' ? <FlatList data={people} keyExtractor={(item) => item.id} renderItem={row} keyboardShouldPersistTaps="handled" ListHeaderComponent={<View style={[styles.search, { backgroundColor: theme.colors.surfaceElevated }]}><Ionicons name="search" size={19} color={theme.colors.textMuted} /><TextInput value={query} onChangeText={setQuery} placeholder="Search people" placeholderTextColor={theme.colors.textMuted} style={[styles.searchInput, { color: theme.colors.textPrimary }]} /></View>} contentContainerStyle={styles.list} />
-      : <View style={styles.swipe}><View style={styles.stack}><CardStack ref={stack} users={mockUsers} /></View><ActionButtons onAction={(action) => stack.current?.act(action)} /></View>}
-  </SafeAreaView>;
+  const router = useRouter();
+  const { theme } = useTheme();
+  const { width } = useWindowDimensions();
+  const [mode, setMode] = useState<Mode>('Browse');
+  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState<string[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const query = useDebounce(search.trim().toLowerCase(), 200);
+  const stack = useRef<CardStackHandle>(null);
+  const showDistance = usePreferences((state) => state.showDistance);
+  const showPresence = usePreferences((state) => state.showActiveStatus);
+  const { data, isPending, isError, isRefetching, isRefetchError, refetch } = useDiscoverProfiles();
+  const sendRequest = useSendRequest();
+
+  // Responsive grid: 2 columns on phones, more on tablets / unfolded foldables / landscape.
+  const contentWidth = Math.min(width, spacing.contentMax);
+  const columns = contentWidth >= 600 ? 3 : 2;
+  const cardWidth = Math.floor((contentWidth - spacing.screen * 2 - GAP * (columns - 1)) / columns);
+
+  const allInterests = useMemo(
+    () => [...new Set((data ?? []).flatMap((profile) => profile.interests))].sort(),
+    [data],
+  );
+  const profiles = useMemo(
+    () =>
+      (data ?? []).filter(
+        (profile) =>
+          (!filters.length || profile.interests.some((interest) => filters.includes(interest))) &&
+          (!query ||
+            `${profile.name} ${profile.bio} ${profile.interests.join(' ')}`
+              .toLowerCase()
+              .includes(query)),
+      ),
+    [data, filters, query],
+  );
+
+  const swipeProfiles = useMemo(
+    () => profiles.filter((profile) => profile.relationship.status !== 'outgoing'),
+    [profiles],
+  );
+
+  const pendingUserId = sendRequest.isPending ? sendRequest.variables?.userId : undefined;
+  const connect = useCallback(
+    (profile: ProfileView, superLike = false) => {
+      const { relationship } = profile;
+      if (relationship.status === 'connected') {
+        router.push(`/chat/${relationship.conversationId}`);
+        return;
+      }
+      // Never fire a duplicate request for someone already requested or currently being requested.
+      if (relationship.status === 'outgoing' || pendingUserId === profile.id) return;
+      sendRequest.mutate({ userId: profile.id, name: profile.name, superLike });
+    },
+    [pendingUserId, router, sendRequest],
+  );
+  const openProfile = useCallback(
+    (profile: ProfileView) => router.push(`/profile/${profile.id}`),
+    [router],
+  );
+  const onSwipe = useCallback(
+    (profile: ProfileView, action: SwipeAction) => {
+      if (action !== 'pass') connect(profile, action === 'super');
+    },
+    [connect],
+  );
+
+  const header = (
+    <View style={styles.top}>
+      <Header
+        title="Discover"
+        align="left"
+        action={
+          <IconButton
+            icon="options-outline"
+            label={filters.length ? `Filters, ${filters.length} active` : 'Filters'}
+            dot={filters.length > 0}
+            onPress={() => setFilterOpen(true)}
+          />
+        }
+      />
+      <Tabs
+        variant="segmented"
+        items={['Browse', 'Swipe'] as const}
+        value={mode}
+        onChange={setMode}
+      />
+    </View>
+  );
+
+  let body: React.ReactNode;
+  if (isPending) {
+    body = (
+      <View style={[styles.grid, styles.skeletonGrid]}>
+        {[0, 1, 2, 3].map((item) => (
+          <Skeleton key={item} style={{ width: cardWidth, aspectRatio: 0.68, borderRadius: 20 }} />
+        ))}
+      </View>
+    );
+  } else if (isError && !data) {
+    body = (
+      <ErrorState onRetry={() => void refetch()} message="We couldn't load new people right now." />
+    );
+  } else if (mode === 'Browse') {
+    body = (
+      <FlatList
+        key={`grid-${columns}`}
+        data={profiles}
+        numColumns={columns}
+        keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        columnWrapperStyle={styles.column}
+        contentContainerStyle={[styles.grid, !profiles.length && styles.empty]}
+        initialNumToRender={6}
+        windowSize={7}
+        removeClippedSubviews
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={() => void refetch()}
+            tintColor={theme.colors.primary}
+            colors={[theme.colors.primary]}
+            progressBackgroundColor={theme.colors.surfaceElevated}
+          />
+        }
+        ListHeaderComponent={
+          <View style={styles.search}>
+            <Input
+              accessibilityLabel="Search people"
+              icon="search-outline"
+              placeholder="Search names, interests…"
+              value={search}
+              onChangeText={setSearch}
+              returnKeyType="search"
+            />
+          </View>
+        }
+        ListEmptyComponent={
+          query || filters.length ? (
+            <EmptyState
+              icon="search-outline"
+              title="No one matches that"
+              message="Try a broader search or fewer interests."
+              actionLabel="Clear search & filters"
+              onAction={() => {
+                setSearch('');
+                setFilters([]);
+              }}
+            />
+          ) : (
+            <EmptyState
+              icon="moon-outline"
+              title="You've met everyone nearby"
+              message="New people join every day. Pull down to refresh."
+            />
+          )
+        }
+        renderItem={({ item }) => (
+          <ProfileCard
+            profile={item}
+            width={cardWidth}
+            showDistance={showDistance}
+            pending={pendingUserId === item.id}
+            onOpen={openProfile}
+            onAction={connect}
+          />
+        )}
+      />
+    );
+  } else {
+    body = (
+      <View style={styles.swipe}>
+        <View style={styles.stack}>
+          <CardStack
+            ref={stack}
+            profiles={swipeProfiles}
+            showDistance={showDistance}
+            showPresence={showPresence}
+            onSwipe={onSwipe}
+            onEmptyAction={() => setMode('Browse')}
+          />
+        </View>
+        <ActionButtons
+          onAction={(action) => stack.current?.act(action)}
+          disabled={!swipeProfiles.length}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <Screen padded={false}>
+      {header}
+      {isRefetchError && data ? (
+        <OfflineBanner message="Can't refresh right now. Showing saved profiles." />
+      ) : null}
+      <View style={styles.body}>{body}</View>
+      <FilterSheet
+        visible={filterOpen}
+        interests={allInterests}
+        selected={filters}
+        onApply={setFilters}
+        onClose={() => setFilterOpen(false)}
+      />
+    </Screen>
+  );
 }
+
 const styles = StyleSheet.create({
-  root: { flex: 1 }, header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  toggle: { flexDirection: 'row', padding: spacing.xs, borderRadius: radius.full }, toggleItem: { minHeight: 32, paddingHorizontal: spacing.md, borderRadius: radius.full, justifyContent: 'center' },
-  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl }, search: { height: spacing.touch, borderRadius: radius.full, paddingHorizontal: spacing.lg, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginVertical: spacing.md }, searchInput: { flex: 1, fontSize: typography.size.md },
-  person: { minHeight: 80, flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderBottomWidth: 1 }, copy: { flex: 1, gap: spacing.xs }, swipe: { flex: 1, paddingHorizontal: spacing.lg }, stack: { flex: 1, marginVertical: spacing.md },
+  top: { paddingHorizontal: spacing.screen, paddingBottom: spacing.sm },
+  body: { flex: 1 },
+  search: { paddingBottom: spacing.md },
+  grid: {
+    paddingHorizontal: spacing.screen,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxl,
+    gap: GAP,
+  },
+  skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  column: { gap: GAP },
+  empty: { flexGrow: 1 },
+  swipe: { flex: 1, paddingHorizontal: spacing.screen },
+  stack: { flex: 1, marginTop: spacing.sm, maxHeight: 640 },
 });

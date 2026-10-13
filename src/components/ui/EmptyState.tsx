@@ -1,11 +1,81 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
+import { Button } from './Button';
 import { Text } from './Text';
-import { spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
-export function EmptyState({ icon = 'sparkles-outline', title, message }: { icon?: keyof typeof Ionicons.glyphMap; title: string; message: string }): React.JSX.Element {
+export type EmptyStateProps = {
+  icon?: keyof typeof Ionicons.glyphMap;
+  title: string;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  tone?: 'default' | 'danger';
+  compact?: boolean;
+};
+
+export function EmptyState({
+  icon = 'sparkles-outline',
+  title,
+  message,
+  actionLabel,
+  onAction,
+  tone = 'default',
+  compact = false,
+}: EmptyStateProps): React.JSX.Element {
   const { theme } = useTheme();
-  return <View style={styles.root}><Ionicons name={icon} size={28} color={theme.colors.textMuted} /><Text variant="heading">{title}</Text><Text color="muted" center>{message}</Text></View>;
+  const accent = tone === 'danger' ? theme.colors.danger : theme.colors.primary;
+  return (
+    <View style={[styles.root, compact && styles.compact]}>
+      <View
+        style={[
+          styles.icon,
+          {
+            backgroundColor: tone === 'danger' ? theme.colors.dangerSoft : theme.colors.primarySoft,
+          },
+        ]}
+      >
+        <Ionicons name={icon} size={28} color={accent} />
+      </View>
+      <Text variant="subheading" center>
+        {title}
+      </Text>
+      <Text color="secondary" center style={styles.message}>
+        {message}
+      </Text>
+      {actionLabel && onAction ? (
+        <Button
+          label={actionLabel}
+          onPress={onAction}
+          variant={tone === 'danger' ? 'secondary' : 'primary'}
+          size="sm"
+          fullWidth={false}
+          style={styles.action}
+        />
+      ) : null}
+    </View>
+  );
 }
-const styles = StyleSheet.create({ root: { flex: 1, minHeight: 240, padding: spacing.xxl, gap: spacing.sm, alignItems: 'center', justifyContent: 'center' } });
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    minHeight: 280,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    padding: spacing.xxl,
+  },
+  compact: { minHeight: 180, flex: 0 },
+  icon: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  message: { maxWidth: 320 },
+  action: { marginTop: spacing.md },
+});

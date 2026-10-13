@@ -1,10 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { ActivityIndicator, Pressable, StyleSheet, type ViewStyle } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { Text } from '@/components/ui/Text';
-import { accentGradient, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
 type ButtonProps = {
@@ -16,7 +21,7 @@ type ButtonProps = {
   disabled?: boolean;
   icon?: keyof typeof Ionicons.glyphMap;
   fullWidth?: boolean;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
 };
 
@@ -33,40 +38,68 @@ export function Button({
   accessibilityLabel,
 }: ButtonProps): React.JSX.Element {
   const { theme } = useTheme();
-  const backgrounds = {
-    primary: theme.palette.transparent,
-    secondary: theme.palette.transparent,
-    ghost: theme.palette.transparent,
-    danger: theme.colors.danger,
-    pill: theme.colors.primarySoft,
-  };
-  const foreground =
-    variant === 'primary' || variant === 'danger'
-      ? theme.palette.white
-      : variant === 'secondary'
-        ? theme.colors.text
-        : theme.colors.primary;
+  const inactive = Boolean(disabled || loading);
+  const palette = {
+    primary: {
+      bg: theme.colors.primary,
+      pressed: theme.colors.primaryPressed,
+      fg: theme.colors.onPrimary,
+      border: theme.colors.primary,
+    },
+    secondary: {
+      bg: theme.colors.surfaceElevated,
+      pressed: theme.colors.surfacePressed,
+      fg: theme.colors.text,
+      border: theme.colors.border,
+    },
+    ghost: {
+      bg: theme.palette.transparent,
+      pressed: theme.colors.primarySoft,
+      fg: theme.colors.primary,
+      border: theme.palette.transparent,
+    },
+    danger: {
+      bg: theme.colors.dangerSoft,
+      pressed: theme.colors.dangerSoft,
+      fg: theme.colors.danger,
+      border: theme.colors.danger,
+    },
+    pill: {
+      bg: theme.colors.primarySoft,
+      pressed: theme.colors.primarySoft,
+      fg: theme.colors.primary,
+      border: theme.palette.transparent,
+    },
+  }[variant];
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      disabled={disabled || loading}
-      onPress={() => { void Haptics.selectionAsync(); onPress(); }}
+      accessibilityState={{ disabled: inactive, busy: Boolean(loading) }}
+      disabled={inactive}
+      onPress={() => {
+        void Haptics.selectionAsync();
+        onPress();
+      }}
       style={({ pressed }) => [
         styles.base,
         styles[size],
-        { backgroundColor: backgrounds[variant], borderColor: variant === 'secondary' ? theme.colors.border : theme.palette.transparent, opacity: disabled ? 0.45 : pressed ? 0.8 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] },
+        {
+          backgroundColor: pressed ? palette.pressed : palette.bg,
+          borderColor: palette.border,
+          opacity: disabled ? 0.45 : 1,
+          transform: [{ scale: pressed ? 0.98 : 1 }],
+        },
         fullWidth && styles.full,
         style,
       ]}
     >
-      {variant === 'primary' ? <LinearGradient colors={accentGradient} style={StyleSheet.absoluteFill} /> : null}
       {loading ? (
-        <ActivityIndicator color={foreground} />
+        <ActivityIndicator color={palette.fg} />
       ) : (
         <>
-          {icon ? <Ionicons name={icon} size={20} color={foreground} /> : null}
-          <Text variant="label" weight="bold" style={{ color: foreground }}>
+          {icon ? <Ionicons name={icon} size={size === 'sm' ? 17 : 19} color={palette.fg} /> : null}
+          <Text variant="label" weight="semibold" numberOfLines={1} style={{ color: palette.fg }}>
             {label}
           </Text>
         </>
@@ -77,18 +110,16 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: spacing.touch,
     borderRadius: radius.full,
     borderWidth: 1,
-    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
     paddingHorizontal: spacing.xl,
   },
-  sm: { height: 44 },
-  md: { height: 50 },
-  lg: { height: 56 },
+  sm: { minHeight: 40, paddingHorizontal: spacing.lg },
+  md: { minHeight: 50 },
+  lg: { minHeight: 56 },
   full: { width: '100%' },
 });

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { authService } from '../services';
 import type { AuthResult, Session, User } from '../types';
 import { secureStorage } from '@/services/storage/secureStorage';
+import { queryClient } from '@/services/queryClient';
+import { useOutbox } from '@/features/chat/store/outboxStore';
 import { logger } from '@/utils/logger';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
@@ -12,6 +14,8 @@ type AuthState = {
   hydrate: () => Promise<void>;
   setAuthenticated: (result: AuthResult) => Promise<void>;
   logout: () => Promise<void>;
+  /** Applies a server-confirmed profile update to the signed-in user. */
+  updateUser: (user: User) => void;
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -43,7 +47,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       await authService.logout();
     } finally {
       await secureStorage.clearSession();
+      // Drop every cached conversation, profile and unsent message so the next account starts clean.
+      queryClient.clear();
+      useOutbox.getState().clear();
       set({ status: 'unauthenticated', session: null, user: null });
     }
   },
+  updateUser: (user) => set((state) => (state.user?.id === user.id ? { user } : state)),
 }));

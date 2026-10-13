@@ -4,7 +4,7 @@ import { Text } from '@/components/ui';
 import { InviteCodeForm } from '../components/InviteCodeForm';
 export function InviteCodeScreen(): React.JSX.Element {
   return (
-    <Screen>
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
       <Header title="Invitation" back />
       <View style={styles.content}>
         <Text variant="title">Your invitation awaits.</Text>

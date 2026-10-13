@@ -5,12 +5,16 @@ import { Text, Wordmark } from '@/components/ui';
 import { LoginForm } from '../components/LoginForm';
 export function LoginScreen(): React.JSX.Element {
   return (
-    <Screen scroll>
+    <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
       <Header title="Welcome back" back />
-<Wordmark large />
+      <Wordmark large />
       <View style={styles.copy}>
-<Text variant="title" center>Sign in</Text>
-<Text color="muted" center>Pick up where you left off.</Text>
+        <Text variant="title" center>
+          Sign in
+        </Text>
+        <Text color="muted" center>
+          Pick up where you left off.
+        </Text>
       </View>
       <LoginForm />
       <View style={styles.footer}>

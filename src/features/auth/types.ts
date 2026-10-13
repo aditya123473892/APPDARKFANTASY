@@ -16,6 +16,11 @@ export type User = {
   bio: string;
   interests: string[];
   avatarUri: string;
+  /** Optional, backwards-compatible profile fields. */
+  location?: string;
+  distanceKm?: number;
+  photos?: string[];
+  occupation?: string;
 };
 
 export type Session = {

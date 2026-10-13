@@ -1,21 +1,30 @@
 import { StyleSheet, View } from 'react-native';
-import { Divider, Text } from '@/components/ui';
+import { Text } from '@/components/ui';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/useTheme';
 export function DateDivider({ label }: { label: string }): React.JSX.Element {
+  const { theme } = useTheme();
   return (
-    <View style={styles.row}>
-      <View style={styles.line}>
-        <Divider />
-      </View>
-      <Text variant="caption" color="muted">
-        {label}
-      </Text>
-      <View style={styles.line}>
-        <Divider />
+    <View style={styles.row} accessibilityRole="header">
+      <View
+        style={[
+          styles.pill,
+          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        ]}
+      >
+        <Text variant="caption" color="secondary">
+          {label}
+        </Text>
       </View>
     </View>
   );
 }
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 8 },
-  line: { flex: 1 },
+  row: { alignItems: 'center', marginVertical: spacing.md },
+  pill: {
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
 });

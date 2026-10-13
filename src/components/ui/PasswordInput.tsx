@@ -20,13 +20,21 @@ export const PasswordInput = forwardRef<TextInput, PasswordInputProps>(function 
   const { theme } = useTheme();
   return (
     <View style={styles.group}>
-      {label ? <Text variant="label">{label}</Text> : null}
+      {label ? (
+        <Text variant="label" color="secondary">
+          {label}
+        </Text>
+      ) : null}
       <View
         style={[
           styles.wrapper,
           {
-            backgroundColor: theme.colors.surfaceMuted,
-            borderColor: error ? theme.colors.danger : focused ? theme.colors.primary : theme.colors.border,
+            backgroundColor: theme.colors.surfaceElevated,
+            borderColor: error
+              ? theme.colors.danger
+              : focused
+                ? theme.colors.primary
+                : theme.colors.border,
           },
         ]}
       >
@@ -40,9 +48,16 @@ export const PasswordInput = forwardRef<TextInput, PasswordInputProps>(function 
           autoComplete="off"
           placeholderTextColor={theme.colors.textMuted}
           selectionColor={theme.colors.primary}
+          cursorColor={theme.colors.primary}
           style={[styles.input, { color: theme.colors.text }, style]}
-          onFocus={(event) => { setFocused(true); onFocus?.(event); }}
-          onBlur={(event) => { setFocused(false); onBlur?.(event); }}
+          onFocus={(event) => {
+            setFocused(true);
+            onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            setFocused(false);
+            onBlur?.(event);
+          }}
           {...props}
         />
         <Pressable

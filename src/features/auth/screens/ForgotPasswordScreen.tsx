@@ -26,7 +26,7 @@ export function ForgotPasswordScreen(): React.JSX.Element {
     setSent(true);
   };
   return (
-    <Screen>
+    <Screen edges={['top', 'left', 'right', 'bottom']}>
       <Header title="Reset password" back />
       <View style={styles.content}>
         <Text variant="title">Check your inbox</Text>

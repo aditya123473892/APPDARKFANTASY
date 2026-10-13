@@ -1,13 +1,23 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { type PropsWithChildren, useState } from 'react';
+import { focusManager, QueryClientProvider } from '@tanstack/react-query';
+import { type PropsWithChildren, useEffect } from 'react';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { queryClient } from '@/services/queryClient';
 import { ThemeProvider } from '@/theme/ThemeProvider';
 
+/** Lets TanStack Query pause polling in the background and refetch stale data on resume. */
+function useAppFocusManager(): void {
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const onChange = (status: AppStateStatus) => focusManager.setFocused(status === 'active');
+    const subscription = AppState.addEventListener('change', onChange);
+    return () => subscription.remove();
+  }, []);
+}
+
 export function AppProviders({ children }: PropsWithChildren): React.JSX.Element {
-  const [queryClient] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 30_000 } } }),
-  );
+  useAppFocusManager();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

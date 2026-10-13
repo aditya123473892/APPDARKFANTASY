@@ -9,43 +9,91 @@ import { radius, spacing, typography } from '@/theme';
 type InputProps = TextInputProps & {
   label?: string;
   error?: string;
+  hint?: string;
   icon?: keyof typeof Ionicons.glyphMap;
+  showCount?: boolean;
 };
 
 export const Input = forwardRef<TextInput, InputProps>(function Input(
-  { label, error, icon, style, onFocus, onBlur, ...props },
+  {
+    label,
+    error,
+    hint,
+    icon,
+    showCount,
+    style,
+    onFocus,
+    onBlur,
+    multiline,
+    editable = true,
+    ...props
+  },
   ref,
 ) {
   const { theme } = useTheme();
   const [focused, setFocused] = useState(false);
+  const length = typeof props.value === 'string' ? props.value.length : 0;
   return (
     <View style={styles.group}>
-      {label ? <Text variant="label">{label}</Text> : null}
+      {label ? (
+        <Text variant="label" color="secondary">
+          {label}
+        </Text>
+      ) : null}
       <View
         style={[
           styles.wrapper,
+          multiline && styles.multilineWrapper,
           {
-            backgroundColor: theme.colors.surfaceMuted,
-            borderColor: error ? theme.colors.danger : focused ? theme.colors.primary : theme.colors.border,
+            backgroundColor: editable ? theme.colors.surfaceElevated : theme.colors.surface,
+            borderColor: error
+              ? theme.colors.danger
+              : focused
+                ? theme.colors.primary
+                : theme.colors.border,
           },
         ]}
       >
         {icon ? <Ionicons name={icon} size={19} color={theme.colors.textMuted} /> : null}
         <TextInput
           ref={ref}
+          accessibilityLabel={props.accessibilityLabel ?? label}
           placeholderTextColor={theme.colors.textMuted}
           selectionColor={theme.colors.primary}
-          style={[styles.input, { color: theme.colors.text }, style]}
+          cursorColor={theme.colors.primary}
+          maxFontSizeMultiplier={typography.maxFontScale}
+          editable={editable}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'center'}
+          style={[
+            styles.input,
+            multiline && styles.multiline,
+            { color: editable ? theme.colors.text : theme.colors.textSecondary },
+            style,
+          ]}
           autoCapitalize="none"
-          onFocus={(event) => { setFocused(true); onFocus?.(event); }}
-          onBlur={(event) => { setFocused(false); onBlur?.(event); }}
+          onFocus={(event) => {
+            setFocused(true);
+            onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            setFocused(false);
+            onBlur?.(event);
+          }}
           {...props}
         />
       </View>
-      {error ? (
-        <Text variant="caption" color="danger">
-          {error}
-        </Text>
+      {error || hint || (showCount && props.maxLength) ? (
+        <View style={styles.meta}>
+          <Text variant="caption" color={error ? 'danger' : 'muted'} style={styles.metaText}>
+            {error ?? hint ?? ''}
+          </Text>
+          {showCount && props.maxLength ? (
+            <Text variant="caption" color={length >= props.maxLength ? 'danger' : 'muted'}>
+              {length}/{props.maxLength}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -57,10 +105,14 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: radius.md,
     borderWidth: 1,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.md + 2,
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  input: { flex: 1, minHeight: spacing.touch, fontSize: typography.size.md },
+  multilineWrapper: { alignItems: 'flex-start', paddingVertical: spacing.sm },
+  input: { flex: 1, minHeight: spacing.touch - 4, fontSize: typography.size.md },
+  multiline: { minHeight: 96, maxHeight: 180, paddingTop: spacing.sm },
+  meta: { flexDirection: 'row', gap: spacing.sm },
+  metaText: { flex: 1 },
 });
