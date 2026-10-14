@@ -1,49 +1,102 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { env } from '@/config/env';
-import { authService } from '@/features/auth/services';
-import { useAuthStore } from '@/features/auth/store/authStore';
+import {
+  sessionIdentity,
+  invalidateSession,
+  registerSessionTeardown,
+  notifyForbidden,
+} from '@/features/auth/sessionRuntime';
+import { initializePinning } from './pinning';
 
-type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean };
-let refreshPromise: Promise<string> | null = null;
-
+type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean; _sessionGeneration?: number };
+function assertRequestSession(config?: RetryConfig): void {
+  if (config?._sessionGeneration !== sessionIdentity.generation)
+    throw new axios.CanceledError('Session ended');
+}
+let requests = new AbortController();
+registerSessionTeardown(() => {
+  requests.abort();
+  requests = new AbortController();
+});
 export const apiClient = axios.create({
   baseURL: env.apiUrl,
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
+  maxRedirects: 0,
 });
-
-apiClient.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().session?.accessToken;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+apiClient.interceptors.request.use(async (config) => {
+  const guarded = config as RetryConfig;
+  guarded._sessionGeneration ??= sessionIdentity.generation;
+  assertRequestSession(guarded);
+  const scope = requests;
+  await initializePinning();
+  assertRequestSession(guarded);
+  if (scope.signal.aborted) throw new axios.CanceledError('Session ended');
+  config.signal = scope.signal;
+  const target = new URL(apiClient.getUri(config));
+  if (target.origin !== new URL(env.apiUrl).origin || target.username || target.password)
+    throw new Error('API requests must stay on the configured origin');
+  if (
+    [...target.searchParams.keys()].some((key) =>
+      /^(token|access_?token|authorization|password)$/i.test(key),
+    )
+  )
+    throw new Error('Credentials are forbidden in request URLs');
+  if (!__DEV__ && target.protocol !== 'https:') throw new Error('HTTPS is required');
+  const token = sessionIdentity.getToken();
+  if (config.url === '/auth/login') config.headers.delete('Authorization');
+  else if (!config.headers.Authorization && token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
-
 apiClient.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError) => {
-    const config = error.config as RetryConfig | undefined;
-    const authState = useAuthStore.getState();
-    if (error.response?.status !== 401 || !config || config._retry || !authState.session)
-      return Promise.reject(error);
-    config._retry = true;
-    refreshPromise ??= authService
-      .refreshSession(authState.session.refreshToken)
-      .then(async (session) => {
-        if (!authState.user) throw error;
-        await authState.setAuthenticated({ session, user: authState.user });
-        return session.accessToken;
-      })
-      .finally(() => {
-        refreshPromise = null;
-      });
-    try {
-      config.headers.Authorization = `Bearer ${await refreshPromise}`;
-      return apiClient(config);
-    } catch (refreshError) {
-      await useAuthStore.getState().logout();
-      return Promise.reject(refreshError);
+  async (response) => {
+    assertRequestSession(response.config);
+    if ([401, 403].includes(response.data?.statusCode)) {
+      if (response.data.statusCode === 401)
+        await invalidateSession(
+          response.config.headers.Authorization,
+          response.config.url === '/auth/me' &&
+            response.data.message === 'Account blocked!, contact administrator Dark Fantasy',
+        );
+      else if (response.config.url !== '/auth/me')
+        await notifyForbidden(response.config.headers.Authorization);
+      throw new AxiosError(
+        response.data.statusCode === 403
+          ? 'You are not permitted to perform this action.'
+          : 'Session rejected',
+        'ERR_BAD_RESPONSE',
+        response.config,
+        undefined,
+        response,
+      );
     }
+    return response;
+  },
+  async (error: AxiosError<{ message?: string }>) => {
+    const config = error.config as RetryConfig | undefined;
+    if (config) assertRequestSession(config);
+    if (error.response?.status === 401)
+      await invalidateSession(
+        config?.headers.Authorization,
+        config?.url === '/auth/me' &&
+          error.response?.data?.message === 'Account blocked!, contact administrator Dark Fantasy',
+      );
+    if (error.response?.status === 403) {
+      error.message = 'You are not permitted to perform this action.';
+      if (config?.url !== '/auth/me') await notifyForbidden(config?.headers.Authorization);
+    }
+    if (
+      !axios.isCancel(error) &&
+      !config?.signal?.aborted &&
+      config?.method === 'get' &&
+      !config._retry &&
+      (!error.response || [502, 503, 504].includes(error.response.status))
+    ) {
+      config._retry = true;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      if (config.signal?.aborted) throw new axios.CanceledError('Session ended');
+      return apiClient(config);
+    }
+    return Promise.reject(error);
   },
 );
-
-// TODO(backend): Import and call this client only from real feature services.

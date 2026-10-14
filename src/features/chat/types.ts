@@ -6,13 +6,23 @@ export type LocalMessageStatus = MessageStatus | 'sending' | 'failed';
 
 export type Message = {
   id: string;
-  /** Client-generated id echoed back by the server so retries are idempotent. */
+  /** Local correlation only; the backend does not echo it or make retries idempotent. */
   clientId?: string;
   conversationId: string;
   senderId: string;
   text: string;
   createdAt: string;
   status: MessageStatus;
+  senderName?: string;
+  media?: ChatMedia[];
+};
+export type ChatMedia = {
+  _id: string;
+  mimetype?: string;
+  originalname?: string;
+  status?: string;
+  expiresAt?: string;
+  revokedAt?: string;
 };
 
 export type ChatParticipant = { id: string; name: string; age: number; avatarUri: string };
@@ -25,6 +35,15 @@ export type Conversation = {
   presence: Presence | null;
   createdAt: string;
   updatedAt: string;
+  kind?: 'direct' | 'group';
+  groupId?: string;
+  ownerId?: string;
+  memberCount?: number;
 };
 
-export type SendMessageInput = { conversationId: string; text: string; clientId: string };
+export type SendMessageInput = {
+  conversationId: string;
+  text: string;
+  clientId: string;
+  assets?: import('@/features/feed/types').UploadAsset[];
+};

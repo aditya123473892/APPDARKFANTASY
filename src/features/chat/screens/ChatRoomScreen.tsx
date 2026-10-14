@@ -17,12 +17,20 @@ import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
 import { Avatar, EmptyState, Skeleton, Text } from '@/components/ui';
 import { useKeyboard } from '@/hooks/useKeyboard';
-import { isServiceError } from '@/services/errors';
+import { isServiceError, describeError } from '@/services/errors';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { formatPresence } from '@/utils/formatters';
 import { ChatInput } from '../components/ChatInput';
 import { DateDivider } from '../components/DateDivider';
+import { useMutation } from '@tanstack/react-query';
+import { pickMedia } from '@/features/create-post/pickMedia';
+import { chatService } from '../services';
+import { toast } from '@/components/ui/Toast';
+import { sessionIdentity, isSessionCurrent } from '@/features/auth/sessionRuntime';
+import { useCan } from '@/features/auth/hooks/useCurrentUser';
+import { useAuthStore } from '@/features/auth/store/authStore';
+import { hasCapability } from '@/features/auth/permissions';
 import { MessageBubble } from '../components/MessageBubble';
 import {
   useConversation,
@@ -60,6 +68,35 @@ export function ChatRoomScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboard();
   const myId = useMyId();
+  const canSendMessages = useCan('canSendMessages');
+  const canShareMedia = useCan('canShareMedia');
+  const attach = useMutation({
+    mutationFn: async () => {
+      const scope = sessionIdentity.generation;
+      const allowed = () => {
+        const auth = useAuthStore.getState();
+        return (
+          isSessionCurrent(scope) &&
+          auth.status === 'authenticated' &&
+          hasCapability(auth.roles, 'canShareMedia')
+        );
+      };
+      if (!allowed()) return;
+      const assets = await pickMedia();
+      if (!assets.length || !allowed()) return;
+      try {
+        await chatService.sendMessage({ conversationId, text: '', assets, clientId: '' });
+      } catch (error) {
+        if (isSessionCurrent(scope))
+          toast.error(
+            describeError(
+              error,
+              'Attachment send status is unknown. Refresh before sending again.',
+            ),
+          );
+      }
+    },
+  });
   const listRef = useRef<FlatList<Row>>(null);
   const [showJump, setShowJump] = useState(false);
 
@@ -154,7 +191,11 @@ export function ChatRoomScreen(): React.JSX.Element {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`View ${participant.name}'s profile`}
-            onPress={() => router.push(`/profile/${participant.id}`)}
+            onPress={() =>
+              conversation?.kind === 'group'
+                ? router.push({ pathname: '/groups/[id]', params: { id: participant.id } })
+                : router.push(`/profile/${participant.id}`)
+            }
             style={styles.person}
           >
             <Avatar
@@ -202,8 +243,8 @@ export function ChatRoomScreen(): React.JSX.Element {
           ) : messages.length === 0 && participant ? (
             <EmptyState
               icon="sparkles-outline"
-              title={`You and ${participant.name} are connected`}
-              message="Break the ice — mention something from their profile you genuinely liked."
+              title="No messages yet"
+              message={`Start the conversation in ${participant.name}.`}
             />
           ) : (
             <FlatList
@@ -251,7 +292,12 @@ export function ChatRoomScreen(): React.JSX.Element {
         </View>
         <ChatInput
           onSend={onSend}
-          disabled={!conversation}
+          onAttach={canShareMedia ? () => attach.mutate() : undefined}
+          canSendMessages={canSendMessages}
+          canShareMedia={canShareMedia}
+          disabled={
+            !conversation || conversationQuery.isError || messagesQuery.isError || attach.isPending
+          }
           bottomInset={keyboardVisible ? 0 : insets.bottom}
           placeholder={participant ? `Message ${participant.name}…` : 'Write a message…'}
         />

@@ -1,0 +1,1031 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const ts = require('typescript');
+const axios = require('axios');
+const { validateAuthBuild } = require('./auth-build-config.cjs');
+
+test('real backend mappings preserve identities, media types, like state and conversation boundaries', () => {
+  const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const { mapPost } = h.load('src/features/feed/services/feedService.real.ts');
+  const post = mapPost({
+    _id: '333333333333333333333333',
+    user: { _id: other, displayname: 'Real author' },
+    caption: 'Server caption',
+    createdAt: '2026-10-14T00:00:00Z',
+    visibility: 'public',
+    status: 'approved',
+    media: [{ url: '/uploads/video.mp4', mimetype: 'video/mp4' }],
+    likes: [{ user: { _id: me } }],
+    comments: [],
+  });
+  assert.equal(post.user.id, other);
+  assert.equal(post.body, 'Server caption');
+  assert.equal(post.liked, true);
+  assert.equal(post.media[0].mimetype, 'video/mp4');
+  assert.equal(post.media[0].uri, 'https://api.example.test/uploads/video.mp4');
+  assert.equal(
+    mapPost({ _id: 'p', user: other, createdAt: '2026-10-14T00:00:00Z', likes: ['like-id'] })
+      .likeStateKnown,
+    false,
+  );
+  const { mapMessage, conversationKey } = h.load('src/features/chat/services/chatService.real.ts');
+  const raw = {
+    _id: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+    sender: { _id: other, displayname: 'Sender' },
+    receiver: me,
+    sentAt: '2026-10-14T01:00:00Z',
+    message: 'From backend',
+    isRead: false,
+  };
+  assert.equal(conversationKey(raw), `user:${other}`);
+  assert.equal(mapMessage(raw, `user:${other}`).senderId, other);
+  assert.equal(mapMessage(raw, `user:${other}`).status, 'sent');
+  assert.equal(conversationKey({ ...raw, receiver: '444444444444444444444444' }), null);
+  assert.equal(
+    conversationKey({ ...raw, groupId: '555555555555555555555555' }),
+    'group:555555555555555555555555',
+  );
+});
+
+test('paginated real user directory never falls back to fixtures and excludes current/blocked accounts', async () => {
+  const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const calls = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    calls.push(config.url);
+    return h.ok(config, {
+      users: [
+        { ...h.user, _id: me },
+        { ...h.user, _id: other, displayname: 'Backend user' },
+        { ...h.user, _id: '333333333333333333333333', isBlocked: true },
+      ],
+      count: 3,
+    });
+  };
+  const { listRealUsers } = h.load('src/features/profile/services/profileService.real.ts');
+  const users = await listRealUsers();
+  assert.deepEqual(calls, ['/users']);
+  assert.equal(users.length, 1);
+  assert.equal(users[0].id, other);
+  assert.equal(users[0].name, 'Backend user');
+  assert.equal(users[0].distanceKm, undefined);
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, { users: [], count: 0 });
+  assert.equal((await listRealUsers()).length, 0);
+});
+
+test('real group and message writes send confirmed DTOs without client-supplied identity or invented fields', async () => {
+  let unreadRefreshes = 0;
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    './socketSession': {
+      refreshUnread: async () => {
+        unreadRefreshes++;
+      },
+      getHistory: async () => [],
+      joinGroup: async () => {},
+    },
+  });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const requests = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    requests.push({ url: config.url, body: JSON.parse(config.data) });
+    return h.ok(
+      config,
+      config.url === '/groups/create-group'
+        ? { _id: '333333333333333333333333', name: 'Server group', admin: me, members: [me, other] }
+        : {
+            _id: '444444444444444444444444',
+            sender: me,
+            receiver: other,
+            message: 'Hello',
+            sentAt: '2026-10-14T01:00:00Z',
+            isRead: false,
+          },
+    );
+  };
+  const { groupService } = h.load('src/features/chat/services/groupService.ts');
+  const group = await groupService.create('  Server group  ', [other, other]);
+  assert.equal(group.admin, me);
+  assert.deepEqual(requests[0], {
+    url: '/groups/create-group',
+    body: { name: 'Server group', members: [other] },
+  });
+  const { realChatService } = h.load('src/features/chat/services/chatService.real.ts');
+  const sent = await realChatService.sendMessage({
+    conversationId: `user:${other}`,
+    text: 'Hello',
+    clientId: 'local-only',
+  });
+  assert.deepEqual(requests[1], {
+    url: '/chats/messages',
+    body: { receiver: other, message: 'Hello' },
+  });
+  assert.equal(sent.id, '444444444444444444444444');
+  assert.equal(sent.clientId, 'local-only');
+  assert.equal(sent.status, 'sent');
+  assert.equal(unreadRefreshes, 1);
+});
+
+test('socket history requests serialize uncorrelated server events and logout cancels pending requests', async () => {
+  const { EventEmitter } = require('node:events');
+  class FakeSocket extends EventEmitter {
+    connected = false;
+    calls = [];
+    hasListeners(name) {
+      return this.listenerCount(name) > 0;
+    }
+    connect() {
+      this.connected = true;
+      setTimeout(() => super.emit('connect'), 0);
+    }
+    disconnect() {
+      this.connected = false;
+      super.emit('disconnect');
+    }
+    emit(name, data) {
+      if (name === 'getUnreadCount') {
+        setTimeout(() => super.emit('unreadMessageCount', []), 0);
+        return true;
+      }
+      if (name === 'getChatHistory') {
+        this.calls.push(data.user2);
+        return true;
+      }
+      return super.emit(name, data);
+    }
+    reply(data) {
+      super.emit('chatHistory', data);
+    }
+  }
+  const socket = new FakeSocket();
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    'socket.io-client': { io: () => socket },
+    '@/services/queryClient': {
+      queryClient: {
+        invalidateQueries: async () => {},
+        setQueryData: () => {},
+        getQueryData: () => undefined,
+        clear: () => {},
+        cancelQueries: async () => {},
+      },
+    },
+  });
+  const me = '111111111111111111111111';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const { socketRequest } = h.load('src/features/chat/services/socketSession.ts');
+  const first = socketRequest('getChatHistory', 'chatHistory', { user2: 'first' });
+  const second = socketRequest('getChatHistory', 'chatHistory', { user2: 'second' });
+  await until(() => socket.calls.length === 1);
+  assert.deepEqual(socket.calls, ['first']);
+  socket.reply(['first response']);
+  assert.deepEqual(Array.from(await first), ['first response']);
+  await until(() => socket.calls.length === 2);
+  assert.deepEqual(socket.calls, ['first', 'second']);
+  const canceled = assert.rejects(second);
+  h.runtime.teardownSession();
+  await canceled;
+  assert.equal(socket.connected, false);
+});
+
+test('each role has confirmed capabilities; unknown roles fail closed', () => {
+  const h = harness();
+  const { hasCapability, hasRole } = h.load('src/features/auth/permissions.ts');
+  for (const role of ['root', 'admin', 'user', 'manager']) {
+    assert.equal(hasCapability([role], 'canSendMessages'), true);
+    assert.equal(hasCapability([role], 'canShareMedia'), true);
+    assert.equal(hasCapability([role], 'canModerate'), ['root', 'admin'].includes(role));
+    assert.equal(hasCapability([role], 'canRequestConnection'), role === 'user');
+  }
+  assert.equal(hasRole(['root'], ['admin']), true);
+  assert.equal(hasCapability([], 'canSendMessages'), false);
+  assert.equal(hasCapability(['admin', 'unknown'], 'canModerate'), false);
+  const { parseUser } = h.load('src/features/auth/userModel.ts');
+  assert.throws(() => parseUser({ ...h.user, roles: [] }));
+  assert.throws(() => parseUser({ ...h.user, roles: ['ADMIN'] }));
+});
+
+test('profile refresh updates roles, fails closed, recovers, and logout clears identity/cache', async () => {
+  const h = harness();
+  const store = h.useAuthStore;
+  const session = {
+    accessToken: h.token(),
+    expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    userId: h.user._id,
+  };
+  await store.getState().setAuthenticated({ session, user: h.user });
+  const { userCache, USER_CACHE_LIMIT, senderId, isUserBlocked } = h.load(
+    'src/features/auth/userCache.ts',
+  );
+  for (let i = 0; i < 250; i++)
+    userCache.put({ _id: String(i), displayname: 'Member', passwordResetToken: 'private' });
+  assert.equal(userCache.size(), USER_CACHE_LIMIT);
+  assert.equal(userCache.get('249').passwordResetToken, undefined);
+  assert.equal(senderId({ _id: h.user._id }), store.getState().currentUser._id);
+  assert.equal(isUserBlocked('249'), undefined);
+  const before = store.getState().sessionRevision;
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, { ...h.user, roles: ['admin'] });
+  await store.getState().refreshProfile();
+  assert.deepEqual(Array.from(store.getState().roles), ['admin']);
+  assert.equal(store.getState().sessionRevision, before + 1);
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, { ...h.user, roles: ['unknown'] });
+  await store.getState().refreshProfile();
+  assert.equal(store.getState().currentUser, null);
+  assert.equal(store.getState().roles.length, 0);
+  assert.ok(store.getState().profileError);
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, h.user);
+  await store.getState().refreshProfile();
+  assert.equal(store.getState().status, 'authenticated');
+  let tornDown = 0;
+  h.runtime.sessionIdentity.subscribe(() => tornDown++);
+  await store.getState().logout();
+  assert.equal(userCache.size(), 0);
+  assert.equal(h.runtime.sessionIdentity.userId, null);
+  assert.equal(h.runtime.sessionIdentity.getToken(), null);
+  assert.equal(tornDown, 1);
+});
+
+test('403 never retries action and refreshes /auth/me once for HTTP and envelope', async () => {
+  for (const envelope of [true, false]) {
+    const h = harness();
+    await h.useAuthStore.getState().setAuthenticated({
+      user: h.user,
+      session: {
+        accessToken: h.token(),
+        userId: h.user._id,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      },
+    });
+    const calls = [];
+    h.apiClient.defaults.adapter = async (config) => {
+      calls.push(config.url);
+      if (config.url === '/auth/me') return h.ok(config, { ...h.user, roles: ['manager'] });
+      const response = h.ok(config, null);
+      response.data.statusCode = 403;
+      if (envelope) return response;
+      response.status = 403;
+      throw new axios.AxiosError('Forbidden', 'ERR_BAD_RESPONSE', config, undefined, response);
+    };
+    await assert.rejects(h.apiClient.post('/admin/action'), /not permitted/);
+    assert.deepEqual(calls, ['/admin/action', '/auth/me']);
+    assert.equal(h.useAuthStore.getState().status, 'authenticated');
+    assert.ok(h.useAuthStore.getState().permissionError.includes('not permitted'));
+  }
+});
+
+test('blocked /auth/me and unverified profile land in account states', async () => {
+  const h = harness();
+  const session = {
+    accessToken: h.token(),
+    userId: h.user._id,
+    expiresAt: new Date(Date.now() + 3600000).toISOString(),
+  };
+  await h.useAuthStore
+    .getState()
+    .setAuthenticated({ session, user: { ...h.user, isEmailVerified: false } });
+  assert.equal(h.useAuthStore.getState().status, 'unverified');
+  await h.useAuthStore.getState().setAuthenticated({ session, user: h.user });
+  h.apiClient.defaults.adapter = async (config) => ({
+    ...h.ok(config, null),
+    data: {
+      statusCode: 401,
+      error: 'Forbidden',
+      message: 'Account blocked!, contact administrator Dark Fantasy',
+    },
+  });
+  await h.useAuthStore.getState().refreshProfile();
+  assert.equal(h.useAuthStore.getState().status, 'blocked');
+  assert.equal(h.runtime.getRuntimeToken(), null);
+});
+
+async function until(condition) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail('Expected asynchronous condition did not complete');
+}
+
+function chatHarness() {
+  const { EventEmitter } = require('node:events');
+  const sockets = [];
+  const history = new Map();
+  let held = false;
+  const pendingHistory = [];
+  class ChatSocket extends EventEmitter {
+    connected = false;
+    packets = [];
+    hasListeners(name) {
+      return this.listenerCount(name) > 0;
+    }
+    connect() {
+      this.connected = true;
+      setTimeout(() => this.server('connect'), 0);
+    }
+    disconnect() {
+      this.connected = false;
+      this.server('disconnect');
+    }
+    server(name, data) {
+      return super.emit(name, data);
+    }
+    emit(name, payload, ack) {
+      this.packets.push({ name, payload });
+      if (name === 'joinGroup') setTimeout(() => ack({ groupId: payload }), 0);
+      if (name === 'getUnreadCount' || name === 'markAsRead')
+        setTimeout(() => this.server('unreadMessageCount', []), 0);
+      if (name === 'getChatHistory' || name === 'getGroupChatHistory') {
+        const reply = () =>
+          this.server(
+            name === 'getChatHistory' ? 'chatHistory' : 'groupChatHistory',
+            history.get(payload.user2 ?? payload.groupId) ?? [],
+          );
+        if (held) pendingHistory.push(reply);
+        else setTimeout(reply, 0);
+      }
+      return true;
+    }
+  }
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    'socket.io-client': {
+      io: (_url, options) => {
+        const socket = new ChatSocket();
+        socket.options = options;
+        sockets.push(socket);
+        return socket;
+      },
+    },
+  });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  return {
+    ...h,
+    me,
+    other,
+    sockets,
+    history,
+    transport: h.load('src/features/chat/services/socketSession.ts'),
+    state: h.load('src/features/chat/services/chatState.ts'),
+    hold: () => {
+      held = true;
+    },
+    release: () => {
+      held = false;
+      pendingHistory.splice(0).forEach((reply) => reply());
+    },
+  };
+}
+function backendMessage(me, other, extras = {}) {
+  return {
+    _id: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+    sender: other,
+    receiver: me,
+    sentAt: '2026-10-14T01:00:00Z',
+    message: 'Hello',
+    isRead: false,
+    media: [],
+    ...extras,
+  };
+}
+
+test('Stage A allowlist drops private fields and rejects malformed or cross-chat payloads', () => {
+  const h = chatHarness();
+  const { parseMessage, mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
+  const raw = backendMessage(h.me, h.other, {
+    token: 'private',
+    sender: { _id: h.other, displayname: 'Peer', email: 'private' },
+    media: [
+      {
+        _id: 'bbbbbbbbbbbbbbbbbbbbbbbb',
+        mimetype: 'image/jpeg',
+        status: 'active',
+        url: 'https://private.example/link',
+        storageKey: 'private',
+        filename: 'private',
+      },
+    ],
+  });
+  const safe = parseMessage(raw);
+  assert.equal(safe.token, undefined);
+  assert.equal(safe.sender.email, undefined);
+  assert.equal(safe.media[0].url, undefined);
+  assert.equal(safe.media[0].storageKey, undefined);
+  for (const extras of [
+    { sender: null },
+    { sentAt: 'bad' },
+    { isRead: 'yes' },
+    { media: [{}] },
+    { media: [{ _id: 'bbbbbbbbbbbbbbbbbbbbbbbb', mimetype: 'image/jpeg', expiresAt: 'bad' }] },
+  ])
+    assert.equal(parseMessage({ ...raw, ...extras }), null);
+  assert.throws(() => mapMessage(raw, `user:${h.me}`));
+  h.runtime.teardownSession();
+});
+
+test('Stage A merges REST/socket IDs, preserves read, and protects edits/deletes against stale histories', async () => {
+  const h = chatHarness();
+  await h.transport.ensureChatReady();
+  const socket = h.sockets[0];
+  const key = `user:${h.other}`;
+  const queryKey = ['chat', 'messages', key];
+  const raw = backendMessage(h.me, h.other, { sender: h.me, receiver: h.other });
+  socket.server('receiveMessage', raw);
+  const { mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
+  h.state.mergeMessage({ ...mapMessage(raw, key), clientId: 'temporary' });
+  assert.equal(h.queryData.get(JSON.stringify(queryKey)).length, 1);
+  socket.server('messagesRead', { userId: h.other });
+  socket.server('receiveMessage', raw);
+  let rows = h.queryData.get(JSON.stringify(queryKey));
+  assert.equal(rows[0].status, 'read');
+  assert.equal(rows[0].clientId, 'temporary');
+  h.history.set(h.other, [raw]);
+  h.hold();
+  const load = h.transport.getHistory(key);
+  await until(() => socket.packets.some((packet) => packet.name === 'getChatHistory'));
+  socket.server('messageUpdated', { ...raw, message: 'Changed' });
+  h.release();
+  assert.equal((await load)[0].text, 'Changed');
+  const started = h.state.historyVersion();
+  socket.server('messageDeleted', { ...raw, messageId: raw._id });
+  rows = h.state.reconcileHistory(key, [mapMessage(raw, key)], started);
+  assert.equal(rows.length, 0);
+  h.runtime.teardownSession();
+});
+
+test('Stage A unread arrays drive badges, dedupe IDs, and fail closed on count-shaped data', async () => {
+  const h = chatHarness();
+  await h.transport.ensureChatReady();
+  const key = `user:${h.other}`;
+  h.queryData.set(JSON.stringify(['chat', 'conversations']), [{ id: key, unreadCount: 0 }]);
+  const raw = backendMessage(h.me, h.other);
+  h.sockets[0].server('unreadData', [raw, raw]);
+  assert.equal(h.state.unreadFor(key), 1);
+  assert.equal(h.queryData.get(JSON.stringify(['chat', 'conversations']))[0].unreadCount, 1);
+  h.sockets[0].server('unreadMessageCount', { count: 8 });
+  assert.equal(h.state.unreadFor(key), 1);
+  h.sockets[0].server('unreadMessageCount', []);
+  assert.equal(h.state.unreadFor(key), 0);
+  h.runtime.teardownSession();
+});
+
+test('Stage A reconnect rejoins groups and resyncs history/unread before emitting read', async () => {
+  const h = chatHarness();
+  const group = '333333333333333333333333';
+  await h.transport.joinGroup(group);
+  await h.transport.getHistory(`user:${h.other}`);
+  await h.transport.getHistory(`group:${group}`);
+  const socket = h.sockets[0];
+  const before = socket.packets.length;
+  h.hold();
+  socket.disconnect();
+  socket.connect();
+  await until(() =>
+    socket.packets.slice(before).some((packet) => packet.name === 'getChatHistory'),
+  );
+  assert.equal(h.state.useChatConnection.getState().ready, false);
+  let visible = true;
+  const read = h.transport.socketRequest(
+    'markAsRead',
+    'unreadMessageCount',
+    { user2: h.other },
+    () => visible,
+  );
+  assert.equal(
+    socket.packets.slice(before).some((packet) => packet.name === 'markAsRead'),
+    false,
+  );
+  visible = false;
+  const rejected = assert.rejects(read);
+  h.release();
+  await rejected;
+  await until(() => h.state.useChatConnection.getState().ready);
+  assert.equal(
+    socket.packets.slice(before).some((packet) => packet.name === 'markAsRead'),
+    false,
+  );
+  const operations = socket.packets.slice(before).map((packet) => packet.name);
+  assert.equal(operations[0], 'joinGroup');
+  assert.ok(operations.indexOf('getUnreadCount') > operations.indexOf('getGroupChatHistory'));
+  let auth;
+  socket.options.auth((value) => {
+    auth = value;
+  });
+  assert.equal(auth.token, h.runtime.sessionIdentity.getToken());
+  await h.transport.socketRequest(
+    'markAsRead',
+    'unreadMessageCount',
+    { user2: h.other },
+    () => true,
+  );
+  assert.equal(socket.packets.at(-1).name, 'markAsRead');
+  h.runtime.teardownSession();
+});
+
+test('Stage A rejects old socket callbacks and HTTP responses after same-account relogin', async () => {
+  const h = chatHarness();
+  await h.transport.ensureChatReady();
+  const oldHandler = h.sockets[0].listeners('receiveMessage')[0];
+  const scope = h.runtime.sessionIdentity.generation;
+  let complete;
+  h.apiClient.defaults.adapter = (config) =>
+    new Promise((resolve) => {
+      complete = () => resolve(h.ok(config, { url: 'https://private.example/media' }));
+    });
+  const oldRequest = h.apiClient.post(
+    '/chats/messages/aaaaaaaaaaaaaaaaaaaaaaaa/media/bbbbbbbbbbbbbbbbbbbbbbbb/access-url',
+  );
+  const rejected = assert.rejects(oldRequest);
+  await until(() => Boolean(complete));
+  h.runtime.teardownSession();
+  h.runtime.setSessionIdentity(h.me, h.token(h.me));
+  assert.equal(h.runtime.isSessionCurrent(scope), false);
+  oldHandler(backendMessage(h.me, h.other));
+  assert.equal(h.queryData.has(JSON.stringify(['chat', 'messages', `user:${h.other}`])), false);
+  complete();
+  await rejected;
+  assert.equal(h.logs.length, 0);
+  h.runtime.teardownSession();
+});
+
+test('Stage A composer and attachment capabilities are independent', () => {
+  const h = harness({
+    react: { useState: () => ['Hello', () => {}], useRef: (value) => ({ current: value }) },
+    'react-native': {
+      View: 'View',
+      Pressable: 'Pressable',
+      TextInput: 'TextInput',
+      StyleSheet: { create: (value) => value, hairlineWidth: 1 },
+    },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    'expo-haptics': { impactAsync: async () => {}, ImpactFeedbackStyle: { Light: 'light' } },
+    '@/components/ui': { Text: 'Text' },
+    '@/theme': {
+      radius: { xl: 1, full: 1 },
+      spacing: { sm: 1, md: 1, lg: 1 },
+      typography: { size: { md: 1 }, lineHeight: { md: 1 }, maxFontScale: 1 },
+    },
+    '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
+  });
+  const { ChatInput } = h.load('src/features/chat/components/ChatInput.tsx');
+  function find(node, label) {
+    if (!node || typeof node !== 'object') return undefined;
+    if (node.props?.accessibilityLabel === label) return node;
+    for (const child of [node.props?.children].flat(Infinity)) {
+      const found = find(child, label);
+      if (found) return found;
+    }
+  }
+  let sends = 0;
+  const props = {
+    onSend: () => {
+      sends++;
+    },
+    onAttach: () => {},
+    bottomInset: 0,
+  };
+  const mediaOnly = ChatInput({ ...props, canShareMedia: true, canSendMessages: false });
+  assert.equal(find(mediaOnly, 'Send message').props.disabled, true);
+  find(mediaOnly, 'Send message').props.onPress();
+  assert.equal(sends, 0);
+  assert.equal(find(mediaOnly, 'Message').props.editable, false);
+  assert.equal(find(mediaOnly, 'Attach photos or videos').props.disabled, false);
+  const textOnly = ChatInput({ ...props, canShareMedia: false, canSendMessages: true });
+  assert.equal(find(textOnly, 'Attach photos or videos'), undefined);
+  assert.equal(find(textOnly, 'Send message').props.disabled, false);
+  find(textOnly, 'Send message').props.onPress();
+  assert.equal(sends, 1);
+});
+
+test('Stage A read hook gates focus, foreground, synchronization and direct chats at emission', async () => {
+  const preferences = { readReceipts: true };
+  const usePreferences = (selector) => selector(preferences);
+  usePreferences.getState = () => preferences;
+  const connection = { ready: true, epoch: 1 };
+  const useChatConnection = (selector) => selector(connection);
+  useChatConnection.getState = () => connection;
+  const app = { currentState: 'active' };
+  const effects = [];
+  let blur;
+  const reads = [];
+  const h = harness({
+    react: {
+      useState: () => [true, () => {}],
+      useRef: (value) => ({ current: value }),
+      useCallback: (fn) => fn,
+      useEffect: (fn) => {
+        effects.push(fn);
+      },
+      useMemo: (fn) => fn(),
+    },
+    'react-native': { Platform: { OS: 'android' }, AppState: app },
+    'expo-router': {
+      useFocusEffect: (fn) => {
+        blur = fn();
+      },
+    },
+    '@/hooks/useAppState': { useAppState: () => app.currentState },
+    '@/features/auth/hooks/useCurrentUser': { useCan: () => true },
+    '@/components/ui/Toast': { toast: { error: () => {} } },
+    '@/features/settings/store/preferencesStore': { usePreferences },
+    '../services/chatState': { useChatConnection },
+    '../services': {
+      chatService: {
+        markRead: async (key, allowed) => {
+          reads.push({ key, allowed });
+        },
+      },
+    },
+  });
+  h.runtime.setSessionIdentity('111111111111111111111111', h.token('111111111111111111111111'));
+  h.useAuthStore.setState({ status: 'authenticated', roles: ['user'] });
+  const { useMarkConversationRead } = h.load('src/features/chat/hooks/useChat.ts');
+  const key = 'user:222222222222222222222222';
+  useMarkConversationRead(key, 'aaaaaaaaaaaaaaaaaaaaaaaa');
+  effects.splice(0).forEach((fn) => fn());
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0].allowed(), true);
+  app.currentState = 'background';
+  assert.equal(reads[0].allowed(), false);
+  app.currentState = 'active';
+  connection.ready = false;
+  assert.equal(reads[0].allowed(), false);
+  connection.ready = true;
+  blur();
+  assert.equal(reads[0].allowed(), false);
+  useMarkConversationRead('group:333333333333333333333333', 'aaaaaaaaaaaaaaaaaaaaaaaa');
+  effects.splice(0).forEach((fn) => fn());
+  assert.equal(reads.length, 1);
+  h.runtime.teardownSession();
+  assert.equal(reads[0].allowed(), false);
+});
+
+function harness(overrides = {}) {
+  const cache = new Map();
+  const secure = new Map();
+  const writes = [];
+  const counters = { queries: 0, outbox: 0, sockets: 0 };
+  const logs = [];
+  const queryData = new Map();
+  const stubs = {
+    react: {
+      useState: (initial) => [initial, () => {}],
+      useRef: (initial) => ({ current: initial }),
+      useCallback: (fn) => fn,
+      useEffect: () => {},
+    },
+    '@/config/env': {
+      env: { apiUrl: 'https://api.example.test/api', pinningEnabled: false, pins: [] },
+    },
+    'expo-secure-store': {
+      WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'device-only',
+      getItemAsync: async (key) => secure.get(key) ?? null,
+      setItemAsync: async (key, value, options) => {
+        writes.push({ key, value, options });
+        secure.set(key, value);
+      },
+      deleteItemAsync: async (key) => {
+        secure.delete(key);
+      },
+    },
+    '@/services/queryClient': {
+      queryClient: {
+        setQueryData: (key, value) => {
+          const id = JSON.stringify(key);
+          const next = typeof value === 'function' ? value(queryData.get(id)) : value;
+          if (next !== undefined) queryData.set(id, next);
+          return next;
+        },
+        getQueryData: (key) => queryData.get(JSON.stringify(key)),
+        cancelQueries: async () => {},
+        clear: () => {
+          queryData.clear();
+          counters.queries++;
+        },
+      },
+    },
+    '@/features/chat/store/outboxStore': {
+      useOutbox: {
+        getState: () => ({
+          clear: () => {
+            counters.outbox++;
+          },
+        }),
+      },
+    },
+  };
+  Object.assign(stubs, overrides);
+  function load(filename) {
+    filename = path.resolve(filename);
+    if (cache.has(filename)) return cache.get(filename).exports;
+    const module = { exports: {} };
+    cache.set(filename, module);
+    const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      fileName: filename,
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        esModuleInterop: true,
+        jsx: ts.JsxEmit.ReactJSX,
+      },
+    }).outputText;
+    const req = (id) => {
+      if (stubs[id]) return stubs[id];
+      if (id.startsWith('.') || id.startsWith('@/')) {
+        const base = id.startsWith('@/')
+          ? path.resolve('src', id.slice(2))
+          : path.resolve(path.dirname(filename), id);
+        const file = [base + '.ts', base + '.tsx', path.join(base, 'index.ts')].find(fs.existsSync);
+        return load(file);
+      }
+      return require(id);
+    };
+    vm.runInNewContext(
+      source,
+      {
+        require: req,
+        module,
+        exports: module.exports,
+        __DEV__: false,
+        URL,
+        AbortController,
+        setTimeout,
+        clearTimeout,
+        console: { debug: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+      },
+      { filename },
+    );
+    return module.exports;
+  }
+  const { apiClient } = load('src/services/api/apiClient.ts');
+  const { useAuthStore, getAuthRevision } = load('src/features/auth/store/authStore.ts');
+  const runtime = load('src/features/auth/sessionRuntime.ts');
+  const service = load('src/features/auth/services/authService.real.ts').realAuthService;
+  const token = (sub = 'desktop-user-id', seconds = 3600) =>
+    [
+      Buffer.from('{"alg":"HS256"}').toString('base64url'),
+      Buffer.from(JSON.stringify({ sub, exp: Math.floor(Date.now() / 1000) + seconds })).toString(
+        'base64url',
+      ),
+      'unverified-test-signature',
+    ].join('.');
+  const user = {
+    _id: 'desktop-user-id',
+    username: 'Desktop@example.test',
+    displayname: 'Desktop',
+    intrests: ['music'],
+    firstName: 'Desktop',
+    lastName: 'Test',
+    roles: ['user'],
+    isEmailVerified: true,
+    isBlocked: false,
+  };
+  const ok = (config, data) => ({
+    config,
+    data: { data, error: false, statusCode: 201 },
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+  });
+  return {
+    load,
+    apiClient,
+    useAuthStore,
+    getAuthRevision,
+    runtime,
+    service,
+    token,
+    user,
+    ok,
+    secure,
+    writes,
+    counters,
+    logs,
+    queryData,
+  };
+}
+
+test('release rejects HTTP/missing URLs, allows HTTPS, dev HTTP, requires backup pins', () => {
+  assert.throws(() => validateAuthBuild({ EXPO_PUBLIC_API_URL: 'http://localhost:9000/api' }));
+  assert.throws(() => validateAuthBuild({}));
+  assert.doesNotThrow(() =>
+    validateAuthBuild({ EXPO_PUBLIC_API_URL: 'https://api.example.test/api' }),
+  );
+  assert.doesNotThrow(() =>
+    validateAuthBuild({ EXPO_PUBLIC_API_URL: 'http://localhost:9000/api' }, { development: true }),
+  );
+  assert.throws(() =>
+    validateAuthBuild({
+      EXPO_PUBLIC_API_URL: 'https://api.example.test/api',
+      EXPO_PUBLIC_SSL_PINNING_ENABLED: 'true',
+    }),
+  );
+  const config = require('../app.config.js');
+  const before = { ...process.env };
+  try {
+    process.env.EXPO_PUBLIC_API_URL = 'https://api.example.test/api';
+    process.env.APP_VARIANT = 'production';
+    const result = config({ config: { plugins: [] } });
+    assert.equal(result.android.allowBackup, false);
+    assert.equal(result.ios.infoPlist.NSAppTransportSecurity.NSAllowsArbitraryLoads, false);
+    const properties = result.plugins.find((p) => p[0] === 'expo-build-properties')[1];
+    assert.equal(properties.android.usesCleartextTraffic, false);
+    assert.equal(properties.android.enableMinifyInReleaseBuilds, true);
+  } finally {
+    process.env = before;
+  }
+});
+
+test('exact login contract, profile identity, password cleanup, secure persistence, restart and full logout', async () => {
+  const h = harness();
+  const requests = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    requests.push(config.url);
+    if (config.url === '/auth/login') {
+      assert.deepEqual(JSON.parse(config.data), {
+        username: 'Desktop@example.test',
+        password: 'unchanged password ',
+      });
+      assert.equal(config.headers.Authorization, undefined);
+      return h.ok(config, { accessToken: h.token(), user: h.user });
+    }
+    assert.equal(config.url, '/auth/me');
+    assert.equal(config.headers.Authorization, `Bearer ${h.token()}`);
+    return h.ok(config, h.user);
+  };
+  const input = {
+    email: ' Desktop@example.test ',
+    password: 'unchanged password ',
+    strategy: 'email_password',
+  };
+  h.useAuthStore.getState().beginLogin();
+  const result = await h.service.login(input);
+  assert.equal(input.password, '');
+  assert.equal(result.user._id, h.user._id);
+  assert.deepEqual(requests, ['/auth/login', '/auth/me']);
+  await h.useAuthStore.getState().setAuthenticated(result);
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0].value, result.session.accessToken);
+  assert.equal(h.writes[0].options.keychainAccessible, 'device-only');
+  h.runtime.setRuntimeToken(null);
+  await h.useAuthStore.getState().hydrate();
+  assert.equal(h.useAuthStore.getState().user.id, h.user._id);
+  h.runtime.registerSessionTeardown(() => {
+    h.counters.sockets++;
+  });
+  await h.useAuthStore.getState().logout();
+  assert.equal(h.secure.size, 0);
+  assert.equal(h.runtime.getRuntimeToken(), null);
+  assert.equal(h.runtime.getSocketHandshakeAuth(), null);
+  assert.equal(h.useAuthStore.getState().user, null);
+  assert.equal(h.useAuthStore.getState().session, null);
+  assert.equal(h.useAuthStore.getState().status, 'unauthenticated');
+  assert.ok(h.counters.queries && h.counters.outbox && h.counters.sockets);
+  assert.deepEqual(h.logs, []);
+});
+
+test('reject third-party URLs before transport; GET retries once and login never retries', async () => {
+  const h = harness();
+  h.runtime.setRuntimeToken(h.token());
+  let calls = 0;
+  h.apiClient.defaults.adapter = async (config) => {
+    calls++;
+    throw new axios.AxiosError('offline', 'ERR_NETWORK', config);
+  };
+  await assert.rejects(h.apiClient.get('https://third-party.test/steal'));
+  assert.equal(calls, 0);
+  await assert.rejects(h.apiClient.get('/auth/me'));
+  assert.equal(calls, 2);
+  calls = 0;
+  await assert.rejects(
+    h.service.login({ email: 'a@b.test', password: 'private', strategy: 'email_password' }),
+  );
+  assert.equal(calls, 1);
+});
+
+test('401 expires session; 403 preserves session; expired token cannot restore', async () => {
+  for (const status of [401, 403]) {
+    for (const envelope of [true, false]) {
+      const h = harness();
+      await h.useAuthStore.getState().setAuthenticated({
+        session: {
+          accessToken: h.token(),
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          userId: h.user._id,
+        },
+        user: h.user,
+      });
+      h.apiClient.defaults.adapter = async (config) => {
+        const response = h.ok(config, null);
+        if (envelope) {
+          response.data.statusCode = status;
+          return response;
+        }
+        response.status = status;
+        throw new axios.AxiosError('rejected', 'ERR_BAD_RESPONSE', config, undefined, response);
+      };
+      await assert.rejects(h.apiClient.get('/auth/me'));
+      assert.equal(h.secure.size, status === 401 ? 0 : 1);
+      assert.equal(h.useAuthStore.getState().status, status === 401 ? 'expired' : 'authenticated');
+    }
+  }
+  const h = harness();
+  h.secure.set('darkfantasy.token.v2', h.token('desktop-user-id', -1));
+  await h.useAuthStore.getState().hydrate();
+  assert.equal(h.secure.size, 0);
+  assert.equal(h.runtime.getRuntimeToken(), null);
+});
+
+test('generic errors conceal nonexistent account vs backend wrong-password 500', async () => {
+  for (const status of [400, 500]) {
+    const h = harness();
+    h.apiClient.defaults.adapter = async (config) => {
+      const response = h.ok(config, null);
+      response.status = status;
+      throw new axios.AxiosError(
+        'sensitive backend message',
+        'ERR_BAD_RESPONSE',
+        config,
+        undefined,
+        response,
+      );
+    };
+    await assert.rejects(
+      h.service.login({ email: 'a@b.test', password: 'private', strategy: 'email_password' }),
+      (error) => error.code === 'INVALID_CREDENTIALS' && !error.message.includes('sensitive'),
+    );
+    assert.deepEqual(h.logs, []);
+  }
+});
+
+test('deep links discard external destinations, encoded routes, params and returnTo', () => {
+  const { redirectSystemPath: redirect } = harness().load('app/+native-intent.tsx');
+  for (const path of [
+    'https://evil.test',
+    '//evil.test',
+    '/%2f%2fevil.test',
+    'darkfantasy://evil.test',
+  ])
+    assert.equal(redirect({ path, initial: true }), '/login');
+  assert.equal(
+    redirect({ path: 'darkfantasy://discover?returnTo=https://evil.test', initial: true }),
+    '/discover',
+  );
+  assert.equal(redirect({ path: '/login?token=secret', initial: true }), '/login');
+});
+
+test('synchronous duplicate-submit guard and logout during pending login prevent resurrection', async () => {
+  const h = harness();
+  let resolveLogin;
+  let calls = 0;
+  h.service.login = () => {
+    calls++;
+    return new Promise((resolve) => {
+      resolveLogin = resolve;
+    });
+  };
+  const { login } = h.load('src/features/auth/hooks/useLogin.ts').useLogin();
+  const first = login('a@b.test', 'private');
+  assert.equal(await login('a@b.test', 'private'), false);
+  assert.equal(calls, 1);
+  await h.useAuthStore.getState().logout();
+  resolveLogin({
+    session: { accessToken: h.token(), userId: h.user._id },
+    user: h.user,
+  });
+  assert.equal(await first, false);
+  assert.equal(h.useAuthStore.getState().status, 'unauthenticated');
+  assert.equal(h.secure.size, 0);
+});
+
+test('logout during GET backoff cancels retry instead of sending an old token', async () => {
+  const h = harness();
+  h.runtime.setRuntimeToken(h.token());
+  let calls = 0;
+  let notify;
+  const started = new Promise((resolve) => {
+    notify = resolve;
+  });
+  h.apiClient.defaults.adapter = async (config) => {
+    calls++;
+    notify();
+    throw new axios.AxiosError('offline', 'ERR_NETWORK', config);
+  };
+  const pending = assert.rejects(h.apiClient.get('/auth/me'), (error) => axios.isCancel(error));
+  await started;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await h.useAuthStore.getState().logout();
+  await pending;
+  assert.equal(calls, 1);
+});

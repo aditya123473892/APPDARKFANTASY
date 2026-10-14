@@ -5,7 +5,7 @@ export interface ChatService {
   /** Throws ServiceError('NOT_FOUND') when the conversation doesn't exist or isn't the viewer's. */
   getConversation(conversationId: string): Promise<Conversation>;
   listMessages(conversationId: string): Promise<Message[]>;
-  /** Must be idempotent per `clientId` so retries never create duplicates. */
+  /** clientId is local correlation. The current backend does not provide idempotency. */
   sendMessage(input: SendMessageInput): Promise<Message>;
-  markRead(conversationId: string): Promise<void>;
+  markRead(conversationId: string, allowed?: () => boolean): Promise<void>;
 }

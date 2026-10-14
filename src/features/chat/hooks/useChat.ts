@@ -1,5 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { AppState } from 'react-native';
+import { useAppState } from '@/hooks/useAppState';
+import { useCan } from '@/features/auth/hooks/useCurrentUser';
+import { hasCapability } from '@/features/auth/permissions';
+import { useChatConnection } from '../services/chatState';
 import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
@@ -7,6 +13,9 @@ import { queryKeys } from '@/services/queryKeys';
 import { chatService } from '../services';
 import { useOutbox, type OutboxItem } from '../store/outboxStore';
 import type { Conversation, LocalMessageStatus, Message } from '../types';
+import { sessionIdentity, isSessionCurrent } from '@/features/auth/sessionRuntime';
+import { toast } from '@/components/ui/Toast';
+import { describeError } from '@/services/errors';
 
 /** A message as rendered: either server-confirmed or still in the local outbox. */
 export type ChatMessage = Omit<Message, 'status'> & { status: LocalMessageStatus; local: boolean };
@@ -14,13 +23,14 @@ export type ChatMessage = Omit<Message, 'status'> & { status: LocalMessageStatus
 const MESSAGE_POLL_MS = 15_000;
 
 export function useMyId(): string {
-  return useAuthStore((state) => state.user?.id ?? 'me');
+  return useAuthStore((state) => state.currentUser?._id ?? '');
 }
 
 export function useConversations() {
   return useQuery({
     queryKey: queryKeys.conversations,
     queryFn: () => chatService.listConversations(),
+    refetchInterval: 30000,
   });
 }
 
@@ -41,7 +51,7 @@ export function useConversation(conversationId: string) {
       queryClient
         .getQueryData<Conversation[]>(queryKeys.conversations)
         ?.find((item) => item.id === conversationId),
-    retry: (count, error) => (error as { code?: string }).code !== 'NOT_FOUND' && count < 2,
+    retry: false,
   });
 }
 
@@ -58,7 +68,7 @@ export function useMessages(conversationId: string, enabled = true) {
     queryKey: queryKeys.messages(conversationId),
     queryFn: () => chatService.listMessages(conversationId),
     enabled: enabled && Boolean(conversationId),
-    // No realtime transport yet: poll gently while the conversation is open (paused in background).
+    // Socket events merge immediately; polling also catches missed server updates.
     refetchInterval: MESSAGE_POLL_MS,
   });
   const outbox = useOutbox(
@@ -91,8 +101,7 @@ export function useMessages(conversationId: string, enabled = true) {
       ...confirmed.map((message) => ({
         ...message,
         // Read receipts are reciprocal: hide "read" when the viewer has them turned off.
-        status:
-          !readReceipts && message.status === 'read' ? ('delivered' as const) : message.status,
+        status: !readReceipts && message.status === 'read' ? ('sent' as const) : message.status,
         local: false,
       })),
       ...pending,
@@ -115,6 +124,13 @@ export function useSendMessage(conversationId: string) {
       if (inFlight.current.has(item.clientId)) return;
       inFlight.current.add(item.clientId);
       const outbox = useOutbox.getState();
+      const scope = sessionIdentity.generation;
+      const auth = useAuthStore.getState();
+      if (auth.status !== 'authenticated' || !hasCapability(auth.roles, 'canSendMessages')) {
+        inFlight.current.delete(item.clientId);
+        toast.error("You don't have permission to send messages.");
+        return;
+      }
       outbox.setStatus(item.clientId, 'sending');
       try {
         const message = await chatService.sendMessage({
@@ -122,15 +138,22 @@ export function useSendMessage(conversationId: string) {
           text: item.text,
           clientId: item.clientId,
         });
+        if (!isSessionCurrent(scope)) return;
         queryClient.setQueryData<Message[]>(queryKeys.messages(item.conversationId), (current) =>
-          current && !current.some((existing) => existing.id === message.id)
-            ? [...current, message]
+          !(current ?? []).some((existing) => existing.id === message.id)
+            ? [...(current ?? []), message]
             : current,
         );
         useOutbox.getState().remove(item.clientId);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.conversations });
-      } catch {
+      } catch (error) {
+        if (!isSessionCurrent(scope)) return;
         useOutbox.getState().setStatus(item.clientId, 'failed');
+        toast.error(
+          describeError(
+            error,
+            'Send status is unknown. Refresh this conversation before sending again.',
+          ),
+        );
       } finally {
         inFlight.current.delete(item.clientId);
       }
@@ -168,21 +191,47 @@ export function useSendMessage(conversationId: string) {
   return { send, retry, discard };
 }
 
-/** Marks the conversation read when it is opened and whenever new incoming messages arrive. */
+/** Recheck focus/foreground/session at emission, after any queued socket work. */
 export function useMarkConversationRead(
   conversationId: string,
   latestIncomingId: string | undefined,
 ) {
-  const queryClient = useQueryClient();
-  const { mutate } = useMutation({
-    mutationFn: () => chatService.markRead(conversationId),
-    onSuccess: () => {
-      queryClient.setQueryData<Conversation[]>(queryKeys.conversations, (current) =>
-        current?.map((item) => (item.id === conversationId ? { ...item, unreadCount: 0 } : item)),
-      );
-    },
-  });
+  const [focused, setFocused] = useState(false);
+  const focus = useRef(false);
+  const appState = useAppState();
+  const ready = useChatConnection((state) => state.ready);
+  const epoch = useChatConnection((state) => state.epoch);
+  const canSend = useCan('canSendMessages');
+  const receipts = usePreferences((state) => state.readReceipts);
+  const scope = sessionIdentity.generation;
+  useFocusEffect(
+    useCallback(() => {
+      focus.current = true;
+      setFocused(true);
+      return () => {
+        focus.current = false;
+        setFocused(false);
+      };
+    }, []),
+  );
   useEffect(() => {
-    if (conversationId && latestIncomingId) mutate();
-  }, [conversationId, latestIncomingId, mutate]);
+    const allowed = () =>
+      focus.current &&
+      AppState.currentState === 'active' &&
+      useChatConnection.getState().ready &&
+      isSessionCurrent(scope) &&
+      usePreferences.getState().readReceipts &&
+      useAuthStore.getState().status === 'authenticated';
+    if (
+      conversationId.startsWith('user:') &&
+      latestIncomingId &&
+      focused &&
+      appState === 'active' &&
+      ready &&
+      canSend &&
+      receipts
+    ) {
+      void chatService.markRead(conversationId, allowed).catch(() => undefined);
+    }
+  }, [conversationId, latestIncomingId, focused, appState, ready, epoch, canSend, receipts, scope]);
 }

@@ -10,26 +10,32 @@ const MAX_LENGTH = 2000;
 
 export function ChatInput({
   onSend,
+  onAttach,
   bottomInset,
   disabled = false,
+  canSendMessages = false,
+  canShareMedia = false,
   placeholder = 'Write a message…',
 }: {
   onSend: (value: string) => void;
+  onAttach?: () => void;
   /** Gesture/navigation bar height. Pass 0 while the keyboard is open. */
   bottomInset: number;
   disabled?: boolean;
+  canSendMessages?: boolean;
+  canShareMedia?: boolean;
   placeholder?: string;
 }): React.JSX.Element {
   const [value, setValue] = useState('');
   const lastSend = useRef(0);
   const { theme } = useTheme();
-  const canSend = !disabled && value.trim().length > 0;
+  const canSend = !disabled && canSendMessages && value.trim().length > 0;
 
   const send = (): void => {
     const text = value.trim();
     // Ignore a second tap that lands before the input has cleared (prevents accidental double sends).
     const now = Date.now();
-    if (!text || disabled || now - lastSend.current < 400) return;
+    if (!text || disabled || !canSendMessages || now - lastSend.current < 400) return;
     lastSend.current = now;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setValue('');
@@ -47,6 +53,21 @@ export function ChatInput({
         },
       ]}
     >
+      {onAttach && canShareMedia ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Attach photos or videos"
+          disabled={disabled}
+          onPress={onAttach}
+          style={{ width: 40, height: 44, justifyContent: 'center', alignItems: 'center' }}
+        >
+          <Ionicons
+            name="attach-outline"
+            size={24}
+            color={disabled ? theme.colors.textMuted : theme.colors.primary}
+          />
+        </Pressable>
+      ) : null}
       <View
         style={[
           styles.field,
@@ -60,7 +81,7 @@ export function ChatInput({
           selectionColor={theme.colors.primary}
           cursorColor={theme.colors.primary}
           multiline
-          editable={!disabled}
+          editable={!disabled && canSendMessages}
           maxLength={MAX_LENGTH}
           maxFontSizeMultiplier={typography.maxFontScale}
           value={value}
