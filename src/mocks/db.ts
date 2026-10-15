@@ -85,7 +85,7 @@ const messages: Message[] = [
     senderId: 'u1',
     text: 'Then it is settled. Friday at 8? I will save us the corner table 🎷',
     createdAt: ago(15 * MIN),
-    status: 'delivered',
+    status: 'sent',
   },
   {
     id: 'm6',
@@ -101,7 +101,7 @@ const messages: Message[] = [
     senderId: 'u2',
     text: 'Honestly? A midnight carbonara for my sister after her finals.',
     createdAt: ago(2 * HOUR),
-    status: 'delivered',
+    status: 'sent',
   },
   {
     id: 'm8',
@@ -109,7 +109,7 @@ const messages: Message[] = [
     senderId: 'u2',
     text: 'Your playlist is dangerously good ✨',
     createdAt: ago(90 * MIN),
-    status: 'delivered',
+    status: 'sent',
   },
   {
     id: 'm9',

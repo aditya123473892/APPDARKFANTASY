@@ -1,7 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
+  Modal,
+  TextInput,
   FlatList,
   Pressable,
   StyleSheet,
@@ -20,14 +23,21 @@ import { useKeyboard } from '@/hooks/useKeyboard';
 import { isServiceError, describeError } from '@/services/errors';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
-import { formatPresence } from '@/utils/formatters';
+import * as Clipboard from 'expo-clipboard';
+import { messageActions } from '../utils/messageActions';
+import { roomState, updateRoom, useConversationState } from '../store/conversationStore';
+import type { ChatMessage } from '../hooks/useChat';
 import { ChatInput } from '../components/ChatInput';
 import { DateDivider } from '../components/DateDivider';
 import { useMutation } from '@tanstack/react-query';
 import { pickMedia } from '@/features/create-post/pickMedia';
 import { chatService } from '../services';
 import { toast } from '@/components/ui/Toast';
-import { sessionIdentity, isSessionCurrent } from '@/features/auth/sessionRuntime';
+import {
+  sessionIdentity,
+  isSessionCurrent,
+  registerSessionTeardown,
+} from '@/features/auth/sessionRuntime';
 import { useCan } from '@/features/auth/hooks/useCurrentUser';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { hasCapability } from '@/features/auth/permissions';
@@ -41,7 +51,6 @@ import {
   useSendMessage,
   useTypingEmitter,
   useTypingNames,
-  useVisiblePresence,
 } from '../hooks/useChat';
 import { buildRows, type ChatRow as Row } from '../utils/buildRows';
 
@@ -63,6 +72,7 @@ function MessagesSkeleton(): React.JSX.Element {
 }
 
 export function ChatRoomScreen(): React.JSX.Element {
+  const renderScope = sessionIdentity.generation;
   const params = useLocalSearchParams<{ id: string }>();
   const conversationId = typeof params.id === 'string' ? params.id : '';
   const router = useRouter();
@@ -75,7 +85,7 @@ export function ChatRoomScreen(): React.JSX.Element {
   const canShareMedia = useCan('canShareMedia');
   const attach = useMutation({
     mutationFn: async () => {
-      const scope = sessionIdentity.generation;
+      const scope = renderScope;
       const allowed = () => {
         const auth = useAuthStore.getState();
         return (
@@ -112,29 +122,34 @@ export function ChatRoomScreen(): React.JSX.Element {
   const conversation = conversationQuery.data;
   const notFound = !conversationId || isServiceError(conversationQuery.error, 'NOT_FOUND');
   const messagesQuery = useMessages(conversationId, !notFound);
-  const { messages } = messagesQuery;
-  const { send, retry, discard } = useSendMessage(conversationId);
+  const { messages, allMessages } = messagesQuery;
+  const { send, retry, resync } = useSendMessage(conversationId);
   const typing = useTypingEmitter(conversationId);
   const typingNames = useTypingNames(conversationId);
   const isGroup = conversation?.kind === 'group' || conversationId.startsWith('group:');
-  const typingLabel = typingNames.length
-    ? isGroup
-      ? typingNames.length === 1
-        ? `${typingNames[0]} is typing…`
-        : `${typingNames.length} people are typing…`
-      : 'typing…'
-    : null;
-  const presence = formatPresence(useVisiblePresence(conversation));
+  const typingLabel =
+    !isGroup && typingNames.length
+      ? isGroup
+        ? typingNames.length === 1
+          ? `${typingNames[0]} is typing…`
+          : `${typingNames.length} people are typing…`
+        : 'typing…'
+      : null;
+
   const subtitle =
     typingLabel ??
-    (isGroup && conversation?.memberCount ? `${conversation.memberCount} members` : presence);
+    (isGroup && conversation?.memberCount ? `${conversation.memberCount} members` : null);
 
   const latestIncomingId = useMemo(
     () =>
-      [...messages].reverse().find((message) => !message.local && message.senderId !== myId)?.id,
-    [messages, myId],
+      [...allMessages].reverse().find((message) => !message.local && message.senderId !== myId)?.id,
+    [allMessages, myId],
   );
-  useMarkConversationRead(conversation ? conversationId : '', latestIncomingId);
+  useMarkConversationRead(
+    conversation ? conversationId : '',
+    latestIncomingId,
+    !messagesQuery.isFetching && messagesQuery.isSuccess,
+  );
 
   const rows = useMemo(() => buildRows(messages), [messages]);
 
@@ -161,6 +176,159 @@ export function ChatRoomScreen(): React.JSX.Element {
     setShowJump(event.nativeEvent.contentOffset.y > 480);
   }, []);
 
+  const draft = useConversationState((state) => state.rooms[conversationId]?.draft ?? '');
+  const firstUnread = useConversationState((state) => state.rooms[conversationId]?.firstUnread);
+  const [editing, setEditing] = useState<ChatMessage>();
+  const [editText, setEditText] = useState('');
+  useEffect(
+    () =>
+      registerSessionTeardown(() => {
+        setEditing(undefined);
+        setEditText('');
+      }),
+    [],
+  );
+  const openActions = useCallback(
+    (message: ChatMessage) => {
+      const scope = renderScope;
+      const valid = () => isSessionCurrent(scope);
+      const options = messageActions(message, myId);
+      Alert.alert('Message', undefined, [
+        ...(options.includes('copy')
+          ? [
+              {
+                text: 'Copy',
+                onPress: () => {
+                  if (valid())
+                    void Clipboard.setStringAsync(message.text).catch(() =>
+                      toast.error('Could not copy text.'),
+                    );
+                },
+              },
+            ]
+          : []),
+        ...(canSendMessages && options.includes('edit')
+          ? [
+              {
+                text: 'Edit',
+                onPress: () => {
+                  if (valid()) {
+                    setEditing(message);
+                    setEditText(message.text);
+                  }
+                },
+              },
+            ]
+          : []),
+        ...(canSendMessages && options.includes('delete')
+          ? [
+              {
+                text: 'Delete for everyone',
+                style: 'destructive' as const,
+                onPress: () => {
+                  if (!valid()) return;
+                  Alert.alert(
+                    'Delete for everyone?',
+                    'This permanently removes the message for all participants.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => {
+                          if (valid())
+                            void chatService.deleteMessage(conversationId, message.id).catch(() => {
+                              if (valid())
+                                toast.error(
+                                  'Could not confirm deletion. Refresh history before trying again.',
+                                );
+                            });
+                        },
+                      },
+                    ],
+                  );
+                },
+              },
+            ]
+          : []),
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    },
+    [myId, canSendMessages, conversationId, renderScope],
+  );
+  const saveEdit = () => {
+    if (!editing || !editText.trim() || !isSessionCurrent(renderScope)) return;
+    const scope = renderScope;
+    const id = editing.id,
+      text = editText;
+    Alert.alert('Save edit?', 'Replace this message for all participants?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Save',
+        onPress: () => {
+          if (!isSessionCurrent(scope)) return;
+          void chatService
+            .editMessage(conversationId, id, text)
+            .then(() => {
+              if (isSessionCurrent(scope)) {
+                setEditing(undefined);
+                setEditText('');
+              }
+            })
+            .catch(() => {
+              if (isSessionCurrent(scope))
+                toast.error('Could not confirm edit. Refresh history before trying again.');
+            });
+        },
+      },
+    ]);
+  };
+  const [jumpTarget, setJumpTarget] = useState<string>();
+  const jumpFirstUnread = () => {
+    if (!isSessionCurrent(renderScope)) return;
+    const index = allMessages.findIndex((message) => message.id === firstUnread);
+    if (index < 0 || !firstUnread) return;
+    updateRoom(conversationId, {
+      window: Math.max(roomState(conversationId).window, allMessages.length - index),
+    });
+    setJumpTarget(firstUnread);
+  };
+  const scrollRetry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(scrollRetry.current), []);
+  useEffect(() => {
+    if (!jumpTarget) return;
+    const index = rows.findIndex((row) => row.type === 'message' && row.message.id === jumpTarget);
+    if (index >= 0)
+      requestAnimationFrame(() => {
+        if (!isSessionCurrent(renderScope)) return;
+        listRef.current?.scrollToIndex({ index, animated: true });
+        setJumpTarget(undefined);
+      });
+  }, [rows, jumpTarget, renderScope]);
+  const seenIncoming = useRef<Set<string> | undefined>(undefined);
+  const [newIncoming, setNewIncoming] = useState(0);
+  useEffect(
+    () =>
+      registerSessionTeardown(() => {
+        seenIncoming.current = undefined;
+        setNewIncoming(0);
+        setJumpTarget(undefined);
+        clearTimeout(scrollRetry.current);
+      }),
+    [],
+  );
+  useEffect(() => {
+    const ids = allMessages
+      .filter((message) => !message.local && message.senderId !== myId)
+      .map((message) => message.id);
+    const added = seenIncoming.current
+      ? ids.filter((id) => !seenIncoming.current!.has(id)).length
+      : 0;
+    seenIncoming.current = new Set(ids);
+    if (showJump && added) setNewIncoming((count) => count + added);
+    if (!showJump) setNewIncoming(0);
+  }, [allMessages, myId, showJump]);
+
   const renderItem = useCallback<ListRenderItem<Row>>(
     ({ item }) =>
       item.type === 'divider' ? (
@@ -172,10 +340,12 @@ export function ChatRoomScreen(): React.JSX.Element {
           first={item.first}
           last={item.last}
           onRetry={retry}
-          onDiscard={discard}
+          onResync={resync}
+          onActions={openActions}
+          group={isGroup}
         />
       ),
-    [discard, myId, retry],
+    [isGroup, myId, retry, resync, openActions],
   );
 
   if (notFound) {
@@ -225,12 +395,7 @@ export function ChatRoomScreen(): React.JSX.Element {
             }
             style={styles.person}
           >
-            <Avatar
-              uri={participant.avatarUri}
-              label={participant.name}
-              online={presence === 'Online now'}
-              size={40}
-            />
+            <Avatar uri={participant.avatarUri} label={participant.name} size={40} />
             <View style={styles.personCopy}>
               <Text variant="subheading" numberOfLines={1}>
                 {participant.name}
@@ -238,9 +403,7 @@ export function ChatRoomScreen(): React.JSX.Element {
               {subtitle ? (
                 <Text
                   variant="caption"
-                  color={
-                    typingLabel ? 'primary' : presence === 'Online now' ? 'success' : 'secondary'
-                  }
+                  color={typingLabel ? 'primary' : 'secondary'}
                   numberOfLines={1}
                   accessibilityLiveRegion="polite"
                 >
@@ -261,6 +424,60 @@ export function ChatRoomScreen(): React.JSX.Element {
         <OfflineBanner message="Can't reach the server. We'll keep trying." />
       ) : null}
 
+      <Modal
+        visible={Boolean(editing)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setEditing(undefined);
+          setEditText('');
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            padding: 24,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+          }}
+        >
+          <View
+            style={{
+              padding: 20,
+              gap: 16,
+              backgroundColor: theme.colors.surfaceElevated,
+              borderRadius: 16,
+            }}
+          >
+            <Text variant="subheading">Edit message</Text>
+            <TextInput
+              accessibilityLabel="Edit message text"
+              multiline
+              maxLength={2000}
+              value={editText}
+              onChangeText={setEditText}
+              style={{ color: theme.colors.text, minHeight: 80 }}
+            />
+            <Pressable accessibilityRole="button" onPress={saveEdit}>
+              <Text color="primary">Save edit</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setEditing(undefined);
+                setEditText('');
+              }}
+            >
+              <Text>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+      {!isGroup && firstUnread && allMessages.some((message) => message.id === firstUnread) ? (
+        <Pressable accessibilityRole="button" onPress={jumpFirstUnread} style={{ padding: 12 }}>
+          <Text color="primary">Jump to first unread</Text>
+        </Pressable>
+      ) : null}
       <KeyboardAvoidingScreen>
         <View style={styles.body}>
           {initialLoading ? (
@@ -287,6 +504,18 @@ export function ChatRoomScreen(): React.JSX.Element {
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
               onScroll={onScroll}
+              onScrollToIndexFailed={(info) => {
+                if (!isSessionCurrent(renderScope)) return;
+                listRef.current?.scrollToOffset({
+                  offset: info.averageItemLength * info.index,
+                  animated: false,
+                });
+                clearTimeout(scrollRetry.current);
+                scrollRetry.current = setTimeout(() => {
+                  if (isSessionCurrent(renderScope))
+                    listRef.current?.scrollToIndex({ index: info.index, animated: true });
+                }, 200);
+              }}
               scrollEventThrottle={64}
               // Keep the reader's place when new messages arrive, but follow along if they're at the bottom.
               maintainVisibleContentPosition={{
@@ -322,7 +551,7 @@ export function ChatRoomScreen(): React.JSX.Element {
             >
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Jump to latest messages"
+                accessibilityLabel={`Jump to latest messages. ${newIncoming} new incoming messages`}
                 onPress={scrollToLatest}
                 style={[
                   styles.jump,
@@ -333,11 +562,16 @@ export function ChatRoomScreen(): React.JSX.Element {
                 ]}
               >
                 <Ionicons name="arrow-down" size={20} color={theme.colors.text} />
+                {newIncoming > 0 ? <Text variant="caption">{newIncoming}</Text> : null}
               </Pressable>
             </Animated.View>
           ) : null}
         </View>
         <ChatInput
+          draftValue={draft}
+          onDraftChange={(text) => {
+            if (isSessionCurrent(renderScope)) updateRoom(conversationId, { draft: text });
+          }}
           onSend={onSend}
           onChangeText={typing.onChangeText}
           onAttach={canShareMedia ? () => attach.mutate() : undefined}

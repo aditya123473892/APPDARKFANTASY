@@ -1,4 +1,5 @@
 import type { UserSummary } from '@/features/auth/userModel';
+import axios from 'axios';
 import { displayName } from '@/features/auth/userModel';
 import { userCache } from '@/features/auth/userCache';
 import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRuntime';
@@ -8,10 +9,11 @@ import { ServiceError } from '@/services/errors';
 import { appendAsset } from '@/services/api/multipart';
 import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
-import { emitTyping, getHistory, refreshUnread, socketRequest } from './socketSession';
+import { emitTyping, getHistory, refreshUnread, socketRequest, socketAck } from './socketSession';
 import {
   isObjectId,
   mapMessage,
+  parseMessage,
   parseUserSummary,
   type BackendMessage,
 } from './chatPayload';
@@ -73,6 +75,14 @@ const target = (key: string) => {
     throw new ServiceError('NOT_FOUND');
   return kind === 'group' ? { groupId: id } : { receiver: id };
 };
+function ownMessage(key: string, id: string): Message {
+  const message = queryClient
+    .getQueryData<Message[]>(queryKeys.messages(key))
+    ?.find((row) => row.id === id);
+  if (!message || message.senderId !== sessionIdentity.userId || !isObjectId(id))
+    throw new ServiceError('FORBIDDEN');
+  return message;
+}
 
 export const realChatService: ChatService = {
   async listConversations() {
@@ -132,8 +142,34 @@ export const realChatService: ChatService = {
     return groupConversation(group);
   },
   listMessages: getHistory,
-  async loadOlderMessages() {
-    return false;
+  async editMessage(key, id, text) {
+    const scope = sessionIdentity.generation;
+    const message = ownMessage(key, id);
+    if (!text.trim() || text.length > 2000 || message.media?.length)
+      throw new ServiceError('VALIDATION');
+    const raw = await socketAck('updateMessage', { messageId: id, newMessage: text.trim() });
+    assertSessionCurrent(scope);
+    const parsed = parseMessage(raw);
+    if (!parsed || parsed._id !== id) throw new ServiceError('UNKNOWN');
+    mergeMessage(mapMessage(parsed, key));
+  },
+  async deleteMessage(key, id) {
+    const scope = sessionIdentity.generation;
+    ownMessage(key, id);
+    const raw = await socketRequest<unknown>(
+      'deleteMessage',
+      'messageDeleted',
+      { messageId: id },
+      undefined,
+      (value) =>
+        Boolean(
+          value && typeof value === 'object' && 'messageId' in value && value.messageId === id,
+        ),
+    );
+    assertSessionCurrent(scope);
+    const parsed = parseMessage(raw);
+    if (!parsed || parsed._id !== id) throw new ServiceError('UNKNOWN');
+    mergeMessage(mapMessage(parsed, key), true);
   },
   async sendMessage(input) {
     const scope = sessionIdentity.generation;
@@ -156,6 +192,7 @@ export const realChatService: ChatService = {
           : undefined,
       );
       assertSessionCurrent(scope);
+      if (Number(response.data?.statusCode) >= 500) throw new ServiceError('UNKNOWN');
       const message: Message = {
         ...mapMessage(unwrap<BackendMessage>(response.data), input.conversationId),
         clientId: input.clientId,
@@ -166,6 +203,14 @@ export const realChatService: ChatService = {
       return message;
     } catch (error) {
       assertSessionCurrent(scope);
+      if (axios.isAxiosError(error)) {
+        const status = Number(error.response?.data?.statusCode ?? error.response?.status);
+        if (status === 403) throw new ServiceError('FORBIDDEN');
+        if (status === 404) throw new ServiceError('NOT_FOUND');
+        if ([400, 409, 422].includes(status))
+          throw new ServiceError(status === 409 ? 'CONFLICT' : 'VALIDATION');
+        if (status >= 500) throw new ServiceError('UNKNOWN');
+      }
       throw serviceError(error);
     }
   },
@@ -183,8 +228,9 @@ export const realChatService: ChatService = {
     markPeerRead(key);
   },
   setTyping(key, isTyping) {
+    if (!isTyping || !key.startsWith('user:')) return;
     try {
-      emitTyping({ ...target(key), isTyping });
+      emitTyping({ receiver: key.slice(5) });
     } catch {
       // Typing is best effort; an invalid key has nothing to notify.
     }

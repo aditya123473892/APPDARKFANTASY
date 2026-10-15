@@ -11,9 +11,10 @@ import { ChatAttachment } from './ChatAttachment';
 const statusLabel: Record<ChatMessage['status'], string> = {
   sending: 'Sending',
   sent: 'Sent',
-  delivered: 'Delivered',
+
   read: 'Read',
-  failed: 'Not sent',
+  'failed-definitive': 'Rejected by server',
+  uncertain: 'Send status unknown',
 };
 
 export const MessageBubble = memo(function MessageBubble({
@@ -22,7 +23,9 @@ export const MessageBubble = memo(function MessageBubble({
   first,
   last,
   onRetry,
-  onDiscard,
+  onResync,
+  onActions,
+  group,
 }: {
   message: ChatMessage;
   mine: boolean;
@@ -30,21 +33,49 @@ export const MessageBubble = memo(function MessageBubble({
   first: boolean;
   last: boolean;
   onRetry: (clientId: string) => void;
-  onDiscard: (clientId: string) => void;
+  onResync: (clientId: string) => void;
+  onActions: (message: ChatMessage) => void;
+  group: boolean;
 }): React.JSX.Element {
   const { theme } = useTheme();
-  const failed = message.status === 'failed';
+  const failed = message.status === 'failed-definitive' || message.status === 'uncertain';
   const time = formatMessageTime(message.createdAt);
 
   const openFailedActions = (): void => {
     if (!message.clientId) return;
     const clientId = message.clientId;
-    // Retrying reuses the message's clientId, so the server never stores it twice.
-    Alert.alert('Message not sent', 'Try sending it again, or delete it from this device.', [
-      { text: 'Retry', onPress: () => onRetry(clientId) },
-      { text: 'Delete', style: 'destructive', onPress: () => onDiscard(clientId) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    const uncertain = message.status === 'uncertain';
+    const canRetry = !uncertain || message.resync === 'absent';
+    Alert.alert(
+      uncertain ? 'Send status unknown' : 'Server rejected message',
+      uncertain
+        ? message.resync === 'present'
+          ? 'A matching own message exists in the refreshed history. Its identity cannot be proven; sending again is withheld.'
+          : 'Refresh history first. Even if absent, sending again may create a duplicate if the original arrives later.'
+        : 'The server rejected this message. You can try again.',
+      [
+        ...(uncertain ? [{ text: 'Resync history', onPress: () => onResync(clientId) }] : []),
+        ...(canRetry
+          ? [
+              {
+                text: 'Send again',
+                onPress: () =>
+                  Alert.alert(
+                    'Send again?',
+                    uncertain
+                      ? 'The refreshed history shows no matching message. The original may still arrive later, so this can create a duplicate.'
+                      : 'Send this message again?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Send again', onPress: () => onRetry(clientId) },
+                    ],
+                  ),
+              },
+            ]
+          : []),
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
   };
 
   const statusIcon =
@@ -52,7 +83,7 @@ export const MessageBubble = memo(function MessageBubble({
       ? 'time-outline'
       : message.status === 'sent'
         ? 'checkmark'
-        : message.status === 'failed'
+        : failed
           ? 'alert-circle'
           : 'checkmark-done';
   const statusColor =
@@ -73,10 +104,10 @@ export const MessageBubble = memo(function MessageBubble({
       <Pressable
         accessible
         accessibilityRole={failed ? 'button' : 'text'}
-        accessibilityLabel={`${mine ? 'You' : 'Them'}: ${message.text}. ${time}${mine ? `. ${statusLabel[message.status]}` : ''}`}
-        accessibilityHint={failed ? 'Opens options to retry or delete' : undefined}
-        disabled={!failed}
-        onPress={openFailedActions}
+        accessibilityLabel={`${mine ? 'You' : 'Them'}: ${message.text}. ${time}${mine && (!group || message.local) ? `. ${statusLabel[message.status]}` : ''}`}
+        accessibilityHint={failed ? 'Opens send-status options' : 'Long press for message actions'}
+        onPress={failed ? openFailedActions : undefined}
+        onLongPress={() => onActions(message)}
         style={[
           styles.bubble,
           mine
@@ -130,7 +161,9 @@ export const MessageBubble = memo(function MessageBubble({
               <Text variant="caption" color="muted">
                 {message.status === 'sending' ? 'Sending…' : time}
               </Text>
-              {mine ? <Ionicons name={statusIcon} size={14} color={statusColor} /> : null}
+              {mine && (!group || message.local) ? (
+                <Ionicons name={statusIcon} size={14} color={statusColor} />
+              ) : null}
             </>
           )}
         </View>

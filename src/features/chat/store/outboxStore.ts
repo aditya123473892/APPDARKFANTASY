@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { registerSessionTeardown } from '@/features/auth/sessionRuntime';
 
 /**
  * Messages the user has sent that the server hasn't confirmed yet. Kept outside the
@@ -10,15 +11,16 @@ export type OutboxItem = {
   conversationId: string;
   text: string;
   createdAt: string;
-  status: 'sending' | 'failed';
-  /** The last failure was a connection problem: resend automatically after reconnecting. */
-  retryable?: boolean;
+  status: 'sending' | 'failed-definitive' | 'uncertain';
+  resync?: 'present' | 'absent';
+  baselineIds?: string[];
 };
 
 type OutboxState = {
   items: Record<string, OutboxItem>;
   upsert: (item: OutboxItem) => void;
-  setStatus: (clientId: string, status: OutboxItem['status'], retryable?: boolean) => void;
+  setStatus: (clientId: string, status: OutboxItem['status']) => void;
+  setResync: (clientId: string, resync: OutboxItem['resync']) => void;
   remove: (clientId: string) => void;
   clear: () => void;
 };
@@ -26,11 +28,16 @@ type OutboxState = {
 export const useOutbox = create<OutboxState>((set) => ({
   items: {},
   upsert: (item) => set((state) => ({ items: { ...state.items, [item.clientId]: item } })),
-  setStatus: (clientId, status, retryable) =>
+  setResync: (clientId, resync) =>
+    set((state) => {
+      const item = state.items[clientId];
+      return item ? { items: { ...state.items, [clientId]: { ...item, resync } } } : state;
+    }),
+  setStatus: (clientId, status) =>
     set((state) => {
       const item = state.items[clientId];
       return item
-        ? { items: { ...state.items, [clientId]: { ...item, status, retryable } } }
+        ? { items: { ...state.items, [clientId]: { ...item, status, resync: undefined } } }
         : state;
     }),
   remove: (clientId) =>
@@ -41,3 +48,10 @@ export const useOutbox = create<OutboxState>((set) => ({
     }),
   clear: () => set({ items: {} }),
 }));
+
+export function disconnectSending(): void {
+  const state = useOutbox.getState();
+  for (const item of Object.values(state.items))
+    if (item.status === 'sending') state.setStatus(item.clientId, 'uncertain');
+}
+registerSessionTeardown(() => useOutbox.getState().clear());

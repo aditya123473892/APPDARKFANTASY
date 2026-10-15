@@ -60,7 +60,7 @@ export async function prefetchInbox(
         while (index < items.length && allowed()) {
           assertSessionCurrent(scope);
           const item = items[index++]!;
-        if (!force && item.historyLoaded) continue;
+          if (!force && item.historyLoaded) continue;
           try {
             await load(item.id);
             assertSessionCurrent(scope);

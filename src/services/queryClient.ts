@@ -23,3 +23,6 @@ export const queryClient = new QueryClient({
     mutations: { retry: false },
   },
 });
+
+// Chat histories and local search live for the session; auth teardown removes them.
+queryClient.setQueryDefaults(['chat'], { gcTime: Infinity });

@@ -1,11 +1,20 @@
+import { queryClient } from '@/services/queryClient';
+import { startSend, resyncSend, sendAgain } from '../services/sendState';
+import {
+  LOCAL_WINDOW,
+  useConversationState,
+  roomState,
+  updateRoom,
+  localWindow,
+  captureFirstUnread,
+} from '../store/conversationStore';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { AppState } from 'react-native';
 import { useAppState } from '@/hooks/useAppState';
 import { useCan } from '@/features/auth/hooks/useCurrentUser';
-import { hasCapability } from '@/features/auth/permissions';
-import { hasOlderHistory, useChatConnection } from '../services/chatState';
+import { useChatConnection } from '../services/chatState';
 import { useTypingUsers } from '../store/typingStore';
 import { userCache } from '@/features/auth/userCache';
 import { displayName } from '@/features/auth/userModel';
@@ -14,16 +23,21 @@ import { useAuthStore } from '@/features/auth/store/authStore';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { queryKeys } from '@/services/queryKeys';
 import { chatService } from '../services';
-import { useOutbox, type OutboxItem } from '../store/outboxStore';
+import { useOutbox } from '../store/outboxStore';
 import type { Conversation, LocalMessageStatus, Message } from '../types';
-import { sessionIdentity, isSessionCurrent } from '@/features/auth/sessionRuntime';
-import { toast } from '@/components/ui/Toast';
-import { describeError, isServiceError } from '@/services/errors';
-import { createClientId } from '@/utils/clientId';
+import {
+  sessionIdentity,
+  isSessionCurrent,
+  registerSessionTeardown,
+} from '@/features/auth/sessionRuntime';
 import { INBOX_POLL_MS, pollingEnabled } from '../services/inbox';
 
 /** A message as rendered: either server-confirmed or still in the local outbox. */
-export type ChatMessage = Omit<Message, 'status'> & { status: LocalMessageStatus; local: boolean };
+export type ChatMessage = Omit<Message, 'status'> & {
+  status: LocalMessageStatus;
+  local: boolean;
+  resync?: 'present' | 'absent';
+};
 
 const MESSAGE_POLL_MS = 15_000;
 
@@ -82,12 +96,15 @@ export function useVisiblePresence(conversation: Conversation | undefined) {
 export function useMessages(conversationId: string, enabled = true) {
   const myId = useMyId();
   const readReceipts = usePreferences((state) => state.readReceipts);
+  const visible = useChatVisibility();
   const query = useQuery({
     queryKey: queryKeys.messages(conversationId),
     queryFn: () => chatService.listMessages(conversationId),
+    // A live insertion may have created a partial query cache before this screen mounted.
+    refetchOnMount: 'always',
     enabled: enabled && Boolean(conversationId),
     // Socket events merge immediately; polling also catches missed server updates.
-    refetchInterval: MESSAGE_POLL_MS,
+    refetchInterval: visible ? MESSAGE_POLL_MS : false,
   });
   const outbox = useOutbox(
     useShallow((state) =>
@@ -114,6 +131,7 @@ export function useMessages(conversationId: string, enabled = true) {
         createdAt: item.createdAt,
         status: item.status,
         local: true,
+        resync: item.resync,
       }));
     return [
       ...confirmed.map((message) => ({
@@ -126,113 +144,40 @@ export function useMessages(conversationId: string, enabled = true) {
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }, [conversationId, myId, outbox, query.data, readReceipts]);
 
-  // Older pages are loaded on demand when the reader scrolls to the top.
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [olderError, setOlderError] = useState(false);
-  const loading = useRef(false);
-  const hasOlder = Boolean(query.data?.length) && hasOlderHistory(conversationId);
+  const count = useConversationState(
+    (state) => state.rooms[conversationId]?.window ?? LOCAL_WINDOW,
+  );
   const loadOlder = useCallback(async () => {
-    if (loading.current || !hasOlderHistory(conversationId)) return;
-    loading.current = true;
-    setLoadingOlder(true);
-    setOlderError(false);
-    try {
-      await chatService.loadOlderMessages(conversationId);
-    } catch {
-      setOlderError(true);
-    } finally {
-      loading.current = false;
-      setLoadingOlder(false);
-    }
+    updateRoom(conversationId, { window: roomState(conversationId).window + LOCAL_WINDOW });
   }, [conversationId]);
-
-  return { ...query, messages, hasOlder, loadOlder, loadingOlder, olderError };
+  return {
+    ...query,
+    allMessages: messages,
+    messages: localWindow(messages, count),
+    hasOlder: messages.length > count,
+    loadOlder,
+    loadingOlder: false,
+    olderError: false,
+  };
 }
 
 export { createClientId } from '@/utils/clientId';
 
 export function useSendMessage(conversationId: string) {
-  const queryClient = useQueryClient();
-  const inFlight = useRef(new Set<string>());
-
-  const deliver = useCallback(
-    async (item: OutboxItem): Promise<void> => {
-      // Guard against double taps on "retry" firing the same request twice.
-      if (inFlight.current.has(item.clientId)) return;
-      inFlight.current.add(item.clientId);
-      const outbox = useOutbox.getState();
-      const scope = sessionIdentity.generation;
-      const auth = useAuthStore.getState();
-      if (auth.status !== 'authenticated' || !hasCapability(auth.roles, 'canSendMessages')) {
-        inFlight.current.delete(item.clientId);
-        toast.error("You don't have permission to send messages.");
-        return;
-      }
-      outbox.setStatus(item.clientId, 'sending');
-      try {
-        const message = await chatService.sendMessage({
-          conversationId: item.conversationId,
-          text: item.text,
-          clientId: item.clientId,
-        });
-        if (!isSessionCurrent(scope)) return;
-        queryClient.setQueryData<Message[]>(queryKeys.messages(item.conversationId), (current) =>
-          !(current ?? []).some((existing) => existing.id === message.id)
-            ? [...(current ?? []), message]
-            : current,
-        );
-        useOutbox.getState().remove(item.clientId);
-      } catch (error) {
-        if (!isSessionCurrent(scope)) return;
-        // Connection failures are retried automatically once the chat reconnects;
-        // the clientId makes a retry of an already-stored message harmless.
-        const retryable = isServiceError(error, 'NETWORK') || isServiceError(error, 'UNKNOWN');
-        useOutbox.getState().setStatus(item.clientId, 'failed', retryable);
-        if (!retryable) toast.error(describeError(error, "This message couldn't be sent."));
-      } finally {
-        inFlight.current.delete(item.clientId);
-      }
-    },
-    [queryClient],
-  );
-
+  const scope = sessionIdentity.generation;
   const send = useCallback(
-    (text: string): void => {
-      const body = text.trim();
-      if (!body || !conversationId) return;
-      const item: OutboxItem = {
-        clientId: createClientId(),
-        conversationId,
-        text: body,
-        createdAt: new Date().toISOString(),
-        status: 'sending',
-      };
-      useOutbox.getState().upsert(item);
-      void deliver(item);
+    (text: string) => {
+      if (isSessionCurrent(scope)) startSend(conversationId, text, chatService);
     },
-    [conversationId, deliver],
+    [conversationId, scope],
   );
-
-  const retry = useCallback(
-    (clientId: string): void => {
-      const item = useOutbox.getState().items[clientId];
-      if (item && item.conversationId === conversationId) void deliver(item);
-    },
-    [conversationId, deliver],
-  );
-
-  const discard = useCallback((clientId: string) => useOutbox.getState().remove(clientId), []);
-
-  // Resend messages that failed for connection reasons when the chat reconnects.
-  const ready = useChatConnection((state) => state.ready);
-  useEffect(() => {
-    if (!ready) return;
-    for (const item of Object.values(useOutbox.getState().items))
-      if (item.conversationId === conversationId && item.status === 'failed' && item.retryable)
-        void deliver(item);
-  }, [conversationId, deliver, ready]);
-
-  return { send, retry, discard };
+  const retry = useCallback((id: string) => {
+    void sendAgain(id, chatService).catch(() => undefined);
+  }, []);
+  const resync = useCallback((id: string) => {
+    void resyncSend(id, chatService).catch(() => undefined);
+  }, []);
+  return { send, retry, resync };
 }
 
 /** Names of the people typing in a conversation, excluding the viewer. */
@@ -255,16 +200,16 @@ const TYPING_REFRESH_MS = 3000;
 
 /** Tells the other participants while the viewer is typing; throttled, and stops on send or clear. */
 export function useTypingEmitter(conversationId: string) {
+  const scope = sessionIdentity.generation;
   const lastSent = useRef(0);
   const stop = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stopTyping = useCallback(() => {
     clearTimeout(stop.current);
-    if (lastSent.current) chatService.setTyping(conversationId, false);
-    lastSent.current = 0;
-  }, [conversationId]);
+  }, []);
   const onChangeText = useCallback(
     (text: string) => {
-      if (!text.trim()) return stopTyping();
+      if (!isSessionCurrent(scope)) return;
+      if (!conversationId.startsWith('user:') || !text.trim()) return stopTyping();
       const now = Date.now();
       if (now - lastSent.current > TYPING_REFRESH_MS) {
         lastSent.current = now;
@@ -273,9 +218,17 @@ export function useTypingEmitter(conversationId: string) {
       clearTimeout(stop.current);
       stop.current = setTimeout(stopTyping, TYPING_REFRESH_MS + 1000);
     },
-    [conversationId, stopTyping],
+    [conversationId, stopTyping, scope],
   );
   useEffect(() => stopTyping, [stopTyping]);
+  useEffect(
+    () =>
+      registerSessionTeardown(() => {
+        stopTyping();
+        lastSent.current = 0;
+      }),
+    [stopTyping],
+  );
   return { onChangeText, stopTyping };
 }
 
@@ -283,6 +236,7 @@ export function useTypingEmitter(conversationId: string) {
 export function useMarkConversationRead(
   conversationId: string,
   latestIncomingId: string | undefined,
+  historyReady = true,
 ) {
   const [focused, setFocused] = useState(false);
   const focus = useRef(false);
@@ -294,35 +248,50 @@ export function useMarkConversationRead(
   const scope = sessionIdentity.generation;
   useFocusEffect(
     useCallback(() => {
+      updateRoom(conversationId, { unreadCaptured: false, firstUnread: undefined });
       focus.current = true;
       setFocused(true);
       return () => {
         focus.current = false;
         setFocused(false);
       };
-    }, []),
+    }, [conversationId]),
   );
   useEffect(() => {
     // Direct read receipts are visible to the sender, so they follow the
-    // reciprocal preference. A group read cursor is private to the viewer.
-    const group = conversationId.startsWith('group:');
+    // reciprocal preference. This contract has no group read command.
+    const history = queryClient.getQueryData<Message[]>(queryKeys.messages(conversationId));
+    if (historyReady && focused && appState === 'active' && history)
+      captureFirstUnread(conversationId, history, sessionIdentity.userId ?? '');
     const allowed = () =>
       focus.current &&
       AppState.currentState === 'active' &&
       useChatConnection.getState().ready &&
       isSessionCurrent(scope) &&
-      (group || usePreferences.getState().readReceipts) &&
+      usePreferences.getState().readReceipts &&
       useAuthStore.getState().status === 'authenticated';
     if (
-      (group || conversationId.startsWith('user:')) &&
+      conversationId.startsWith('user:') &&
+      historyReady &&
       latestIncomingId &&
       focused &&
       appState === 'active' &&
       ready &&
       canSend &&
-      (group || receipts)
+      receipts
     ) {
       void chatService.markRead(conversationId, allowed).catch(() => undefined);
     }
-  }, [conversationId, latestIncomingId, focused, appState, ready, epoch, canSend, receipts, scope]);
+  }, [
+    conversationId,
+    latestIncomingId,
+    historyReady,
+    focused,
+    appState,
+    ready,
+    epoch,
+    canSend,
+    receipts,
+    scope,
+  ]);
 }

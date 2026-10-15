@@ -1,4 +1,5 @@
 import { messagePreview } from './inbox';
+import { useOutbox } from '../store/outboxStore';
 import { create } from 'zustand';
 import { sessionIdentity, registerSessionTeardown } from '@/features/auth/sessionRuntime';
 import { queryClient } from '@/services/queryClient';
@@ -9,9 +10,6 @@ import { mediaUrl } from '@/services/api/backend';
 import type { Conversation, Message } from '../types';
 import { conversationKey, isObjectId, mapMessage, parseMessage } from './chatPayload';
 
-/** Messages per history request; fewer rows than this means the start of the conversation. */
-export const HISTORY_PAGE = 50;
-
 export const useChatConnection = create(() => ({ ready: false, epoch: 0 }));
 export function setChatReady(ready: boolean): void {
   useChatConnection.setState((state) => ({ ready, epoch: state.epoch + 1 }));
@@ -21,16 +19,8 @@ const overlays = new Map<string, Map<string, { version: number; message: Message
 let version = 0;
 /** Unread direct messages by message ID, from the server's unread arrays and live events. */
 let unread = new Map<string, string>();
-/** Server-reported direct counts, used only while the realtime unread list is unavailable. */
-/** Group unread counts (server cursor based), advanced by live group messages. */
-const groupUnread = new Map<string, number>();
-const countedGroupMessages = new Set<string>();
-/** Whether messages older than the oldest loaded one may exist, per conversation. */
-const olderAvailable = new Map<string, boolean>();
-
 export const knownHistories = () => [...histories];
 export const historyVersion = () => version;
-export const hasOlderHistory = (key: string) => olderAvailable.get(key) ?? false;
 export function unreadFor(key: string): number {
   if (key.startsWith('group:')) return 0;
   return [...unread.values()].filter((value) => value === key).length;
@@ -78,6 +68,12 @@ function updatePreview(key: string, rows: Message[], complete = false): void {
 export function mergeMessage(message: Message, deleted = false): void {
   const key = message.conversationId;
   const next = preserveRead(message);
+  if (!deleted && message.senderId === sessionIdentity.userId) {
+    const state = useOutbox.getState();
+    for (const item of Object.values(state.items))
+      if (item.conversationId === key && item.status === 'uncertain' && item.text === message.text)
+        state.setResync(item.clientId, undefined);
+  }
   const journal = overlays.get(key) ?? new Map();
   journal.set(message.id, { version: ++version, message: deleted ? null : next });
   overlays.set(key, journal);
@@ -98,7 +94,7 @@ export function mergeMessage(message: Message, deleted = false): void {
  * Applies a server message event. `received` marks a newly delivered message
  * (receiveMessage/receiveGroupMessage) as opposed to an edit or deletion.
  */
-export function acceptMessage(value: unknown, deleted = false, received = false): boolean {
+export function acceptMessage(value: unknown, deleted = false, _received = false): boolean {
   const raw = parseMessage(value);
   if (!raw) return false;
   const key = conversationKey(raw);
@@ -114,17 +110,6 @@ export function acceptMessage(value: unknown, deleted = false, received = false)
     previous?.status !== 'read'
   )
     unread.set(raw._id, key);
-  if (
-    received &&
-    !deleted &&
-    raw.groupId &&
-    !previous &&
-    senderId(raw.sender) !== sessionIdentity.userId &&
-    !countedGroupMessages.has(raw._id)
-  ) {
-    countedGroupMessages.add(raw._id);
-    groupUnread.set(key, (groupUnread.get(key) ?? 0) + 1);
-  }
   const message = mapMessage(raw, key);
   if (!raw.groupId && !deleted) {
     const peerId = key.slice(5);
@@ -154,31 +139,9 @@ export function acceptMessage(value: unknown, deleted = false, received = false)
   mergeMessage(message, deleted);
   return true;
 }
-/**
- * Merges the newest page of a conversation. Changes that arrived while the
- * request was in flight take precedence over the snapshot. Older pages loaded
- * earlier are kept when the snapshot is a full page (so it cannot cover them).
- */
-export function reconcileHistory(
-  key: string,
-  rows: Message[],
-  started: number,
-  pageLimit?: number,
-): Message[] {
+/** Full-history snapshot; realtime edits/deletions received during loading win. */
+export function reconcileHistory(key: string, rows: Message[], started: number): Message[] {
   const result = new Map(rows.map((message) => [message.id, preserveRead(message)]));
-  const fullPage = pageLimit !== undefined && rows.length >= pageLimit;
-  let keptOlder = false;
-  if (fullPage) {
-    const oldest = sorted([...rows])[0]!;
-    for (const row of queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? []) {
-      if (!result.has(row.id) && compareMessages(row, oldest) < 0) {
-        result.set(row.id, row);
-        keptOlder = true;
-      }
-    }
-  }
-  if (pageLimit !== undefined)
-    olderAvailable.set(key, keptOlder ? (olderAvailable.get(key) ?? true) : fullPage);
   for (const [id, entry] of overlays.get(key) ?? []) {
     if (entry.version <= started) continue;
     if (entry.message) result.set(id, preserveRead(entry.message));
@@ -188,22 +151,6 @@ export function reconcileHistory(
   queryClient.setQueryData(queryKeys.messages(key), merged);
   updatePreview(key, merged, true);
   // Only prune entries represented by the snapshot; another request may still be in flight.
-  return merged;
-}
-/** Adds an older page in front of the loaded history. */
-export function prependHistory(key: string, rows: Message[], pageLimit: number): Message[] {
-  const journal = overlays.get(key);
-  const current = queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [];
-  const result = new Map(current.map((message) => [message.id, message]));
-  for (const row of rows) {
-    if (result.has(row.id)) continue;
-    const overlay = journal?.get(row.id);
-    if (overlay && !overlay.message) continue; // deleted while the page was loading
-    result.set(row.id, preserveRead(overlay?.message ?? row));
-  }
-  olderAvailable.set(key, rows.length >= pageLimit);
-  const merged = sorted([...result.values()]);
-  queryClient.setQueryData(queryKeys.messages(key), merged);
   return merged;
 }
 export function acceptUnread(value: unknown): boolean {
@@ -225,18 +172,6 @@ export function acceptUnread(value: unknown): boolean {
   unread = next;
   refreshUnreadCounts();
   return true;
-}
-/** Server counts from the conversation list, used until a realtime unread list arrives. */
-export function acceptServerUnread(
-  direct: Map<string, number> | null,
-  groups: Map<string, number>,
-): void {
-  for (const [key, count] of groups) groupUnread.set(key, count);
-  refreshUnreadCounts();
-}
-export function markGroupRead(key: string): void {
-  groupUnread.set(key, 0);
-  refreshUnreadCounts();
 }
 export function acceptRead(userId: string): void {
   const key = `user:${userId}`;
@@ -271,7 +206,6 @@ export function acceptGroupRemoved(value: unknown): void {
   const key = `group:${groupId}`;
   histories.delete(key);
   overlays.delete(key);
-  groupUnread.delete(key);
   queryClient.setQueryData<Conversation[]>(queryKeys.conversations, (items) =>
     items?.filter((item) => item.id !== key),
   );
@@ -283,9 +217,7 @@ registerSessionTeardown(() => {
   histories.clear();
   overlays.clear();
   unread.clear();
-  groupUnread.clear();
-  countedGroupMessages.clear();
-  olderAvailable.clear();
   version = 0;
+  queryClient.removeQueries({ queryKey: ['chat'] });
   setChatReady(false);
 });

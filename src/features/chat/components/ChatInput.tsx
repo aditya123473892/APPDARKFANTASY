@@ -17,6 +17,8 @@ export function ChatInput({
   canSendMessages = false,
   canShareMedia = false,
   placeholder = 'Write a message…',
+  draftValue,
+  onDraftChange,
 }: {
   onSend: (value: string) => void;
   /** Called with the draft as it changes (e.g. for typing indicators). */
@@ -28,8 +30,15 @@ export function ChatInput({
   canSendMessages?: boolean;
   canShareMedia?: boolean;
   placeholder?: string;
+  draftValue?: string;
+  onDraftChange?: (text: string) => void;
 }): React.JSX.Element {
-  const [value, setValue] = useState('');
+  const [localValue, setLocalValue] = useState('');
+  const value = draftValue ?? localValue;
+  const setValue = (text: string) => {
+    if (draftValue === undefined) setLocalValue(text);
+    onDraftChange?.(text);
+  };
   const lastSend = useRef(0);
   const { theme } = useTheme();
   const canSend = !disabled && canSendMessages && value.trim().length > 0;

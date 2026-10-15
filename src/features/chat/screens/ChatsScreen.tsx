@@ -1,6 +1,6 @@
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { AppState, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { Header, Screen } from '@/components/layout';
@@ -37,35 +37,45 @@ export function ChatsScreen(): React.JSX.Element {
   const { theme } = useTheme();
   const myId = useMyId();
   const visible = useChatVisibility();
-  const visibility = useRef(visible);
-  useEffect(() => { visibility.current = visible; }, [visible]);
   const [previewRefresh, setPreviewRefresh] = useState(0);
+  const prefetchTasks = useRef(0);
   const [search, setSearch] = useState('');
   const query = useDebounce(search.trim().toLowerCase(), 200);
   const { data, error, isPending, isError, isRefetchError, refetch, isRefetching } =
     useConversations(visible);
   const inboxKeys = data?.map((item) => item.id).join('|');
   const latestData = useRef(data);
-  useEffect(() => { latestData.current = data; }, [data]);
+  useEffect(() => {
+    latestData.current = data;
+  }, [data]);
   useEffect(() => {
     if (!visible) return;
-    const timer = setInterval(() => setPreviewRefresh((value) => value + 1), INBOX_POLL_MS);
+    const timer = setInterval(() => {
+      if (prefetchTasks.current === 0) setPreviewRefresh((value) => value + 1);
+    }, INBOX_POLL_MS);
     return () => clearInterval(timer);
   }, [visible]);
 
-  useEffect(() => {
-    if (!visible || !latestData.current) return;
-    let mounted = true;
-    void prefetchInbox(
-      latestData.current,
-      (key) => chatService.listMessages(key),
-      () => mounted && visibility.current,
-      previewRefresh > 0,
-    ).catch(() => undefined);
-    return () => {
-      mounted = false;
-    };
-  }, [inboxKeys, visible, previewRefresh]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!visible || !inboxKeys || !latestData.current) return;
+      let mounted = true;
+      prefetchTasks.current++;
+      void prefetchInbox(
+        latestData.current,
+        (key) => chatService.listMessages(key),
+        () => mounted && AppState.currentState === 'active',
+        previewRefresh > 0,
+      )
+        .catch(() => undefined)
+        .finally(() => {
+          prefetchTasks.current--;
+        });
+      return () => {
+        mounted = false;
+      };
+    }, [inboxKeys, visible, previewRefresh]),
+  );
 
   // Most recent activity first; live messages update `updatedAt` between refetches.
   const conversations = useMemo(() => localSearch(data ?? [], query), [data, query]);

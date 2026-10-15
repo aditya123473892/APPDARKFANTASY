@@ -1,12 +1,11 @@
 import type { Presence } from '@/types';
 
-/** Server-confirmed delivery states. `sending` and `failed` only exist client-side in the outbox. */
-export type MessageStatus = 'sent' | 'delivered' | 'read';
-export type LocalMessageStatus = MessageStatus | 'sending' | 'failed';
+export type MessageStatus = 'sent' | 'read';
+export type LocalMessageStatus = MessageStatus | 'sending' | 'failed-definitive' | 'uncertain';
 
 export type Message = {
   id: string;
-  /** Idempotency key: the server stores a message once per key and echoes it back. */
+  /** Local REST-response correlation only; never sent as an idempotency key. */
   clientId?: string;
   conversationId: string;
   senderId: string;

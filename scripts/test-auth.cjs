@@ -560,7 +560,7 @@ async function until(condition) {
   assert.fail('Expected asynchronous condition did not complete');
 }
 
-function chatHarness() {
+function chatHarness(overrides = {}) {
   const { EventEmitter } = require('node:events');
   const sockets = [];
   const history = new Map();
@@ -585,6 +585,16 @@ function chatHarness() {
     }
     emit(name, payload, ack) {
       this.packets.push({ name, payload });
+      if (name === 'updateMessage' || name === 'deleteMessage') {
+        const message = [...history.values()].flat().find((row) => row._id === payload.messageId);
+        setTimeout(() => {
+          if (name === 'updateMessage') {
+            const updated = { ...message, message: payload.newMessage };
+            this.server('messageUpdated', updated);
+            ack(updated);
+          } else this.server('messageDeleted', { ...message, messageId: payload.messageId });
+        }, 0);
+      }
       if (name === 'joinGroup') setTimeout(() => ack({ groupId: payload }), 0);
       if (name === 'getUnreadCount' || name === 'markAsRead')
         setTimeout(() => this.server('unreadMessageCount', []), 0);
@@ -610,6 +620,7 @@ function chatHarness() {
         return socket;
       },
     },
+    ...overrides,
   });
   const me = '111111111111111111111111';
   const other = '222222222222222222222222';
@@ -852,7 +863,7 @@ test('Stage A composer and attachment capabilities are independent', () => {
   assert.equal(sends, 1);
 });
 
-test('Stage A read hook gates focus, foreground and synchronization; groups read without receipts', async () => {
+test('read hook gates focus, foreground and synchronization; first unread is captured before direct read', async () => {
   const preferences = { readReceipts: true };
   const usePreferences = (selector) => selector(preferences);
   usePreferences.getState = () => preferences;
@@ -887,7 +898,8 @@ test('Stage A read hook gates focus, foreground and synchronization; groups read
     '../services': {
       chatService: {
         markRead: async (key, allowed) => {
-          reads.push({ key, allowed });
+          const state = h.load('src/features/chat/store/conversationStore.ts');
+          reads.push({ key, allowed, firstUnread: state.roomState(key).firstUnread });
         },
       },
     },
@@ -896,10 +908,14 @@ test('Stage A read hook gates focus, foreground and synchronization; groups read
   h.useAuthStore.setState({ status: 'authenticated', roles: ['user'] });
   const { useMarkConversationRead } = h.load('src/features/chat/hooks/useChat.ts');
   const key = 'user:222222222222222222222222';
+  h.queryData.set(JSON.stringify(['chat', 'messages', key]), [
+    { id: 'aaaaaaaaaaaaaaaaaaaaaaaa', senderId: '222222222222222222222222', status: 'sent' },
+  ]);
   useMarkConversationRead(key, 'aaaaaaaaaaaaaaaaaaaaaaaa');
   effects.splice(0).forEach((fn) => fn());
   assert.equal(reads.length, 1);
   assert.equal(reads[0].allowed(), true);
+  assert.equal(reads[0].firstUnread, 'aaaaaaaaaaaaaaaaaaaaaaaa');
   app.currentState = 'background';
   assert.equal(reads[0].allowed(), false);
   app.currentState = 'active';
@@ -914,11 +930,9 @@ test('Stage A read hook gates focus, foreground and synchronization; groups read
   assert.equal(reads.length, 1); // direct receipts follow the reciprocal preference
   useMarkConversationRead('group:333333333333333333333333', 'aaaaaaaaaaaaaaaaaaaaaaaa');
   effects.splice(0).forEach((fn) => fn());
-  assert.equal(reads.length, 2);
-  assert.equal(reads[1].key, 'group:333333333333333333333333');
+  assert.equal(reads.length, 1); // no group read event exists
   h.runtime.teardownSession();
   assert.equal(reads[0].allowed(), false);
-  assert.equal(reads[1].allowed(), false);
 });
 
 function harness(overrides = {}) {
@@ -968,8 +982,10 @@ function harness(overrides = {}) {
       },
     },
     '@/features/chat/store/outboxStore': {
+      disconnectSending: () => {},
       useOutbox: {
         getState: () => ({
+          items: {},
           clear: () => {
             counters.outbox++;
           },
@@ -1012,8 +1028,9 @@ function harness(overrides = {}) {
         __DEV__: false,
         URL,
         AbortController,
-        setTimeout,
-        clearTimeout,
+        Date: overrides.__date ?? Date,
+        setTimeout: overrides.__setTimeout ?? setTimeout,
+        clearTimeout: overrides.__clearTimeout ?? clearTimeout,
         console: { debug: (...args) => logs.push(args), error: (...args) => logs.push(args) },
       },
       { filename },
@@ -1282,12 +1299,12 @@ test('logout during GET backoff cancels retry instead of sending an old token', 
   assert.equal(calls, 1);
 });
 
-test('server-echoed clientId reconciles messages; invalid keys are dropped', () => {
+test('server payloads cannot establish client-side correlation or idempotency', () => {
   const h = chatHarness();
   const { parseMessage, mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
   const raw = backendMessage(h.me, h.other, { clientId: 'abc123-xyz' });
-  assert.equal(parseMessage(raw).clientId, 'abc123-xyz');
-  assert.equal(mapMessage(raw, `user:${h.other}`).clientId, 'abc123-xyz');
+  assert.equal(parseMessage(raw).clientId, undefined);
+  assert.equal(mapMessage(raw, `user:${h.other}`).clientId, undefined);
   assert.equal(parseMessage({ ...raw, clientId: 'x' }).clientId, undefined);
   assert.equal(parseMessage({ ...raw, clientId: '<script>alert(1)</script>' }).clientId, undefined);
   h.runtime.teardownSession();
@@ -1309,21 +1326,10 @@ test('full histories reconcile snapshots and never send pagination fields', asyn
   const page = (from, to) => Array.from({ length: to - from }, (_, i) => message(from + i));
   const queryKey = JSON.stringify(['chat', 'messages', key]);
 
-  h.state.reconcileHistory(key, page(50, 100), h.state.historyVersion(), 50);
-  assert.equal(h.state.hasOlderHistory(key), true);
-  h.state.prependHistory(key, page(10, 50), 50);
-  assert.equal(h.state.hasOlderHistory(key), false);
-  assert.equal(h.queryData.get(queryKey).length, 90);
-  // A refresh of the newest page (one new message) must not drop older pages.
-  h.state.reconcileHistory(key, page(51, 101), h.state.historyVersion(), 50);
-  const rows = h.queryData.get(queryKey);
-  assert.equal(rows.length, 91);
-  assert.equal(rows[0].text, 'm10');
-  assert.equal(rows.at(-1).text, 'm100');
-  // A short page is the whole conversation: rows missing from it were deleted.
-  h.state.reconcileHistory(key, page(98, 101), h.state.historyVersion(), 50);
+  h.state.reconcileHistory(key, page(0, 100), h.state.historyVersion());
+  assert.equal(h.queryData.get(queryKey).length, 100);
+  h.state.reconcileHistory(key, page(98, 101), h.state.historyVersion());
   assert.equal(h.queryData.get(queryKey).length, 3);
-
   await h.transport.getHistory(key);
   const request = h.sockets[0].packets.find((packet) => packet.name === 'getChatHistory');
   assert.equal(JSON.stringify(request.payload), JSON.stringify({ user2: h.other }));
@@ -1366,28 +1372,12 @@ test('typing indicators come from other participants and clear on delivery', asy
   socket.server('receiveMessage', backendMessage(h.me, h.other));
   assert.deepEqual(Object.keys(typing.useTypingStore.getState().typing[direct]), []);
   socket.server('typing', { sender: h.other, groupId: '333333333333333333333333' });
-  assert.ok(typing.useTypingStore.getState().typing['group:333333333333333333333333'][h.other]);
+  assert.equal(
+    typing.useTypingStore.getState().typing['group:333333333333333333333333'],
+    undefined,
+  );
   h.runtime.teardownSession();
   assert.equal(Object.keys(typing.useTypingStore.getState().typing).length, 0);
-});
-
-test('removal from a group drops it from the inbox and its cached history', async () => {
-  const h = chatHarness();
-  await h.transport.ensureChatReady();
-  const group = '333333333333333333333333';
-  const key = `group:${group}`;
-  h.queryData.set(JSON.stringify(['chat', 'conversations']), [
-    { id: key, unreadCount: 0 },
-    { id: `user:${h.other}`, unreadCount: 0 },
-  ]);
-  h.queryData.set(JSON.stringify(['chat', 'messages', key]), [{ id: 'x' }]);
-  h.sockets[0].server('groupRemoved', { groupId: group });
-  assert.deepEqual(
-    h.queryData.get(JSON.stringify(['chat', 'conversations'])).map((row) => row.id),
-    [`user:${h.other}`],
-  );
-  assert.equal(h.queryData.has(JSON.stringify(['chat', 'messages', key])), false);
-  h.runtime.teardownSession();
 });
 
 test('posts use the server like state and cached posts update in every list', () => {
@@ -1428,4 +1418,411 @@ test('posts use the server like state and cached posts update in every list', ()
     store.get('user-posts').map((post) => post.id),
     ['p3'],
   );
+});
+
+test('C edit/delete own messages use confirmed events and merge incoming changes', async () => {
+  const h = chatHarness();
+  const key = `user:${h.other}`;
+  const own = backendMessage(h.me, h.other, { sender: h.me, receiver: h.other });
+  h.history.set(h.other, [own]);
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  await service.listMessages(key);
+  await service.editMessage(key, own._id, 'Changed');
+  const cache = () => h.queryData.get(JSON.stringify(['chat', 'messages', key]));
+  assert.equal(cache()[0].text, 'Changed');
+  const edit = h.sockets[0].packets.find((p) => p.name === 'updateMessage');
+  assert.equal(
+    JSON.stringify(edit.payload),
+    JSON.stringify({ messageId: own._id, newMessage: 'Changed' }),
+  );
+  h.sockets[0].server('messageUpdated', { ...own, message: 'Remote edit' });
+  assert.equal(cache()[0].text, 'Remote edit');
+  await service.deleteMessage(key, own._id);
+  assert.equal(cache().length, 0);
+  const other = backendMessage(h.me, h.other, { _id: 'bbbbbbbbbbbbbbbbbbbbbbbb' });
+  h.sockets[0].server('receiveMessage', other);
+  await assert.rejects(
+    service.editMessage(key, other._id, 'Forbidden'),
+    (e) => e.code === 'FORBIDDEN',
+  );
+  await assert.rejects(service.deleteMessage(key, other._id), (e) => e.code === 'FORBIDDEN');
+  h.sockets[0].server('messageDeleted', { ...other, messageId: other._id });
+  assert.equal(cache().length, 0);
+  const actions = h.load('src/features/chat/utils/messageActions.ts').messageActions;
+  assert.deepEqual(Array.from(actions({ senderId: h.me, text: 'Text', media: [] }, h.me)), [
+    'copy',
+    'edit',
+    'delete',
+  ]);
+  assert.deepEqual(Array.from(actions({ senderId: h.other, text: 'Text' }, h.me)), ['copy']);
+  assert.deepEqual(Array.from(actions({ senderId: h.me, text: 'Caption', media: [{}] }, h.me)), [
+    'copy',
+    'delete',
+  ]);
+  assert.deepEqual(Array.from(actions({ senderId: h.me, text: 'Pending', local: true }, h.me)), [
+    'copy',
+  ]);
+  h.runtime.teardownSession();
+});
+
+test('C local windows, first unread snapshot and drafts clear on logout and account switch', async () => {
+  const h = chatHarness();
+  const room = h.load('src/features/chat/store/conversationStore.ts'),
+    key = `user:${h.other}`;
+  const rows = Array.from({ length: 130 }, (_, i) => ({
+    id: String(i),
+    senderId: h.other,
+    status: i < 20 ? 'read' : 'sent',
+  }));
+  assert.equal(room.localWindow(rows, room.LOCAL_WINDOW)[0].id, '80');
+  room.updateRoom(key, { draft: 'Memory only', window: 100 });
+  assert.equal(room.localWindow(rows, room.roomState(key).window)[0].id, '30');
+  assert.equal(room.captureFirstUnread(key, rows, h.me), '20');
+  rows.forEach((row) => (row.status = 'read'));
+  assert.equal(room.captureFirstUnread(key, rows, h.me), '20');
+  await h.useAuthStore.getState().logout();
+  assert.equal(Object.keys(room.useConversationState.getState().rooms).length, 0);
+  h.runtime.setSessionIdentity(h.me, h.token(h.me));
+  room.updateRoom(key, { draft: 'Old account' });
+  h.runtime.setSessionIdentity(h.other, h.token(h.other));
+  assert.equal(Object.keys(room.useConversationState.getState().rooms).length, 0);
+  h.runtime.teardownSession();
+});
+
+test('C typing is throttled, direct-only, sends no stop event, and expires locally', () => {
+  let now = 10000;
+  const pulses = [],
+    timers = new Map();
+  let timerId = 0;
+  class Clock extends Date {
+    static now() {
+      return now;
+    }
+  }
+  const h = harness({
+    __date: Clock,
+    react: {
+      useRef: (value) => ({ current: value }),
+      useCallback: (fn) => fn,
+      useEffect: (fn) => fn(),
+    },
+    __setTimeout: (fn, ms) => {
+      timers.set(++timerId, { fn, ms });
+      return timerId;
+    },
+    __clearTimeout: (id) => timers.delete(id),
+    'react-native': { Platform: { OS: 'android' } },
+    'expo-router': { useFocusEffect: () => {} },
+    '@/features/auth/hooks/useCurrentUser': { useCan: () => true },
+    '@/features/settings/store/preferencesStore': { usePreferences: () => true },
+    '../services': { chatService: { setTyping: (...args) => pulses.push(args) } },
+  });
+  const { useTypingEmitter } = h.load('src/features/chat/hooks/useChat.ts');
+  h.runtime.setSessionIdentity('111111111111111111111111', h.token('111111111111111111111111'));
+  const typing = useTypingEmitter('user:222222222222222222222222');
+  typing.onChangeText('a');
+  now += 200;
+  typing.onChangeText('ab');
+  assert.equal(pulses.length, 1);
+  now += 3001;
+  typing.onChangeText('abc');
+  assert.equal(pulses.length, 2);
+  typing.stopTyping();
+  assert.equal(pulses.length, 2);
+  typing.onChangeText('Retype immediately');
+  assert.equal(pulses.length, 2, 'clearing or sending does not bypass the throttle');
+  useTypingEmitter('group:333333333333333333333333').onChangeText('x');
+  assert.equal(pulses.length, 2);
+  const state = h.load('src/features/chat/store/typingStore.ts');
+  state.setTyping('user:peer', 'peer', true);
+  const expiry = [...timers.values()].find((timer) => timer.ms === state.TYPING_TTL_MS);
+  assert.ok(expiry);
+  expiry.fn();
+  assert.deepEqual(Object.keys(state.useTypingStore.getState().typing['user:peer']), []);
+  h.runtime.teardownSession();
+  assert.equal(timers.size, 0);
+});
+
+function sendHarness() {
+  const h = chatHarness({ '@/features/chat/store/outboxStore': undefined });
+  h.useAuthStore.setState({ status: 'authenticated', roles: ['user'] });
+  return {
+    ...h,
+    outbox: h.load('src/features/chat/store/outboxStore.ts').useOutbox,
+    sends: h.load('src/features/chat/services/sendState.ts'),
+  };
+}
+
+test('C send state machine covers sending/sent/read/rejected/uncertain with no automatic resend', async () => {
+  const h = sendHarness(),
+    key = `user:${h.other}`;
+  const { ServiceError } = h.load('src/services/errors.ts');
+  let sends = 0,
+    complete;
+  const service = {
+    sendMessage: () => {
+      sends++;
+      return new Promise((resolve) => {
+        complete = resolve;
+      });
+    },
+    listMessages: async () => [],
+  };
+  h.sends.startSend(key, 'Hello', service);
+  const item = Object.values(h.outbox.getState().items)[0];
+  assert.equal(item.status, 'sending');
+  complete({
+    id: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+    conversationId: key,
+    senderId: h.me,
+    text: 'Hello',
+    createdAt: item.createdAt,
+    status: 'sent',
+  });
+  await until(() => Object.keys(h.outbox.getState().items).length === 0);
+  const cache = () => h.queryData.get(JSON.stringify(['chat', 'messages', key]));
+  assert.equal(cache()[0].status, 'sent');
+  h.state.acceptRead(h.other);
+  assert.equal(cache()[0].status, 'read');
+  for (const [code, status] of [
+    ['VALIDATION', 'failed-definitive'],
+    ['FORBIDDEN', 'failed-definitive'],
+    ['NETWORK', 'uncertain'],
+    ['UNKNOWN', 'uncertain'],
+  ]) {
+    const fail = {
+      ...service,
+      sendMessage: async () => {
+        sends++;
+        throw new ServiceError(code);
+      },
+    };
+    h.sends.startSend(key, code, fail);
+    await until(() =>
+      Object.values(h.outbox.getState().items).some((i) => i.text === code && i.status === status),
+    );
+  }
+  const before = sends;
+  await h.transport.ensureChatReady();
+  h.sockets[0].disconnect();
+  h.sockets[0].connect();
+  await until(() => h.state.useChatConnection.getState().ready);
+  await h.transport.ensureChatReady();
+  assert.equal(sends, before, 'reconnect never retries any outbox message');
+  const uncertain = Object.values(h.outbox.getState().items).find((i) => i.status === 'uncertain');
+  assert.equal(h.sends.retryAvailable(uncertain), false);
+  await h.sends.sendAgain(uncertain.clientId, service);
+  assert.equal(sends, before, 'manual send is gated until explicit successful resync');
+  await h.sends.resyncSend(uncertain.clientId, service);
+  assert.equal(h.outbox.getState().items[uncertain.clientId].resync, 'absent');
+  assert.equal(h.sends.retryAvailable(h.outbox.getState().items[uncertain.clientId]), true);
+  assert.equal(sends, before, 'resync itself never sends');
+  h.runtime.teardownSession();
+  assert.equal(Object.keys(h.outbox.getState().items).length, 0);
+});
+
+test('C uncertain resend rechecks absence; matching history or resync failure withholds resend', async () => {
+  const h = sendHarness(),
+    key = `user:${h.other}`;
+  let sent = 0,
+    resynced = 0,
+    rows = [];
+  const item = {
+    clientId: 'local-retry-key',
+    conversationId: key,
+    text: 'Lost',
+    createdAt: '2026-10-15T00:00:00Z',
+    status: 'uncertain',
+    baselineIds: [],
+  };
+  h.outbox.getState().upsert(item);
+  const service = {
+    sendMessage: async () => {
+      sent++;
+      return { ...item, id: 'aaaaaaaaaaaaaaaaaaaaaaaa', senderId: h.me, status: 'sent' };
+    },
+    listMessages: async () => {
+      resynced++;
+      return rows;
+    },
+  };
+  await h.sends.resyncSend(item.clientId, service);
+  rows = [{ id: 'bbbbbbbbbbbbbbbbbbbbbbbb', senderId: h.me, text: 'Lost' }];
+  await h.sends.sendAgain(item.clientId, service);
+  assert.equal(sent, 0);
+  assert.equal(resynced, 2);
+  assert.equal(h.outbox.getState().items[item.clientId].resync, 'present');
+  rows = [];
+  await h.sends.resyncSend(item.clientId, service);
+  await assert.rejects(
+    h.sends.resyncSend(item.clientId, {
+      ...service,
+      listMessages: async () => {
+        throw Error('offline');
+      },
+    }),
+  );
+  assert.equal(h.sends.retryAvailable(h.outbox.getState().items[item.clientId]), false);
+  await h.sends.resyncSend(item.clientId, service);
+  await h.sends.sendAgain(item.clientId, service);
+  assert.equal(sent, 1);
+  assert.equal(h.outbox.getState().items[item.clientId], undefined);
+  h.runtime.teardownSession();
+});
+
+test('C pending send becomes uncertain on disconnect and late completion cannot survive logout', async () => {
+  const h = sendHarness(),
+    key = `user:${h.other}`;
+  await h.transport.ensureChatReady();
+  let finish;
+  h.sends.startSend(key, 'Pending', {
+    sendMessage: () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  });
+  const item = Object.values(h.outbox.getState().items)[0];
+  h.sockets[0].disconnect();
+  assert.equal(h.outbox.getState().items[item.clientId].status, 'uncertain');
+  h.runtime.teardownSession();
+  h.runtime.setSessionIdentity(h.other, h.token(h.other));
+  finish({
+    id: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+    conversationId: key,
+    senderId: h.me,
+    text: 'Pending',
+    status: 'sent',
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(Object.keys(h.outbox.getState().items).length, 0);
+  assert.equal(h.queryData.has(JSON.stringify(['chat', 'messages', key])), false);
+  h.runtime.teardownSession();
+});
+
+test('C uncertain UI offers Send again only after absent resync and never offers dismissal', () => {
+  const alerts = [];
+  const h = harness({
+    react: { memo: (fn) => fn },
+    'react-native': {
+      Platform: { OS: 'android' },
+      View: 'View',
+      Pressable: 'Pressable',
+      Alert: { alert: (...args) => alerts.push(args) },
+      StyleSheet: { create: (value) => value, hairlineWidth: 1 },
+    },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    '@/components/ui': { Text: 'Text' },
+    './ChatAttachment': { ChatAttachment: 'Attachment' },
+    '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
+  });
+  const { MessageBubble } = h.load('src/features/chat/components/MessageBubble.tsx');
+  const find = (node) =>
+    node?.props?.accessibilityLabel === 'Review failed message'
+      ? node
+      : [node?.props?.children]
+          .flat(Infinity)
+          .filter(Boolean)
+          .map((child) => (typeof child === 'object' ? find(child) : undefined))
+          .find(Boolean);
+  const base = {
+    id: 'local-a',
+    clientId: 'a',
+    conversationId: 'user:peer',
+    senderId: 'me',
+    text: 'Unknown',
+    createdAt: '2026-10-15T00:00:00Z',
+    status: 'uncertain',
+    local: true,
+  };
+  for (const resync of [undefined, 'present', 'absent']) {
+    const tree = MessageBubble({
+      message: { ...base, resync },
+      mine: true,
+      first: true,
+      last: true,
+      onRetry: () => {},
+      onResync: () => {},
+      onActions: () => {},
+      group: false,
+    });
+    find(tree).props.onPress();
+    const names = alerts.at(-1)[2].map((action) => action.text);
+    assert.equal(names.includes('Send again'), resync === 'absent');
+    assert.equal(
+      names.some((name) => ['Dismiss', 'Delete', 'Discard'].includes(name)),
+      false,
+    );
+  }
+});
+
+test('inbox query polling follows actual focus and foreground hook state', () => {
+  let focused = true,
+    state = 'active';
+  const h = harness({
+    react: {
+      useState: () => [focused, () => {}],
+      useRef: (value) => ({ current: value }),
+      useCallback: (fn) => fn,
+      useEffect: () => {},
+    },
+    'react-native': { Platform: { OS: 'android' } },
+    'expo-router': { useFocusEffect: () => {} },
+    '@tanstack/react-query': { useQuery: (options) => options },
+    '@/hooks/useAppState': { useAppState: () => state },
+    '@/features/auth/hooks/useCurrentUser': { useCan: () => true },
+    '@/features/settings/store/preferencesStore': { usePreferences: () => true },
+    '../services': { chatService: { listConversations: async () => [] } },
+  });
+  const hooks = h.load('src/features/chat/hooks/useChat.ts');
+  const poll = () => hooks.useConversations(hooks.useChatVisibility()).refetchInterval;
+  assert.equal(poll(), 30000);
+  focused = false;
+  assert.equal(poll(), false);
+  focused = true;
+  state = 'background';
+  assert.equal(poll(), false);
+  state = 'inactive';
+  assert.equal(poll(), false);
+  state = 'active';
+  assert.equal(poll(), 30000);
+  assert.equal(
+    hooks.useConversations(false).refetchInterval,
+    false,
+    'tab badge observer never polls',
+  );
+  h.runtime.teardownSession();
+});
+
+test('C real HTTP sends distinguish definitive rejection, server failure, and no response without retries', async () => {
+  for (const [kind, expected] of [
+    ['envelope400', 'failed-definitive'],
+    ['http400', 'failed-definitive'],
+    ['envelope500', 'uncertain'],
+    ['http500', 'uncertain'],
+    ['timeout', 'uncertain'],
+  ]) {
+    const h = sendHarness(),
+      key = `user:${h.other}`;
+    let posts = 0;
+    h.apiClient.defaults.adapter = async (config) => {
+      posts++;
+      if (kind === 'timeout') throw new axios.AxiosError('timeout', 'ECONNABORTED', config);
+      const code = kind.endsWith('400') ? 400 : 500;
+      const response = h.ok(config, null);
+      response.data = { statusCode: code, error: true, message: 'Rejected' };
+      if (kind.startsWith('http')) {
+        response.status = code;
+        throw new axios.AxiosError('Rejected', 'ERR_BAD_RESPONSE', config, undefined, response);
+      }
+      return response;
+    };
+    const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+    h.sends.startSend(key, 'Outcome ' + kind, service);
+    await until(() =>
+      Object.values(h.outbox.getState().items).some((item) => item.status === expected),
+    );
+    assert.equal(posts, 1);
+    assert.equal(h.logs.length, 0);
+    h.runtime.teardownSession();
+  }
 });

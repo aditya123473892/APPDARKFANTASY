@@ -13,14 +13,11 @@ import { initializePinning } from '@/services/api/pinning';
 import type { Message } from '../types';
 import { conversationKey, isObjectId, mapMessage, parseMessage } from './chatPayload';
 import {
-  acceptGroupRemoved,
-  acceptGroupUpdated,
   acceptMessage,
   acceptUnread,
   acceptRead,
   historyVersion,
   knownHistories,
-  markGroupRead,
   reconcileHistory,
   setChatReady,
   useChatConnection,
@@ -28,6 +25,7 @@ import {
 } from './chatState';
 import { senderId } from '@/features/auth/userCache';
 import { setTyping } from '../store/typingStore';
+import { disconnectSending } from '../store/outboxStore';
 
 let socket: Socket | undefined;
 let socketScope = -1;
@@ -60,6 +58,7 @@ function requestOn<T>(
   reply?: string,
   payload?: unknown,
   allowed?: () => boolean,
+  matches?: (value: T) => boolean,
 ): Promise<T> {
   const epoch = connectionEpoch;
   const operation = async () => {
@@ -78,6 +77,7 @@ function requestOn<T>(
       };
       const success = (data: T) => {
         if (settled) return;
+        if (matches && !matches(data)) return;
         settled = true;
         cleanup();
         if (!isSessionCurrent(scope) || current !== socket || epoch !== connectionEpoch)
@@ -101,7 +101,15 @@ function requestOn<T>(
         if (code === 403 && isSessionCurrent(scope))
           void notifyForbidden(`Bearer ${sessionIdentity.getToken()}`);
         reject(
-          new ServiceError(code === 403 ? 'FORBIDDEN' : code === 404 ? 'NOT_FOUND' : 'VALIDATION'),
+          new ServiceError(
+            code === 403
+              ? 'FORBIDDEN'
+              : code === 404
+                ? 'NOT_FOUND'
+                : typeof code === 'number' && code >= 500
+                  ? 'UNKNOWN'
+                  : 'VALIDATION',
+          ),
         );
       };
       const timer = setTimeout(() => {
@@ -113,7 +121,7 @@ function requestOn<T>(
         }
       }, 15000);
       pending.add(cancel);
-      if (reply) current.once(reply, success);
+      if (reply) current.on(reply, success);
       current.once('error', fail);
       current.once('disconnect', cancel);
       if (reply) current.emit(event, payload);
@@ -124,17 +132,11 @@ function requestOn<T>(
   queue = result.catch(() => undefined);
   return result;
 }
-/** Newest page, or with `before` the page of messages older than that message ID. */
-async function historyOn(
-  current: Socket,
-  scope: number,
-  key: string,
-  before?: string,
-): Promise<Message[]> {
+/** Full history; no cursor, limit or request-correlation fields exist. */
+async function historyOn(current: Socket, scope: number, key: string): Promise<Message[]> {
   const [kind, id] = key.split(':');
   if (!isObjectId(id) || !kind || !['user', 'group'].includes(kind))
     throw new ServiceError('NOT_FOUND');
-  if (before !== undefined && !isObjectId(before)) throw new ServiceError('VALIDATION');
   watchHistory(key);
   const started = historyVersion();
   const rows = await requestOn<unknown>(
@@ -219,28 +221,18 @@ export async function connectSocket(): Promise<Socket> {
     });
     current.on('typing', (raw: unknown) => {
       if (!valid() || !raw || typeof raw !== 'object' || !('sender' in raw)) return;
-      const event = raw as { sender: unknown; groupId?: unknown; isTyping?: unknown };
-      if (!isObjectId(event.sender) || event.sender === sessionIdentity.userId) return;
-      if (event.groupId !== undefined && !isObjectId(event.groupId)) return;
-      const key = event.groupId ? `group:${event.groupId}` : `user:${event.sender}`;
-      setTyping(key, event.sender, event.isTyping !== false);
-    });
-    // Read on another of this user's devices.
-    current.on('groupRead', (raw: unknown) => {
-      if (valid() && raw && typeof raw === 'object' && 'groupId' in raw && isObjectId(raw.groupId))
-        markGroupRead(`group:${raw.groupId}`);
-    });
-    current.on('groupUpdated', (raw: unknown) => {
-      if (valid()) acceptGroupUpdated(raw);
-    });
-    current.on('groupRemoved', (raw: unknown) => {
-      if (!valid()) return;
-      if (raw && typeof raw === 'object' && 'groupId' in raw && typeof raw.groupId === 'string')
-        groups.delete(raw.groupId);
-      acceptGroupRemoved(raw);
+      const event = raw as { sender: unknown; groupId?: unknown };
+      if (
+        !isObjectId(event.sender) ||
+        event.sender === sessionIdentity.userId ||
+        event.groupId !== undefined
+      )
+        return;
+      setTyping('user:' + event.sender, event.sender, true);
     });
     current.on('disconnect', () => {
       if (!valid()) return;
+      disconnectSending();
       connectionEpoch++;
       sync = undefined;
       setChatReady(false);
@@ -318,11 +310,12 @@ export async function socketRequest<T>(
   reply: string,
   payload?: unknown,
   allowed?: () => boolean,
+  matches?: (value: T) => boolean,
 ): Promise<T> {
   const scope = sessionIdentity.generation;
   const current = await ensureChatReady();
   assertSessionCurrent(scope);
-  return requestOn<T>(current, scope, event, reply, payload, allowed);
+  return requestOn<T>(current, scope, event, reply, payload, allowed, matches);
 }
 export async function refreshUnread(): Promise<void> {
   const scope = sessionIdentity.generation;
@@ -342,18 +335,9 @@ export async function socketAck<T>(
   return requestOn<T>(current, scope, event, undefined, payload, allowed);
 }
 /** Fire-and-forget typing state; never queued behind history requests. */
-export function emitTyping(payload: {
-  receiver?: string;
-  groupId?: string;
-  isTyping: boolean;
-}): void {
-  if (socket?.connected && isSessionCurrent(socketScope)) socket.emit('typing', payload);
-}
-export async function getOlderHistory(key: string, before: string): Promise<Message[]> {
-  const scope = sessionIdentity.generation;
-  const current = await ensureChatReady();
-  assertSessionCurrent(scope);
-  return historyOn(current, scope, key, before);
+export function emitTyping(payload: { receiver: string }): void {
+  if (isObjectId(payload.receiver) && socket?.connected && isSessionCurrent(socketScope))
+    socket.emit('typing', payload);
 }
 export async function getHistory(key: string): Promise<Message[]> {
   const scope = sessionIdentity.generation;

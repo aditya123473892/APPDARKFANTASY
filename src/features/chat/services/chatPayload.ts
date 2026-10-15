@@ -14,10 +14,7 @@ export type BackendMessage = {
   sentAt: string;
   isRead?: boolean;
   media?: ChatMedia[];
-  /** Sender-generated idempotency key echoed by the server. */
-  clientId?: string;
 };
-const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
 export const isObjectId = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -86,8 +83,6 @@ export function parseMessage(value: unknown): BackendMessage | null {
     sentAt: raw.sentAt,
     isRead: raw.isRead === true,
     media,
-    clientId:
-      typeof raw.clientId === 'string' && CLIENT_ID.test(raw.clientId) ? raw.clientId : undefined,
   };
 }
 export function conversationKey(raw: BackendMessage): string | null {
@@ -106,7 +101,6 @@ export function mapMessage(value: unknown, key: string): Message {
   const user = userCache.get(senderId(raw.sender));
   return {
     id: raw._id,
-    clientId: raw.clientId,
     conversationId: key,
     senderId: senderId(raw.sender),
     senderName: user ? displayName(user) : undefined,
