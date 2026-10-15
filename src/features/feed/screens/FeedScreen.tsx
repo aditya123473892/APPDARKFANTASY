@@ -103,7 +103,7 @@ export function FeedScreen(): React.JSX.Element {
             <EmptyState
               icon="newspaper-outline"
               title="Quiet for now"
-              message="Posts from people you're connected with will appear here."
+              message="Approved public posts from the backend will appear here."
               actionLabel="Write the first post"
               onAction={() => router.push('/create')}
             />

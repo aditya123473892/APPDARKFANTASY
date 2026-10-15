@@ -1,5 +1,5 @@
 import type { ActivityService } from './activityService';
-import { mockActivityService } from './activityService.mock';
 
 // Single implementation swap point for notifications.
-export const activityService: ActivityService = mockActivityService;
+// No notification routes are registered in the backend. Never substitute fixtures.
+export const activityService: ActivityService = { list: async () => [], markRead: async () => {} };

@@ -1,4 +1,4 @@
-import type { User } from '@/features/auth/types';
+import type { UserView as User } from '@/features/auth/types';
 import type { ProfileView, UpdateProfileInput } from '../types';
 
 export interface ProfileService {

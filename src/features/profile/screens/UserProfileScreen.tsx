@@ -1,296 +1,99 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ErrorState } from '@/components/feedback/ErrorState';
-import { useSafeBack } from '@/components/layout';
-import { Button, EmptyState, Skeleton, Text } from '@/components/ui';
-import { useAuthStore } from '@/features/auth/store/authStore';
-import { useRequestActions, useSendRequest } from '@/features/requests/hooks/useRequests';
-import type { ConnectionRequest } from '@/features/requests/types';
-import { usePreferences } from '@/features/settings/store/preferencesStore';
-import { featureFlags } from '@/config/featureFlags';
-import { isServiceError } from '@/services/errors';
-import { radius, spacing } from '@/theme';
-import { useTheme } from '@/theme/useTheme';
-import { formatDistance, formatPresence } from '@/utils/formatters';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { RefreshControl, ScrollView, View } from 'react-native';
+import { Header, Screen } from '@/components/layout';
+import { Avatar, Button, EmptyState, Loader, PostCard, Text } from '@/components/ui';
 import { InterestChips } from '../components/InterestChips';
-import { PhotoGrid } from '../components/PhotoGrid';
-import { ProfileHeader } from '../components/ProfileHeader';
+import { toast } from '@/components/ui/Toast';
+import { ErrorState } from '@/components/feedback/ErrorState';
+import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useProfile } from '../hooks/useProfiles';
-import type { ProfileView } from '../types';
-
-function asRequest(
-  profile: ProfileView,
-  requestId: string,
-  direction: ConnectionRequest['direction'],
-): ConnectionRequest {
-  return {
-    id: requestId,
-    user: profile,
-    direction,
-    createdAt: new Date().toISOString(),
-    superLike: false,
-  };
-}
-
-/** Bottom action bar — the single place a relationship is acted on from a profile. */
-function RelationshipActions({ profile }: { profile: ProfileView }): React.JSX.Element {
-  const router = useRouter();
-  const send = useSendRequest();
-  const { accept, decline, cancel, pendingId } = useRequestActions();
-  const { relationship } = profile;
-  const sending = send.isPending;
-
-  switch (relationship.status) {
-    case 'connected':
-      return (
-        <Button
-          label={`Message ${profile.name}`}
-          icon="chatbubble-ellipses"
-          onPress={() => router.push(`/chat/${relationship.conversationId}`)}
-        />
-      );
-    case 'incoming': {
-      const request = asRequest(profile, relationship.requestId, 'incoming');
-      const busy = pendingId === relationship.requestId;
-      return (
-        <View style={styles.actionRow}>
-          <Button
-            label="Decline"
-            variant="secondary"
-            disabled={busy}
-            onPress={() => decline.mutate(request)}
-            style={styles.flex}
-          />
-          <Button
-            label="Accept"
-            icon="heart"
-            loading={busy && accept.isPending}
-            disabled={busy}
-            onPress={() => accept.mutate(request)}
-            style={styles.flex}
-          />
-        </View>
-      );
-    }
-    case 'outgoing': {
-      const request = asRequest(profile, relationship.requestId, 'outgoing');
-      return (
-        <Button
-          label="Request sent · Cancel"
-          icon="time-outline"
-          variant="secondary"
-          loading={pendingId === relationship.requestId}
-          onPress={() =>
-            Alert.alert(`Cancel your request to ${profile.name}?`, 'They will no longer see it.', [
-              { text: 'Keep request', style: 'cancel' },
-              {
-                text: 'Cancel request',
-                style: 'destructive',
-                onPress: () => cancel.mutate(request),
-              },
-            ])
-          }
-        />
-      );
-    }
-    default:
-      return (
-        <View style={styles.actionRow}>
-          {featureFlags.ENABLE_SUPER_LIKE ? (
-            <Button
-              label="Super like"
-              icon="star"
-              variant="secondary"
-              fullWidth={false}
-              disabled={sending}
-              onPress={() =>
-                send.mutate({ userId: profile.id, name: profile.name, superLike: true })
-              }
-              accessibilityLabel={`Super like ${profile.name}`}
-            />
-          ) : null}
-          <Button
-            label="Send request"
-            icon="heart"
-            loading={sending}
-            onPress={() => send.mutate({ userId: profile.id, name: profile.name })}
-            style={styles.flex}
-            accessibilityLabel={`Send a connection request to ${profile.name}`}
-          />
-        </View>
-      );
-  }
-}
-
-export function UserProfileScreen(): React.JSX.Element {
-  const params = useLocalSearchParams<{ id: string }>();
-  const id = typeof params.id === 'string' ? params.id : '';
-  const goBack = useSafeBack('/discover');
+import { ProfileHeader } from '../components/ProfileHeader';
+import { listUserPosts } from '@/features/feed/services/feedService.real';
+import { followUser } from '@/features/requests/services/requestsService.real';
+import { describeError } from '@/services/errors';
+import { useTheme } from '@/theme/useTheme';
+export function UserProfileScreen() {
+  const { id = '' } = useLocalSearchParams<{ id: string }>();
+  const myId = useCurrentUserId();
   const router = useRouter();
   const { theme } = useTheme();
-  const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const myId = useAuthStore((state) => state.user?.id);
-  const myInterests = useAuthStore((state) => state.user?.interests) ?? [];
-  const showDistance = usePreferences((state) => state.showDistance);
-  const showPresence = usePreferences((state) => state.showActiveStatus);
-  const { data: profile, isPending, isError, error, refetch } = useProfile(id === myId ? '' : id);
-
-  if (id && id === myId) return <Redirect href="/profile" />;
-
-  const backButton = (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Go back"
-      onPress={goBack}
-      style={[
-        styles.floatingBack,
-        { top: insets.top + spacing.sm, backgroundColor: theme.colors.overlay },
-      ]}
-    >
-      <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
-    </Pressable>
-  );
-
-  if (!id || isServiceError(error, 'NOT_FOUND')) {
-    return (
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.colors.background }]}>
-        <EmptyState
-          icon="person-outline"
-          title="Profile unavailable"
-          message="This person may have paused or deleted their account."
-          actionLabel="Back to Discover"
-          onAction={() => router.replace('/discover')}
-        />
-      </SafeAreaView>
-    );
-  }
-  if (isPending) {
-    return (
-      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-        <Skeleton style={{ height: Math.min(width * 1.1, height * 0.6), borderRadius: 0 }} />
-        <View style={styles.content}>
-          <Skeleton style={styles.skeletonTitle} />
-          <Skeleton style={styles.skeletonLine} />
-          <Skeleton />
-        </View>
-        {backButton}
-      </View>
-    );
-  }
-  if (isError || !profile) {
-    return (
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.colors.background }]}>
-        <ErrorState onRetry={() => void refetch()} message="We couldn't load this profile." />
-        {backButton}
-      </SafeAreaView>
-    );
-  }
-
-  const heroHeight = Math.min(width * 1.15, height * 0.62);
-  const photos = (profile.photos ?? [profile.avatarUri]).slice(1);
-  const shared = profile.interests.filter((interest) => myInterests.includes(interest));
-
+  const profile = useProfile(id === myId ? '' : id);
+  const posts = useQuery({
+    queryKey: ['user-posts', id],
+    queryFn: () => listUserPosts(id),
+    enabled: Boolean(id) && id !== myId,
+  });
+  const follow = useMutation({
+    mutationFn: () => followUser(id),
+    onSuccess: () => toast.success('Follow request sent'),
+    onError: (error) =>
+      toast.error(describeError(error, 'Unable to follow this user. A request may already exist.')),
+  });
+  if (id === myId) return <Redirect href="/profile" />;
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <View style={{ height: heroHeight }}>
-          <Image
-            source={{ uri: profile.avatarUri }}
-            contentFit="cover"
-            transition={180}
-            cachePolicy="memory-disk"
-            accessibilityLabel={`${profile.name}'s main photo`}
-            style={StyleSheet.absoluteFill}
+    <Screen padded={false}>
+      <ScrollView
+        contentContainerStyle={{ padding: 20, gap: 20 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={profile.isRefetching || posts.isRefetching}
+            tintColor={theme.colors.primary}
+            onRefresh={() => {
+              void profile.refetch();
+              void posts.refetch();
+            }}
           />
-          <LinearGradient
-            colors={[theme.colors.overlayTransparent, theme.colors.background]}
-            locations={[0.55, 1]}
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
-        <View style={styles.content}>
-          <ProfileHeader
-            user={profile}
-            presence={showPresence ? formatPresence(profile.presence) : null}
-            distance={showDistance ? formatDistance(profile.distanceKm) : null}
-          />
-          <View style={styles.section}>
-            <Text variant="label" color="muted">
-              ABOUT
-            </Text>
-            <Text>{profile.bio}</Text>
-          </View>
-          {profile.interests.length ? (
-            <View style={styles.section}>
-              <Text variant="label" color="muted">
-                INTERESTS{shared.length ? ` · ${shared.length} IN COMMON` : ''}
-              </Text>
-              <InterestChips interests={profile.interests} highlight={shared} />
-            </View>
-          ) : null}
-          {photos.length ? (
-            <View style={styles.section}>
-              <Text variant="label" color="muted">
-                PHOTOS
-              </Text>
-              <PhotoGrid photos={photos} name={profile.name} />
-            </View>
-          ) : null}
-        </View>
-      </ScrollView>
-      <View
-        style={[
-          styles.bar,
-          {
-            paddingBottom: insets.bottom + spacing.md,
-            backgroundColor: theme.colors.background,
-            borderTopColor: theme.colors.border,
-          },
-        ]}
+        }
       >
-        <View style={styles.barInner}>
-          <RelationshipActions profile={profile} />
-        </View>
-      </View>
-      {backButton}
-    </View>
+        <Header title="Profile" back backFallback="/discover" />
+        {profile.isPending ? (
+          <Loader />
+        ) : profile.isError || !profile.data ? (
+          <ErrorState onRetry={() => void profile.refetch()} />
+        ) : (
+          <>
+            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+              <Avatar uri={profile.data.avatarUri} label={profile.data.name} size={88} />
+              <View style={{ flex: 1 }}>
+                <ProfileHeader user={profile.data} />
+              </View>
+            </View>
+            {profile.data.bio ? <Text>{profile.data.bio}</Text> : null}
+            <InterestChips interests={profile.data.interests} />
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Button
+                label="Message"
+                style={{ flex: 1 }}
+                onPress={() => router.push(`/chat/user:${id}`)}
+              />
+              <Button
+                label={follow.isSuccess ? 'Requested' : 'Follow'}
+                variant="secondary"
+                style={{ flex: 1 }}
+                loading={follow.isPending}
+                disabled={follow.isSuccess}
+                onPress={() => follow.mutate()}
+              />
+            </View>
+            <Text variant="subheading">Posts</Text>
+            {posts.isPending ? (
+              <Loader />
+            ) : posts.isError ? (
+              <ErrorState onRetry={() => void posts.refetch()} />
+            ) : posts.data?.length ? (
+              posts.data.map((post) => <PostCard key={post.id} post={post} />)
+            ) : (
+              <EmptyState
+                compact
+                icon="newspaper-outline"
+                title="No posts to show"
+                message="Posts available to your account will appear here."
+              />
+            )}
+          </>
+        )}
+      </ScrollView>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  scroll: { paddingBottom: spacing.xxl },
-  content: {
-    width: '100%',
-    maxWidth: spacing.contentMax,
-    alignSelf: 'center',
-    paddingHorizontal: spacing.screen,
-    gap: spacing.xl,
-    marginTop: -spacing.xxxl,
-  },
-  section: { gap: spacing.sm },
-  floatingBack: {
-    position: 'absolute',
-    left: spacing.md,
-    width: 44,
-    height: 44,
-    borderRadius: radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bar: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: spacing.md,
-    paddingHorizontal: spacing.screen,
-  },
-  barInner: { width: '100%', maxWidth: spacing.contentMax, alignSelf: 'center' },
-  actionRow: { flexDirection: 'row', gap: spacing.sm },
-  flex: { flex: 1 },
-  skeletonTitle: { width: '50%', height: 28 },
-  skeletonLine: { width: '70%' },
-});

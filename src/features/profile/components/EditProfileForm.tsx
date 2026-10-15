@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 import { Button, Chip, Input, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
-import type { User } from '@/features/auth/types';
+import type { UserView as User } from '@/features/auth/types';
 import { describeError } from '@/services/errors';
 import { spacing } from '@/theme';
 import { useUpdateMyProfile } from '../hooks/useProfiles';
@@ -42,8 +42,6 @@ const schema = z.object({
     .trim()
     .min(10, 'Tell people a little more (10+ characters)')
     .max(240, 'Keep it under 240 characters'),
-  occupation: z.string().trim().max(60, 'Keep it under 60 characters'),
-  location: z.string().trim().max(60, 'Keep it under 60 characters'),
   interests: z
     .array(z.string())
     .min(1, 'Pick at least one interest')
@@ -68,8 +66,6 @@ export function EditProfileForm({
     defaultValues: {
       name: user.name,
       bio: user.bio,
-      occupation: user.occupation ?? '',
-      location: user.location ?? '',
       interests: user.interests,
     },
   });
@@ -79,8 +75,6 @@ export function EditProfileForm({
     update.mutate(
       {
         ...values,
-        occupation: values.occupation || undefined,
-        location: values.location || undefined,
       },
       {
         onSuccess: () => {
@@ -124,40 +118,6 @@ export function EditProfileForm({
             onBlur={field.onBlur}
             onChangeText={field.onChange}
             error={errors.bio?.message}
-          />
-        )}
-      />
-      <Controller
-        control={control}
-        name="occupation"
-        render={({ field }) => (
-          <Input
-            label="Work"
-            icon="briefcase-outline"
-            placeholder="What do you do?"
-            value={field.value}
-            autoCapitalize="sentences"
-            maxLength={60}
-            onBlur={field.onBlur}
-            onChangeText={field.onChange}
-            error={errors.occupation?.message}
-          />
-        )}
-      />
-      <Controller
-        control={control}
-        name="location"
-        render={({ field }) => (
-          <Input
-            label="Neighbourhood"
-            icon="location-outline"
-            placeholder="e.g. Brooklyn, NY"
-            value={field.value}
-            autoCapitalize="words"
-            maxLength={60}
-            onBlur={field.onBlur}
-            onChangeText={field.onChange}
-            error={errors.location?.message}
           />
         )}
       />

@@ -6,6 +6,7 @@ import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { formatMessageTime } from '@/utils/formatters';
 import type { ChatMessage } from '../hooks/useChat';
+import { ChatAttachment } from './ChatAttachment';
 
 const statusLabel: Record<ChatMessage['status'], string> = {
   sending: 'Sending',
@@ -20,7 +21,6 @@ export const MessageBubble = memo(function MessageBubble({
   mine,
   first,
   last,
-  onRetry,
   onDiscard,
 }: {
   message: ChatMessage;
@@ -38,11 +38,14 @@ export const MessageBubble = memo(function MessageBubble({
   const openFailedActions = (): void => {
     if (!message.clientId) return;
     const clientId = message.clientId;
-    Alert.alert('Message not delivered', 'Check your connection, then try sending it again.', [
-      { text: 'Delete', style: 'destructive', onPress: () => onDiscard(clientId) },
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Try again', onPress: () => onRetry(clientId) },
-    ]);
+    Alert.alert(
+      'Send status unknown',
+      'Refresh the conversation before sending again. The server may already have received this message.',
+      [
+        { text: 'Dismiss local copy', style: 'destructive', onPress: () => onDiscard(clientId) },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
   };
 
   const statusIcon =
@@ -92,23 +95,35 @@ export const MessageBubble = memo(function MessageBubble({
           failed && { opacity: 0.7 },
         ]}
       >
+        {!mine && first && message.senderName ? (
+          <Text variant="caption" color="primary">
+            {message.senderName}
+          </Text>
+        ) : null}
         <Text selectable style={{ color: mine ? theme.colors.onPrimary : theme.colors.text }}>
           {message.text}
         </Text>
+        {message.media?.map((media) => (
+          <ChatAttachment
+            key={`${media._id}:${media.expiresAt ?? ''}:${media.status ?? ''}`}
+            media={media}
+            messageId={message.id}
+          />
+        ))}
       </Pressable>
       {last || failed ? (
         <View style={[styles.meta, mine && styles.metaMine]}>
           {failed ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Retry sending message"
+              accessibilityLabel="Review failed message"
               hitSlop={10}
-              onPress={() => message.clientId && onRetry(message.clientId)}
+              onPress={openFailedActions}
               style={styles.retry}
             >
               <Ionicons name="refresh" size={13} color={theme.colors.danger} />
               <Text variant="caption" color="danger">
-                Not delivered · Tap to retry
+                Check send status
               </Text>
             </Pressable>
           ) : (

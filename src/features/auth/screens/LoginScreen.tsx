@@ -1,9 +1,10 @@
-import { Link } from 'expo-router';
+import { usePreventScreenCapture } from 'expo-screen-capture';
 import { StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Text, Wordmark } from '@/components/ui';
 import { LoginForm } from '../components/LoginForm';
 export function LoginScreen(): React.JSX.Element {
+  usePreventScreenCapture('login');
   return (
     <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
       <Header title="Welcome back" back />
@@ -17,14 +18,6 @@ export function LoginScreen(): React.JSX.Element {
         </Text>
       </View>
       <LoginForm />
-      <View style={styles.footer}>
-        <Text color="muted">New here? </Text>
-        <Link href="/register" asChild>
-          <Text color="primary" weight="bold">
-            Create account
-          </Text>
-        </Link>
-      </View>
     </Screen>
   );
 }

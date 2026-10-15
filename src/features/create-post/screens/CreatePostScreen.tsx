@@ -9,7 +9,8 @@ import { Avatar, Button, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useCreatePost } from '@/features/feed/hooks/useFeed';
-import type { PostAudience } from '@/features/feed/types';
+import type { PostAudience, UploadAsset } from '@/features/feed/types';
+import { pickMedia } from '../pickMedia';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { describeError } from '@/services/errors';
 import { radius, spacing, typography } from '@/theme';
@@ -18,7 +19,7 @@ import { useTheme } from '@/theme/useTheme';
 const LIMIT = 500;
 const audiences: { value: PostAudience; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: 'everyone', label: 'Everyone', icon: 'globe-outline' },
-  { value: 'connections', label: 'Connections', icon: 'people-outline' },
+  { value: 'private', label: 'Private', icon: 'lock-closed-outline' },
 ];
 
 export function CreatePostScreen(): React.JSX.Element {
@@ -30,13 +31,14 @@ export function CreatePostScreen(): React.JSX.Element {
   const me = useAuthStore((state) => state.user);
   const [value, setValue] = useState('');
   const [audience, setAudience] = useState<PostAudience>('everyone');
+  const [assets, setAssets] = useState<UploadAsset[]>([]);
   const createPost = useCreatePost();
   const submitted = useRef(false);
 
   const trimmed = value.trim();
   const over = value.length > LIMIT;
-  const canPost = trimmed.length > 0 && !over && !createPost.isPending;
-  const dirty = trimmed.length > 0;
+  const canPost = assets.length > 0 && !over && !createPost.isPending;
+  const dirty = trimmed.length > 0 || assets.length > 0;
 
   // Confirm before discarding a draft — covers the Cancel button, Android back, and swipe-to-dismiss.
   useEffect(
@@ -59,12 +61,16 @@ export function CreatePostScreen(): React.JSX.Element {
   const submit = (): void => {
     if (!canPost) return;
     createPost.mutate(
-      { body: trimmed, audience },
+      { body: trimmed, audience, assets },
       {
-        onSuccess: () => {
+        onSuccess: (post) => {
           submitted.current = true;
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          toast.success('Your post is live');
+          toast.success(
+            post.status === 'approved'
+              ? 'Post published'
+              : 'Post submitted for approval. Find it on your profile.',
+          );
           close();
         },
         onError: (error) =>
@@ -125,6 +131,43 @@ export function CreatePostScreen(): React.JSX.Element {
               Posts can be up to {LIMIT} characters. Remove {value.length - LIMIT} to continue.
             </Text>
           ) : null}
+          <View style={{ gap: 12, marginTop: 20 }}>
+            <Button
+              label={assets.length ? 'Change media' : 'Add photos or videos'}
+              icon="images-outline"
+              variant="secondary"
+              disabled={createPost.isPending}
+              onPress={() => {
+                void pickMedia()
+                  .then((selected) => {
+                    if (selected.length) setAssets(selected);
+                  })
+                  .catch(() => toast.error('Unable to open your photo library.'));
+              }}
+            />
+            <Text variant="caption" color="secondary">
+              Choose at least one photo or video. Posts may require approval before appearing in the
+              public feed.
+            </Text>
+            {assets.map((asset, index) => (
+              <View
+                key={`${asset.uri}-${index}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+              >
+                <Text numberOfLines={1} style={{ flex: 1 }}>
+                  {asset.name}
+                </Text>
+                <Button
+                  label="Remove"
+                  size="sm"
+                  variant="ghost"
+                  fullWidth={false}
+                  disabled={createPost.isPending}
+                  onPress={() => setAssets((items) => items.filter((_, i) => i !== index))}
+                />
+              </View>
+            ))}
+          </View>
         </ScrollView>
         <View
           style={[

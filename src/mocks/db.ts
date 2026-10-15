@@ -6,7 +6,7 @@
  * Nothing here is used once the real services are swapped in at each feature's services/index.ts.
  */
 import type { AppNotification } from '@/features/activity/types';
-import type { User } from '@/features/auth/types';
+import type { UserView as User } from '@/features/auth/types';
 import type { Conversation, Message } from '@/features/chat/types';
 import type { Post } from '@/features/feed/types';
 import type { ConnectionRequest } from '@/features/requests/types';

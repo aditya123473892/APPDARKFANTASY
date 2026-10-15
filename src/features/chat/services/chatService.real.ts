@@ -4,7 +4,7 @@ import { userCache } from '@/features/auth/userCache';
 import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRuntime';
 import { apiClient } from '@/services/api/apiClient';
 import { getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
-import { ServiceError } from '@/services/errors';
+import { isServiceError, ServiceError } from '@/services/errors';
 import { appendAsset } from '@/services/api/multipart';
 import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
@@ -63,10 +63,19 @@ export const realChatService: ChatService = {
     const [users, groups, unread] = await Promise.all([
       getData<{ userChatlist: UserSummary[] }>('/users/chatlist'),
       getData<BackendGroup[]>('/groups/my-groups'),
-      socketRequest<BackendMessage[]>('getUnreadCount', 'unreadMessageCount'),
+      socketRequest<BackendMessage[]>('getUnreadCount', 'unreadMessageCount').catch((error) => {
+        // The REST inbox remains usable while realtime reconnects. Keep the last
+        // confirmed unread state; never substitute an invented zero/count payload.
+        if (isServiceError(error, 'NETWORK')) return undefined;
+        throw error;
+      }),
     ]);
     assertSessionCurrent(scope);
-    if (!acceptUnread(unread) || !Array.isArray(users.userChatlist) || !Array.isArray(groups))
+    if (
+      (unread !== undefined && !acceptUnread(unread)) ||
+      !Array.isArray(users.userChatlist) ||
+      !Array.isArray(groups)
+    )
       throw new ServiceError('UNKNOWN');
     const summaries = users.userChatlist.map(parseUserSummary);
     if (summaries.some((user) => !user)) throw new ServiceError('UNKNOWN');
@@ -75,7 +84,13 @@ export const realChatService: ChatService = {
       ...groups.map(groupConversation),
     ];
     // Join existing groups for incoming group events, even before opening a room.
-    await Promise.all(groups.map((group) => joinGroup(group._id)));
+    await Promise.all(
+      groups.map((group) =>
+        joinGroup(group._id).catch((error) => {
+          if (!isServiceError(error, 'NETWORK')) throw error;
+        }),
+      ),
+    );
     assertSessionCurrent(scope);
     for (const conversation of result) {
       conversation.unreadCount = unreadFor(conversation.id);

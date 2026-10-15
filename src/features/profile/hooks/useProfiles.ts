@@ -13,7 +13,7 @@ export function useProfile(userId: string) {
     queryKey: queryKeys.profile(userId),
     queryFn: () => profileService.get(userId),
     enabled: Boolean(userId),
-    retry: (count, error) => (error as { code?: string }).code !== 'NOT_FOUND' && count < 2,
+    retry: false,
   });
 }
 

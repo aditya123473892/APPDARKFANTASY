@@ -1,4 +1,5 @@
-import type { AuthResult, LoginInput, RegisterInput, Session, User } from '../types';
+import type { User } from '../userModel';
+import type { AuthResult, LoginInput, RegisterInput, Session } from '../types';
 
 export interface AuthService {
   login(input: LoginInput): Promise<AuthResult>;

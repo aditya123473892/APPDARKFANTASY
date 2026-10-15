@@ -3,11 +3,19 @@ import * as Haptics from 'expo-haptics';
 import { Tabs } from 'expo-router';
 import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNotifications } from '@/features/activity/hooks/useActivity';
 import { useUnreadMessageCount } from '@/features/chat/hooks/useChat';
 import { useIncomingRequestCount } from '@/features/requests/hooks/useRequests';
 import { spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
+import { useRoles } from '@/features/auth/hooks/useCurrentUser';
+import { hasCapability, type Capability } from '@/features/auth/permissions';
+const tabCapabilities: Record<string, Capability> = {
+  home: 'canUseApp',
+  discover: 'canUseApp',
+  chats: 'canSendMessages',
+  activity: 'canUseApp',
+  profile: 'canUseApp',
+};
 
 type IconName = keyof typeof Ionicons.glyphMap;
 const icons: Record<string, [IconName, IconName]> = {
@@ -19,13 +27,12 @@ const icons: Record<string, [IconName, IconName]> = {
 };
 
 export default function TabsLayout(): React.JSX.Element {
+  const roles = useRoles();
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const unreadMessages = useUnreadMessageCount();
   const incomingRequests = useIncomingRequestCount();
-  const unreadNotifications =
-    useNotifications().data?.filter((item) => !item.read && item.kind !== 'request').length ?? 0;
-  const activityBadge = incomingRequests + unreadNotifications;
+  const activityBadge = incomingRequests;
   const badge = (count: number) => (count > 0 ? (count > 99 ? '99+' : count) : undefined);
 
   return (
@@ -39,6 +46,7 @@ export default function TabsLayout(): React.JSX.Element {
       screenOptions={({ route }) => {
         const pair = icons[route.name] ?? icons.home!;
         return {
+          href: hasCapability(roles, tabCapabilities[route.name] ?? 'canUseApp') ? undefined : null,
           headerShown: false,
           sceneStyle: { backgroundColor: theme.colors.background },
           tabBarActiveTintColor: theme.colors.primary,
@@ -70,7 +78,7 @@ export default function TabsLayout(): React.JSX.Element {
       }}
     >
       <Tabs.Screen name="home" options={{ title: 'Home', tabBarAccessibilityLabel: 'Home feed' }} />
-      <Tabs.Screen name="discover" options={{ title: 'Discover' }} />
+      <Tabs.Screen name="discover" options={{ title: 'People' }} />
       <Tabs.Screen
         name="chats"
         options={{

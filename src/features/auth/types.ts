@@ -1,3 +1,5 @@
+import type { User as BackendUser } from './userModel';
+export type { User, UserSummary, Role } from './userModel';
 export type LoginStrategy = 'email_password' | 'invite_code' | 'phone_otp' | 'social';
 export type AuthErrorCode =
   | 'INVALID_CREDENTIALS'
@@ -6,9 +8,14 @@ export type AuthErrorCode =
   | 'INVITE_INVALID'
   | 'RATE_LIMITED'
   | 'SESSION_EXPIRED'
+  | 'BLOCKED'
+  | 'UNVERIFIED'
+  | 'NETWORK'
+  | 'SERVER'
+  | 'ACCOUNT_UNAVAILABLE'
   | 'UNKNOWN';
 
-export type User = {
+export type UserView = {
   id: string;
   email: string;
   name: string;
@@ -25,11 +32,11 @@ export type User = {
 
 export type Session = {
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
   expiresAt: string;
   userId: string;
 };
-export type AuthResult = { user: User; session: Session };
+export type AuthResult = { user: BackendUser; session: Session };
 export type LoginInput = { email: string; password: string; strategy: 'email_password' };
 export type RegisterInput = { name: string; email: string; password: string; inviteCode?: string };
 

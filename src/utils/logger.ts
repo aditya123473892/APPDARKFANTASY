@@ -1,9 +1,7 @@
-type LogValue = string | number | boolean | null | undefined | Record<string, unknown>;
+// Fixed event names only: never accept exception objects, response bodies or credentials.
+type Event = 'Preferences could not be read; using defaults' | 'Preferences could not be saved';
 export const logger = {
-  debug(message: string, context?: LogValue): void {
-    if (__DEV__) console.debug(`[app] ${message}`, context ?? '');
-  },
-  error(message: string): void {
-    if (__DEV__) console.error(`[app] ${message}`);
+  debug(message: Event): void {
+    if (__DEV__) console.debug(`[app] ${message}`);
   },
 };

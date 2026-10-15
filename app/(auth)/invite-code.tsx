@@ -1,4 +1,4 @@
-import { InviteCodeScreen } from '@/features/auth/screens/InviteCodeScreen';
+import { Redirect } from 'expo-router';
 export default function InviteCodeRoute(): React.JSX.Element {
-  return <InviteCodeScreen />;
+  return <Redirect href="/login" />;
 }

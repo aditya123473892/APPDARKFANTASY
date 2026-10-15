@@ -1,5 +1,5 @@
 import type { AuthService } from './authService';
-import { mockAuthService } from './authService.mock';
+import { realAuthService } from './authService.real';
 
-// Single implementation swap point. Replace with realAuthService during backend integration.
-export const authService: AuthService = mockAuthService;
+// Phase 1 uses the canonical backend; never fall back to fixture identities.
+export const authService: AuthService = realAuthService;

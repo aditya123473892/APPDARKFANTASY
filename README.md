@@ -1,6 +1,6 @@
 # DARKFANTASY Mobile
 
-A production-oriented Expo Router UI scaffold for a dating-style mobile app. It is frontend-only: all profiles, connection requests, conversations, posts, and authentication responses are typed local fixtures. There are no live API calls or third-party runtime services.
+An Expo Router mobile app connected to the Dark Fantasy backend. Active authentication, profiles, feeds, follow requests, direct chats, and groups use backend data only. See [REAL_DATA_INTEGRATION.md](REAL_DATA_INTEGRATION.md) for current endpoints, validation, and limitations. The older scaffold notes below describe unused fixture services and are superseded by that integration report.
 
 ## Stack
 
@@ -23,6 +23,18 @@ npm start
 ```
 
 Press `a` for Android, `i` for an iOS simulator on macOS, or scan the QR code in Expo Go. The Android emulator/device should use `10.0.2.2` instead of `localhost` when the real backend is eventually connected.
+
+### Expo Go on a physical phone
+
+Set `EXPO_PUBLIC_API_URL` in `.env.mobile` to `http://<PC-Wi-Fi-IP>:9000/api`.
+`localhost` points to the phone itself; `10.0.2.2` is for the Android emulator only.
+Keep the PC and phone on the same Wi-Fi, then restart Metro with
+`npm start -- --clear --lan` after changing the environment file.
+Check `http://<PC-Wi-Fi-IP>:9000/api` in the phone browser before trying login.
+If it times out, check Windows Firewall for the exact Node executable running the
+backend and check for guest-network isolation or a VPN. The portable Node runtime
+and system Node executable require separate firewall allowances. Update the URL
+if the PC's Wi-Fi address changes. Release builds still require HTTPS.
 
 Mock login accepts the prefilled credentials. To test a generic auth failure, use `error@example.com` or password `wrongpass`. The mock invitation code is `NIGHT42`.
 

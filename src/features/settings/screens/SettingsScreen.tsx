@@ -6,7 +6,6 @@ import { Header, Screen } from '@/components/layout';
 import { Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { useAuthStore } from '@/features/auth/store/authStore';
-import { mockNetwork } from '@/mocks/db';
 import { spacing } from '@/theme';
 import { APP_NAME } from '@/utils/constants';
 import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
@@ -16,7 +15,6 @@ export function SettingsScreen(): React.JSX.Element {
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [offline, setOffline] = useState(mockNetwork.isOffline());
 
   const confirmLogout = (): void =>
     Alert.alert('Log out?', 'You will need to sign in again to see your messages.', [
@@ -53,22 +51,6 @@ export function SettingsScreen(): React.JSX.Element {
             last
           />
         </SettingsGroup>
-
-        {__DEV__ ? (
-          <SettingsGroup title="Developer">
-            <SettingsRow
-              icon="cloud-offline-outline"
-              title="Simulate offline"
-              subtitle="Mock backend only. Every request fails like a dropped connection."
-              value={offline}
-              onValueChange={(value) => {
-                mockNetwork.setOffline(value);
-                setOffline(value);
-              }}
-              last
-            />
-          </SettingsGroup>
-        ) : null}
 
         <SettingsGroup>
           <SettingsRow

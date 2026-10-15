@@ -1,5 +1,5 @@
 import { db, relationshipWith, respond } from '@/mocks/db';
-import type { User } from '@/features/auth/types';
+import type { UserView as User } from '@/features/auth/types';
 import type { ProfileView } from '../types';
 import type { ProfileService } from './profileService';
 

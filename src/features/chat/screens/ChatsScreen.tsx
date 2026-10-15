@@ -4,7 +4,8 @@ import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { Header, Screen } from '@/components/layout';
-import { EmptyState, IconButton, Input, Skeleton } from '@/components/ui';
+import { EmptyState, Input, Skeleton, Button, Text } from '@/components/ui';
+import { Can } from '@/features/auth/components/Access';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { useDebounce } from '@/hooks/useDebounce';
 import { spacing } from '@/theme';
@@ -12,6 +13,7 @@ import { useTheme } from '@/theme/useTheme';
 import { ChatListItem } from '../components/ChatListItem';
 import { useConversations, useMyId } from '../hooks/useChat';
 import type { Conversation } from '../types';
+import { describeError } from '@/services/errors';
 
 function ChatsSkeleton(): React.JSX.Element {
   return (
@@ -36,7 +38,8 @@ export function ChatsScreen(): React.JSX.Element {
   const showPresence = usePreferences((state) => state.showActiveStatus);
   const [search, setSearch] = useState('');
   const query = useDebounce(search.trim().toLowerCase(), 200);
-  const { data, isPending, isError, isRefetchError, refetch, isRefetching } = useConversations();
+  const { data, error, isPending, isError, isRefetchError, refetch, isRefetching } =
+    useConversations();
 
   const conversations = useMemo(
     () =>
@@ -52,17 +55,39 @@ export function ChatsScreen(): React.JSX.Element {
   return (
     <Screen padded={false}>
       <View style={styles.top}>
-        <Header
-          title="Messages"
-          align="left"
-          action={
-            <IconButton
-              icon="compass-outline"
-              label="Find people to message"
-              onPress={() => router.push('/discover')}
-            />
-          }
+        <Header title="Messages" align="left" />
+        <Button
+          label="New message"
+          icon="chatbubble-ellipses-outline"
+          size="sm"
+          onPress={() => router.push('/chat/new')}
         />
+        <Can
+          capability="canCreateGroups"
+          fallback={
+            <View style={styles.groupAccess}>
+              <Button
+                label="New group"
+                icon="people-outline"
+                variant="secondary"
+                size="sm"
+                disabled
+                onPress={() => {}}
+              />
+              <Text variant="caption" color="muted">
+                Only admins can create groups. Ask an admin to add you to one.
+              </Text>
+            </View>
+          }
+        >
+          <Button
+            label="New group"
+            icon="people-outline"
+            variant="secondary"
+            size="sm"
+            onPress={() => router.push('/groups/new')}
+          />
+        </Can>
         <Input
           accessibilityLabel="Search conversations"
           icon="search-outline"
@@ -79,7 +104,10 @@ export function ChatsScreen(): React.JSX.Element {
       {isPending ? (
         <ChatsSkeleton />
       ) : isError && !data ? (
-        <ErrorState onRetry={() => void refetch()} message="We couldn't load your conversations." />
+        <ErrorState
+          onRetry={() => void refetch()}
+          message={describeError(error, "We couldn't load your conversations.")}
+        />
       ) : (
         <FlatList
           data={conversations}
@@ -112,9 +140,9 @@ export function ChatsScreen(): React.JSX.Element {
               <EmptyState
                 icon="chatbubbles-outline"
                 title="No conversations yet"
-                message="When someone accepts your request — or you accept theirs — you can chat here."
-                actionLabel="Discover people"
-                onAction={() => router.push('/discover')}
+                message="Start a message with a real user or join a group."
+                actionLabel="New message"
+                onAction={() => router.push('/chat/new')}
               />
             )
           }
@@ -134,6 +162,7 @@ export function ChatsScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   top: { paddingHorizontal: spacing.screen, paddingBottom: spacing.md, gap: spacing.xs },
+  groupAccess: { gap: spacing.xs },
   list: { paddingBottom: spacing.xxl },
   emptyList: { flexGrow: 1 },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: spacing.screen + 56 + spacing.md },

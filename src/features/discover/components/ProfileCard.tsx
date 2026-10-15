@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Can } from '@/features/auth/components/Access';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo } from 'react';
@@ -92,43 +93,45 @@ export const ProfileCard = memo(function ProfileCard({
             {profile.interests.slice(0, 2).join(' · ')}
           </Text>
         ) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${action.label} ${profile.name}`}
-          accessibilityState={{ disabled, busy: pending }}
-          disabled={disabled}
-          hitSlop={4}
-          onPress={() => onAction(profile)}
-          style={({ pressed }) => [
-            styles.action,
-            {
-              backgroundColor: action.active ? theme.colors.primary : theme.colors.overlay,
-              borderColor: action.active ? theme.colors.primary : theme.colors.border,
-              opacity: pressed ? 0.85 : 1,
-            },
-          ]}
-        >
-          {pending ? (
-            <ActivityIndicator size="small" color={theme.colors.onPrimary} />
-          ) : (
-            <>
-              <Ionicons
-                name={action.icon}
-                size={15}
-                color={action.active ? theme.colors.onPrimary : theme.colors.textSecondary}
-              />
-              <Text
-                variant="caption"
-                weight="bold"
-                style={{
-                  color: action.active ? theme.colors.onPrimary : theme.colors.textSecondary,
-                }}
-              >
-                {action.label}
-              </Text>
-            </>
-          )}
-        </Pressable>
+        <Can capability="canRequestConnection">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${action.label} ${profile.name}`}
+            accessibilityState={{ disabled, busy: pending }}
+            disabled={disabled}
+            hitSlop={4}
+            onPress={() => onAction(profile)}
+            style={({ pressed }) => [
+              styles.action,
+              {
+                backgroundColor: action.active ? theme.colors.primary : theme.colors.overlay,
+                borderColor: action.active ? theme.colors.primary : theme.colors.border,
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+          >
+            {pending ? (
+              <ActivityIndicator size="small" color={theme.colors.onPrimary} />
+            ) : (
+              <>
+                <Ionicons
+                  name={action.icon}
+                  size={15}
+                  color={action.active ? theme.colors.onPrimary : theme.colors.textSecondary}
+                />
+                <Text
+                  variant="caption"
+                  weight="bold"
+                  style={{
+                    color: action.active ? theme.colors.onPrimary : theme.colors.textSecondary,
+                  }}
+                >
+                  {action.label}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </Can>
       </View>
     </Pressable>
   );

@@ -1,4 +1,4 @@
-import type { User } from '@/features/auth/types';
+import type { UserView as User } from '@/features/auth/types';
 import { mockImages } from './images';
 
 const img = (index: number): string => mockImages[index % mockImages.length]!;

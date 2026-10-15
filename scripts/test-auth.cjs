@@ -136,6 +136,53 @@ test('real group and message writes send confirmed DTOs without client-supplied 
   assert.equal(unreadRefreshes, 1);
 });
 
+test('REST inbox survives realtime outages without resetting unread or bypassing permission errors', async () => {
+  let failure;
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    './socketSession': {
+      socketRequest: async () => {
+        throw failure;
+      },
+      joinGroup: async () => {
+        throw failure;
+      },
+    },
+  });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const { ServiceError } = h.load('src/services/errors.ts');
+  const state = h.load('src/features/chat/services/chatState.ts');
+  state.acceptUnread([
+    {
+      _id: '444444444444444444444444',
+      sender: other,
+      receiver: me,
+      message: 'Unread',
+      sentAt: '2026-10-15T00:00:00Z',
+      isRead: false,
+    },
+  ]);
+  h.apiClient.defaults.adapter = async (config) =>
+    h.ok(
+      config,
+      config.url === '/users/chatlist'
+        ? { userChatlist: [{ _id: other, displayname: 'Peer' }] }
+        : [{ _id: '333333333333333333333333', name: 'Group', admin: me, members: [me, other] }],
+    );
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  failure = new ServiceError('NETWORK');
+  const rows = await service.listConversations();
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].participant.name, 'Peer');
+  assert.equal(rows[0].unreadCount, 1);
+  failure = new ServiceError('FORBIDDEN');
+  await assert.rejects(service.listConversations(), (error) => error.code === 'FORBIDDEN');
+  failure = new ServiceError('UNKNOWN');
+  await assert.rejects(service.listConversations(), (error) => error.code === 'UNKNOWN');
+});
+
 test('socket history requests serialize uncorrelated server events and logout cancels pending requests', async () => {
   const { EventEmitter } = require('node:events');
   class FakeSocket extends EventEmitter {

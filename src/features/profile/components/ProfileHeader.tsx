@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui';
-import type { User } from '@/features/auth/types';
+import type { UserView as User } from '@/features/auth/types';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
@@ -23,7 +23,8 @@ export function ProfileHeader({
   return (
     <View style={styles.root}>
       <Text variant="title" accessibilityRole="header">
-        {user.name}, {user.age}
+        {user.name}
+        {user.age > 0 ? `, ${user.age}` : ''}
       </Text>
       {presence ? (
         <View style={styles.row}>

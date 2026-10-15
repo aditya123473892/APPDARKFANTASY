@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { isServiceError } from './errors';
+import axios from 'axios';
 
 /**
  * Shared client so auth can wipe cached user data on logout (no data leaks between accounts).
@@ -10,7 +11,14 @@ export const queryClient = new QueryClient({
     queries: {
       staleTime: 30_000,
       retry: (count, error) =>
-        !isServiceError(error, 'NOT_FOUND') && !isServiceError(error, 'VALIDATION') && count < 1,
+        !(
+          axios.isAxiosError(error) &&
+          [401, 403].includes(error.response?.status ?? error.response?.data?.statusCode)
+        ) &&
+        !isServiceError(error, 'NOT_FOUND') &&
+        !isServiceError(error, 'FORBIDDEN') &&
+        !isServiceError(error, 'VALIDATION') &&
+        count < 1,
     },
     mutations: { retry: false },
   },

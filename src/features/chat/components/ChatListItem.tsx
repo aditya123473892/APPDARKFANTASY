@@ -23,7 +23,9 @@ export const ChatListItem = memo(function ChatListItem({
   const fromMe = lastMessage?.senderId === myId;
   const preview = lastMessage
     ? `${fromMe ? 'You: ' : ''}${lastMessage.text}`
-    : 'New connection — say hello 👋';
+    : conversation.kind === 'group'
+      ? `${conversation.memberCount ?? 0} members · Open group`
+      : 'Open conversation';
   const online = showPresence && Boolean(conversation.presence?.online);
   return (
     <Pressable

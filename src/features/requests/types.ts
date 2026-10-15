@@ -1,4 +1,4 @@
-import type { User } from '@/features/auth/types';
+import type { UserView as User } from '@/features/auth/types';
 
 export type RequestDirection = 'incoming' | 'outgoing';
 export type ConnectionRequest = {

@@ -1,72 +1,81 @@
-import { zodResolver } from '@hookform/resolvers/zod';
-import { Controller, useForm } from 'react-hook-form';
-import { StyleSheet, View } from 'react-native';
-import { Link } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { AppState, StyleSheet, TextInput, View } from 'react-native';
 import { Button, Input, PasswordInput, Text } from '@/components/ui';
-import { loginSchema, type LoginValues } from '../schemas/authSchemas';
+import { loginSchema } from '../schemas/authSchemas';
 import { useLogin } from '../hooks/useLogin';
 
 export function LoginForm(): React.JSX.Element {
   const { login, error, isLoading, cooldown } = useLogin();
-  const {
-    control,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<LoginValues>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: { email: 'demo@example.com', password: 'DemoPass1' },
-  });
+  const [email, setEmail] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const password = useRef('');
+  const input = useRef<TextInput>(null);
+  useEffect(() => {
+    const listener = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        password.current = '';
+        input.current?.clear();
+      }
+    });
+    return () => {
+      password.current = '';
+      listener.remove();
+    };
+  }, []);
+  const submit = () => {
+    if (isLoading || cooldown > 0) return;
+    const parsed = loginSchema.safeParse({ email, password: password.current });
+    password.current = '';
+    input.current?.clear();
+    if (!parsed.success) {
+      setValidationError('Enter a valid email and your password.');
+      return;
+    }
+    setValidationError(null);
+    void login(parsed.data.email, parsed.data.password);
+    parsed.data.password = '';
+  };
   return (
     <View style={styles.form}>
-      <Controller
-        control={control}
-        name="email"
-        render={({ field }) => (
-          <Input
-            label="Email"
-            icon="mail-outline"
-            keyboardType="email-address"
-            autoComplete="email"
-            textContentType="username"
-            value={field.value}
-            onBlur={field.onBlur}
-            onChangeText={field.onChange}
-            error={errors.email?.message}
-          />
-        )}
+      <Input
+        label="Email"
+        icon="mail-outline"
+        keyboardType="email-address"
+        autoComplete="username"
+        textContentType="username"
+        autoCorrect={false}
+        autoCapitalize="none"
+        value={email}
+        onChangeText={setEmail}
+        editable={!isLoading}
       />
-      <Controller
-        control={control}
-        name="password"
-        render={({ field }) => (
-          <PasswordInput
-            label="Password"
-            value={field.value}
-            onBlur={field.onBlur}
-            onChangeText={field.onChange}
-            error={errors.password?.message}
-          />
-        )}
+      <PasswordInput
+        ref={input}
+        label="Password"
+        autoComplete="current-password"
+        textContentType="password"
+        importantForAutofill="yes"
+        editable={!isLoading}
+        onChangeText={(value) => {
+          password.current = value;
+        }}
+        onSubmitEditing={submit}
       />
-      <Link href="/forgot-password" asChild>
-        <Text color="primary" variant="label" style={styles.link}>
-          Forgot password?
-        </Text>
-      </Link>
-      {error ? (
+      {validationError || error ? (
         <Text color="danger" variant="label">
-          {error}
+          {validationError ?? error}
         </Text>
       ) : null}
       <Button
         label={cooldown > 0 ? `Try again in ${cooldown}s` : 'Sign in'}
         disabled={cooldown > 0}
         loading={isLoading}
-        onPress={handleSubmit((values) =>
-          login(values.email, values.password).then(() => undefined),
-        )}
+        onPress={submit}
       />
+      <Text color="muted" variant="caption">
+        For account creation or password reset, use the desktop website.
+      </Text>
     </View>
   );
 }
-const styles = StyleSheet.create({ form: { gap: 16 }, link: { alignSelf: 'flex-end' } });
+const styles = StyleSheet.create({ form: { gap: 16 } });

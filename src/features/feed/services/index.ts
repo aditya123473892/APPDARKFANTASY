@@ -1,5 +1,5 @@
 import type { FeedService } from './feedService';
-import { mockFeedService } from './feedService.mock';
+import { realFeedService } from './feedService.real';
 
 // Single implementation swap point for posts.
-export const feedService: FeedService = mockFeedService;
+export const feedService: FeedService = realFeedService;

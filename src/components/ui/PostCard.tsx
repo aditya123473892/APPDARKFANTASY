@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
 import { memo, useState } from 'react';
 import {
   Pressable,
@@ -23,6 +22,13 @@ import { useTheme } from '@/theme/useTheme';
 import { formatRelativeTime } from '@/utils/formatters';
 import { Avatar } from './Avatar';
 import { Text } from './Text';
+import { RemoteMedia } from './RemoteMedia';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { addComment } from '@/features/feed/services/feedService.real';
+import { describeError } from '@/services/errors';
+import { toast } from './Toast';
+import { Input } from './Input';
+import { Button } from './Button';
 
 function RichText({ body }: { body: string }): React.JSX.Element {
   const chunks = body.split(/([#@][\w]+)/g);
@@ -65,14 +71,12 @@ function MediaGallery({ media }: { media: PostMedia[] }): React.JSX.Element {
           style={[styles.mediaScroller, { borderColor: theme.colors.border }]}
         >
           {media.map((item, index) => (
-            <Image
+            <RemoteMedia
               key={`${item.uri}-${index}`}
-              source={{ uri: item.uri }}
-              contentFit="cover"
-              transition={180}
-              cachePolicy="memory-disk"
-              accessibilityLabel={`Post photo ${index + 1} of ${media.length}`}
-              style={{ width, aspectRatio: aspect, backgroundColor: theme.colors.surfaceElevated }}
+              uri={item.uri}
+              mimetype={item.mimetype}
+              width={width}
+              height={width / aspect}
             />
           ))}
         </ScrollView>
@@ -108,12 +112,24 @@ export const PostCard = memo(function PostCard({
 }): React.JSX.Element {
   const { theme } = useTheme();
   const [expanded, setExpanded] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [comment, setComment] = useState('');
+  const queryClient = useQueryClient();
+  const createComment = useMutation({
+    mutationFn: () => addComment(post.id, comment),
+    onSuccess: () => {
+      setComment('');
+      for (const queryKey of [['feed'], ['my-posts'], ['user-posts']])
+        void queryClient.invalidateQueries({ queryKey });
+    },
+    onError: (error) => toast.error(describeError(error, 'Unable to post your comment.')),
+  });
   const scale = useSharedValue(1);
   const likeStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const long = post.body.length > 220;
 
   const like = (): void => {
-    if (!onToggleLike) return;
+    if (!onToggleLike || post.likeStateKnown === false) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     scale.set(
       withSequence(
@@ -157,8 +173,11 @@ export const PostCard = memo(function PostCard({
             ) : null}
           </View>
           <Text variant="caption" color="muted" numberOfLines={1}>
-            @{post.user.handle} · {formatRelativeTime(post.createdAt)}
+            {post.user.handle ? `@${post.user.handle} · ` : ''}
+            {formatRelativeTime(post.createdAt)}
             {post.audience === 'connections' ? ' · Connections' : ''}
+            {post.audience === 'private' ? ' · Private' : ''}
+            {post.status && post.status !== 'approved' ? ` · ${post.status}` : ''}
           </Text>
         </View>
       </Pressable>
@@ -187,6 +206,7 @@ export const PostCard = memo(function PostCard({
             accessibilityLabel={post.liked ? 'Unlike post' : 'Like post'}
             accessibilityState={{ selected: post.liked }}
             onPress={like}
+            disabled={!onToggleLike || post.likeStateKnown === false}
             hitSlop={4}
             style={({ pressed }) => [styles.action, pressed && styles.pressed]}
           >
@@ -200,12 +220,17 @@ export const PostCard = memo(function PostCard({
             </Text>
           </Pressable>
         </Animated.View>
-        <View style={styles.action} accessibilityLabel={`${post.replies} replies`}>
+        <Pressable
+          style={styles.action}
+          accessibilityRole="button"
+          accessibilityLabel={`${post.replies} comments`}
+          onPress={() => setShowComments((shown) => !shown)}
+        >
           <Ionicons name="chatbubble-outline" size={19} color={theme.colors.textMuted} />
           <Text variant="label" weight="medium" color="muted">
             {post.replies}
           </Text>
-        </View>
+        </Pressable>
         <View style={styles.grow} />
         <Pressable
           accessibilityRole="button"
@@ -217,6 +242,41 @@ export const PostCard = memo(function PostCard({
           <Ionicons name="share-outline" size={20} color={theme.colors.textSecondary} />
         </Pressable>
       </View>
+      {showComments ? (
+        <View style={{ gap: 12, paddingBottom: 12 }}>
+          {post.comments?.map((item) => (
+            <View key={item.id} style={{ gap: 4 }}>
+              <Text variant="caption" weight="bold">
+                {item.author.name}
+              </Text>
+              <Text>{item.content}</Text>
+            </View>
+          ))}
+          {!post.comments?.length ? (
+            <Text color="muted" variant="caption">
+              {post.replies
+                ? 'Comment details are not included in this response.'
+                : 'No comments yet.'}
+            </Text>
+          ) : null}
+          <Input
+            accessibilityLabel="Write a comment"
+            placeholder="Write a comment"
+            value={comment}
+            onChangeText={setComment}
+            multiline
+            maxLength={2000}
+            editable={!createComment.isPending}
+          />
+          <Button
+            label="Comment"
+            size="sm"
+            loading={createComment.isPending}
+            disabled={!comment.trim() || createComment.isPending}
+            onPress={() => createComment.mutate()}
+          />
+        </View>
+      ) : null}
     </View>
   );
 });

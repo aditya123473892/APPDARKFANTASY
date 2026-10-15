@@ -7,8 +7,20 @@ import {
   type LoginInput,
   type RegisterInput,
   type Session,
-  type User,
 } from '../types';
+import type { User } from '../userModel';
+const fixtureUser: User = {
+  _id: currentUser.id,
+  username: currentUser.email,
+  displayname: currentUser.name,
+  firstName: 'Alex',
+  lastName: 'Morgan',
+  roles: ['user'],
+  isBlocked: false,
+  isEmailVerified: true,
+  intrests: currentUser.interests,
+  avatar: currentUser.avatarUri,
+};
 
 const wait = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS));
 const createSession = (userId: string): Session => ({
@@ -23,13 +35,16 @@ export const mockAuthService: AuthService = {
     await wait();
     if (input.email === 'error@example.com' || input.password === 'wrongpass')
       throw new AuthError('INVALID_CREDENTIALS');
-    return { user: { ...currentUser, email: input.email }, session: createSession(currentUser.id) };
+    return {
+      user: { ...fixtureUser, username: input.email },
+      session: createSession(fixtureUser._id),
+    };
   },
   async register(input: RegisterInput): Promise<AuthResult> {
     await wait();
     if (input.email === 'taken@example.com') throw new AuthError('EMAIL_IN_USE');
-    const user = { ...currentUser, name: input.name, email: input.email };
-    return { user, session: createSession(user.id) };
+    const user = { ...fixtureUser, displayname: input.name, username: input.email };
+    return { user, session: createSession(user._id) };
   },
   async logout(): Promise<void> {
     await wait();
@@ -42,7 +57,7 @@ export const mockAuthService: AuthService = {
   async getCurrentUser(session: Session): Promise<User> {
     await wait();
     if (!session.accessToken.startsWith('mock_access_')) throw new AuthError('SESSION_EXPIRED');
-    return currentUser;
+    return fixtureUser;
   },
   async requestPasswordReset(_email: string): Promise<void> {
     await wait();

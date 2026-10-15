@@ -15,7 +15,10 @@ import {
 } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useConversations } from '@/features/chat/hooks/useChat';
-import { useFeed, useToggleLike } from '@/features/feed/hooks/useFeed';
+import { useMyPosts, useToggleLike } from '@/features/feed/hooks/useFeed';
+import { useQuery } from '@tanstack/react-query';
+import { getData } from '@/services/api/backend';
+import { ErrorState } from '@/components/feedback/ErrorState';
 import type { Post } from '@/features/feed/types';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -54,7 +57,11 @@ export function MyProfileScreen(): React.JSX.Element {
   const user = useAuthStore((state) => state.user);
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState<ProfileTab>('Posts');
-  const feed = useFeed();
+  const feed = useMyPosts();
+  const followers = useQuery({
+    queryKey: ['followers'],
+    queryFn: () => getData<{ followers: unknown[] }>('/users/follow/followers'),
+  });
   const conversations = useConversations();
   const toggleLike = useToggleLike();
 
@@ -112,7 +119,7 @@ export function MyProfileScreen(): React.JSX.Element {
           <Text style={styles.bio}>{user.bio}</Text>
           <View style={styles.stats}>
             <Stat value={myPosts?.length} label="Posts" />
-            <Stat value={conversations.data?.length} label="Connections" />
+            <Stat value={followers.data?.followers.length} label="Followers" />
             <Stat value={user.interests.length} label="Interests" />
           </View>
           <View style={styles.buttons}>
@@ -150,6 +157,8 @@ export function MyProfileScreen(): React.JSX.Element {
             <PhotoGrid photos={photos} name={user.name} />
           ) : feed.isPending ? (
             <Skeleton style={styles.postSkeleton} />
+          ) : feed.isError ? (
+            <ErrorState onRetry={() => void feed.refetch()} />
           ) : myPosts?.length ? (
             <View style={styles.posts}>
               {myPosts.map((post) => (

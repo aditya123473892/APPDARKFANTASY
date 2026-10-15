@@ -296,7 +296,11 @@ export function ChatRoomScreen(): React.JSX.Element {
           canSendMessages={canSendMessages}
           canShareMedia={canShareMedia}
           disabled={
-            !conversation || conversationQuery.isError || messagesQuery.isError || attach.isPending
+            !conversation ||
+            conversationQuery.isError ||
+            (messagesQuery.isError &&
+              (!messagesQuery.data || !isServiceError(messagesQuery.error, 'NETWORK'))) ||
+            attach.isPending
           }
           bottomInset={keyboardVisible ? 0 : insets.bottom}
           placeholder={participant ? `Message ${participant.name}…` : 'Write a message…'}
