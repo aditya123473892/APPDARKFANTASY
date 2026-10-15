@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Avatar, Badge, Text } from '@/components/ui';
+import { Avatar, Badge, Text, Skeleton } from '@/components/ui';
+import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { formatRelativeTime } from '@/utils/formatters';
@@ -9,7 +10,6 @@ import type { Conversation } from '../types';
 export const ChatListItem = memo(function ChatListItem({
   conversation,
   myId,
-  showPresence,
   onPress,
 }: {
   conversation: Conversation;
@@ -22,11 +22,10 @@ export const ChatListItem = memo(function ChatListItem({
   const unread = unreadCount > 0;
   const fromMe = lastMessage?.senderId === myId;
   const preview = lastMessage
-    ? `${fromMe ? 'You: ' : ''}${lastMessage.text}`
+    ? `${conversation.kind === 'group' ? `${fromMe ? 'You' : lastMessage.senderName || 'Someone'}: ` : fromMe ? 'You: ' : ''}${lastMessage.text}`
     : conversation.kind === 'group'
       ? `${conversation.memberCount ?? 0} members · Open group`
       : 'Open conversation';
-  const online = showPresence && Boolean(conversation.presence?.online);
   return (
     <Pressable
       accessibilityRole="button"
@@ -34,7 +33,7 @@ export const ChatListItem = memo(function ChatListItem({
       onPress={() => onPress(conversation)}
       style={({ pressed }) => [styles.root, pressed && { backgroundColor: theme.colors.surface }]}
     >
-      <Avatar uri={participant.avatarUri} label={participant.name} online={online} size={56} />
+      <Avatar uri={participant.avatarUri} label={participant.name} size={56} />
       <View style={styles.content}>
         <View style={styles.row}>
           <Text
@@ -50,15 +49,28 @@ export const ChatListItem = memo(function ChatListItem({
           </Text>
         </View>
         <View style={styles.row}>
-          <Text
-            numberOfLines={1}
-            variant="label"
-            weight={unread ? 'semibold' : 'regular'}
-            color={unread ? 'default' : lastMessage ? 'secondary' : 'primary'}
-            style={styles.preview}
-          >
-            {preview}
-          </Text>
+          {conversation.previewState === 'loading' ? (
+            <Skeleton style={{ width: '70%', height: 14 }} />
+          ) : (
+            <Text
+              numberOfLines={1}
+              variant="label"
+              weight={unread ? 'semibold' : 'regular'}
+              color={unread ? 'default' : lastMessage ? 'secondary' : 'primary'}
+              style={styles.preview}
+            >
+              {conversation.previewState === 'error'
+                ? 'Preview unavailable · pull to refresh'
+                : preview}
+            </Text>
+          )}
+          {fromMe && conversation.kind !== 'group' ? (
+            <Ionicons
+              name={lastMessage?.status === 'read' ? 'checkmark-done' : 'checkmark'}
+              size={14}
+              color={lastMessage?.status === 'read' ? theme.colors.primary : theme.colors.textMuted}
+            />
+          ) : null}
           {unread ? <Badge value={unreadCount} /> : null}
         </View>
       </View>

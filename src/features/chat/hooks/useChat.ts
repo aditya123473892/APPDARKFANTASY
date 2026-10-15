@@ -20,21 +20,35 @@ import { sessionIdentity, isSessionCurrent } from '@/features/auth/sessionRuntim
 import { toast } from '@/components/ui/Toast';
 import { describeError, isServiceError } from '@/services/errors';
 import { createClientId } from '@/utils/clientId';
+import { INBOX_POLL_MS, pollingEnabled } from '../services/inbox';
 
 /** A message as rendered: either server-confirmed or still in the local outbox. */
 export type ChatMessage = Omit<Message, 'status'> & { status: LocalMessageStatus; local: boolean };
 
 const MESSAGE_POLL_MS = 15_000;
 
+export function useChatVisibility() {
+  const [focused, setFocused] = useState(false);
+  const state = useAppState();
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
+  return pollingEnabled(focused, state);
+}
+
 export function useMyId(): string {
   return useAuthStore((state) => state.currentUser?._id ?? '');
 }
 
-export function useConversations() {
+export function useConversations(poll = false) {
+  const active = useAppState() === 'active';
   return useQuery({
     queryKey: queryKeys.conversations,
     queryFn: () => chatService.listConversations(),
-    refetchInterval: 30000,
+    refetchInterval: poll && active ? INBOX_POLL_MS : false,
   });
 }
 

@@ -18,11 +18,9 @@ import {
   acceptMessage,
   acceptUnread,
   acceptRead,
-  HISTORY_PAGE,
   historyVersion,
   knownHistories,
   markGroupRead,
-  prependHistory,
   reconcileHistory,
   setChatReady,
   useChatConnection,
@@ -139,22 +137,19 @@ async function historyOn(
   if (before !== undefined && !isObjectId(before)) throw new ServiceError('VALIDATION');
   watchHistory(key);
   const started = historyVersion();
-  const page = { limit: HISTORY_PAGE, ...(before ? { before } : {}) };
   const rows = await requestOn<unknown>(
     current,
     scope,
     kind === 'group' ? 'getGroupChatHistory' : 'getChatHistory',
     kind === 'group' ? 'groupChatHistory' : 'chatHistory',
-    kind === 'group' ? { groupId: id, ...page } : { user2: id, ...page },
+    kind === 'group' ? { groupId: id } : { user2: id },
   );
   assertSessionCurrent(scope);
   if (!Array.isArray(rows)) throw new ServiceError('UNKNOWN');
   const parsed = rows.map(parseMessage);
   if (parsed.some((row) => !row || conversationKey(row) !== key)) throw new ServiceError('UNKNOWN');
   const messages = parsed.map((row) => mapMessage(row, key));
-  return before
-    ? prependHistory(key, messages, HISTORY_PAGE)
-    : reconcileHistory(key, messages, started, HISTORY_PAGE);
+  return reconcileHistory(key, messages, started);
 }
 async function resync(current: Socket, scope: number, epoch: number): Promise<void> {
   for (const groupId of groups) await requestOn(current, scope, 'joinGroup', undefined, groupId);

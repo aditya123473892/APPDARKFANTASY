@@ -1,3 +1,4 @@
+import { messagePreview } from './inbox';
 import { create } from 'zustand';
 import { sessionIdentity, registerSessionTeardown } from '@/features/auth/sessionRuntime';
 import { queryClient } from '@/services/queryClient';
@@ -21,7 +22,6 @@ let version = 0;
 /** Unread direct messages by message ID, from the server's unread arrays and live events. */
 let unread = new Map<string, string>();
 /** Server-reported direct counts, used only while the realtime unread list is unavailable. */
-let directFallback: Map<string, number> | null = null;
 /** Group unread counts (server cursor based), advanced by live group messages. */
 const groupUnread = new Map<string, number>();
 const countedGroupMessages = new Set<string>();
@@ -32,8 +32,7 @@ export const knownHistories = () => [...histories];
 export const historyVersion = () => version;
 export const hasOlderHistory = (key: string) => olderAvailable.get(key) ?? false;
 export function unreadFor(key: string): number {
-  if (key.startsWith('group:')) return groupUnread.get(key) ?? 0;
-  if (directFallback) return directFallback.get(key) ?? 0;
+  if (key.startsWith('group:')) return 0;
   return [...unread.values()].filter((value) => value === key).length;
 }
 export function watchHistory(key: string): void {
@@ -59,28 +58,18 @@ function refreshUnreadCounts(): void {
     items?.map((item) => ({ ...item, unreadCount: unreadFor(item.id) })),
   );
 }
-function updatePreview(key: string, rows: Message[]): void {
+function updatePreview(key: string, rows: Message[], complete = false): void {
   const latest = rows[rows.length - 1];
   queryClient.setQueryData<Conversation[]>(queryKeys.conversations, (items) =>
     items?.map((item) => {
       if (item.id !== key) return item;
-      // A history page may end before the server-reported preview; keep the newer one.
-      const keepCurrent =
-        item.lastMessage &&
-        (!latest || Date.parse(item.lastMessage.createdAt) > Date.parse(latest.createdAt));
       return {
         ...item,
+        previewState: 'loaded',
+        historyLoaded: complete || item.historyLoaded,
         unreadCount: unreadFor(key),
-        lastMessage: keepCurrent
-          ? item.lastMessage
-          : latest
-            ? {
-                text: latest.text || (latest.media?.length ? 'Attachment' : ''),
-                senderId: latest.senderId,
-                createdAt: latest.createdAt,
-              }
-            : null,
-        updatedAt: keepCurrent ? item.updatedAt : (latest?.createdAt ?? item.createdAt),
+        lastMessage: latest ? messagePreview(latest) : null,
+        updatedAt: latest?.createdAt ?? item.createdAt,
       };
     }),
   );
@@ -197,7 +186,7 @@ export function reconcileHistory(
   }
   const merged = sorted([...result.values()]);
   queryClient.setQueryData(queryKeys.messages(key), merged);
-  updatePreview(key, merged);
+  updatePreview(key, merged, true);
   // Only prune entries represented by the snapshot; another request may still be in flight.
   return merged;
 }
@@ -234,7 +223,6 @@ export function acceptUnread(value: unknown): boolean {
     if (key) next.set(raw._id, key);
   }
   unread = next;
-  directFallback = null;
   refreshUnreadCounts();
   return true;
 }
@@ -243,7 +231,6 @@ export function acceptServerUnread(
   direct: Map<string, number> | null,
   groups: Map<string, number>,
 ): void {
-  if (direct) directFallback = direct;
   for (const [key, count] of groups) groupUnread.set(key, count);
   refreshUnreadCounts();
 }
@@ -296,7 +283,6 @@ registerSessionTeardown(() => {
   histories.clear();
   overlays.clear();
   unread.clear();
-  directFallback = null;
   groupUnread.clear();
   countedGroupMessages.clear();
   olderAvailable.clear();

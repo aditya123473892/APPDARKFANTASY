@@ -195,7 +195,7 @@ test('real group and message writes send confirmed DTOs with idempotency keys an
   });
   assert.deepEqual(requests[1], {
     url: '/chats/messages',
-    body: { receiver: other, message: 'Hello', clientId: 'local-only' },
+    body: { receiver: other, message: 'Hello' },
   });
   assert.equal(sent.id, '444444444444444444444444');
   assert.equal(sent.clientId, 'local-only');
@@ -210,100 +210,173 @@ test('real group and message writes send confirmed DTOs with idempotency keys an
   assert.deepEqual(requests[2].body, { receiver: other, message: 'Hello' });
 });
 
-test('REST inbox survives realtime outages without resetting unread or bypassing permission errors', async () => {
-  let failure;
+test('B inbox uses confirmed REST lists, preserves array unread, and fails closed on malformed lists', async () => {
   const h = harness({
     'react-native': { Platform: { OS: 'android' } },
-    './socketSession': {
-      socketRequest: async () => {
-        throw failure;
-      },
-      joinGroup: async () => {
-        throw failure;
-      },
-    },
+    './socketSession': { refreshUnread: async () => {} },
   });
-  const me = '111111111111111111111111';
-  const other = '222222222222222222222222';
+  const me = '111111111111111111111111',
+    other = '222222222222222222222222';
   h.runtime.setSessionIdentity(me, h.token(me));
-  const { ServiceError } = h.load('src/services/errors.ts');
   const state = h.load('src/features/chat/services/chatState.ts');
-  state.acceptUnread([
-    {
-      _id: '444444444444444444444444',
-      sender: other,
-      receiver: me,
-      message: 'Unread',
-      sentAt: '2026-10-15T00:00:00Z',
-      isRead: false,
-    },
-  ]);
-  const group = '333333333333333333333333';
-  let conversations = [
-    {
-      id: `group:${group}`,
-      kind: 'group',
-      group: {
-        _id: group,
-        name: 'Group',
-        admin: me,
-        memberCount: 2,
-        createdAt: '2026-10-01T00:00:00Z',
-        updatedAt: '2026-10-01T00:00:00Z',
-      },
-      lastMessage: {
-        _id: '555555555555555555555555',
-        sender: other,
-        groupId: group,
-        message: 'Group hi',
-        sentAt: '2026-10-15T02:00:00Z',
-      },
-      unreadCount: 3,
-      updatedAt: '2026-10-15T02:00:00Z',
-    },
-    {
-      id: `user:${other}`,
-      kind: 'direct',
-      peer: { _id: other, displayname: 'Peer', isOnline: true, username: 'private@example.test' },
-      lastMessage: {
-        _id: '444444444444444444444444',
-        sender: other,
-        receiver: me,
-        message: 'Unread',
-        sentAt: '2026-10-15T00:00:00Z',
-      },
-      unreadCount: 2,
-      updatedAt: '2026-10-15T00:00:00Z',
-    },
-  ];
-  const requested = [];
+  const unread = {
+    _id: '444444444444444444444444',
+    sender: other,
+    receiver: me,
+    message: 'Unread',
+    sentAt: '2026-10-15T00:00:00Z',
+    isRead: false,
+  };
+  state.acceptUnread([unread, unread]);
+  const calls = [];
   h.apiClient.defaults.adapter = async (config) => {
-    requested.push(config.url);
-    return h.ok(config, { conversations });
+    calls.push(config.url);
+    return h.ok(
+      config,
+      config.url === '/users/chatlist'
+        ? { userChatlist: [{ _id: other, displayname: 'Peer' }] }
+        : [],
+    );
   };
   const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
-  failure = new ServiceError('NETWORK');
   const rows = await service.listConversations();
-  assert.deepEqual(requested, ['/chats/conversations']);
-  assert.deepEqual(
-    rows.map((row) => row.id),
-    [`group:${group}`, `user:${other}`],
+  assert.deepEqual(calls.sort(), ['/groups/my-groups', '/users/chatlist']);
+  assert.equal(rows[0].participant.name, 'Peer');
+  assert.equal(rows[0].unreadCount, 1);
+  assert.equal(rows[0].presence, null);
+  assert.equal(rows[0].previewState, 'loading');
+  assert.equal(state.acceptUnread({ count: 999 }), false);
+  assert.equal(state.unreadFor('user:' + other), 1);
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, {});
+  await assert.rejects(service.listConversations());
+});
+
+test('B previews, last activity, loaded-message local search and visibility polling', () => {
+  const h = harness();
+  const inbox = h.load('src/features/chat/services/inbox.ts');
+  const base = {
+    id: 'm',
+    senderId: 'peer',
+    text: '',
+    createdAt: '2026-10-15T02:00:00Z',
+    status: 'read',
+  };
+  assert.equal(
+    inbox.messagePreview({ ...base, media: [{ mimetype: 'image/jpeg' }] }).text,
+    'Photo',
   );
-  // While realtime is down the server's counts are used for both kinds.
-  assert.equal(rows[0].unreadCount, 3);
-  assert.equal(rows[1].unreadCount, 2);
-  assert.equal(rows[0].lastMessage.text, 'Group hi');
-  assert.equal(rows[0].memberCount, 2);
-  assert.equal(rows[1].participant.name, 'Peer');
-  assert.equal(rows[1].presence.online, true);
-  assert.equal(rows[1].presence.lastSeenAt, null);
-  conversations = [{ ...conversations[1], kind: 'unknown' }];
-  await assert.rejects(service.listConversations(), (error) => error.code === 'UNKNOWN');
-  conversations = [];
-  failure = new ServiceError('FORBIDDEN');
-  await assert.rejects(service.listConversations(), (error) => error.code === 'FORBIDDEN');
-  failure = new ServiceError('UNKNOWN');
-  await assert.rejects(service.listConversations(), (error) => error.code === 'UNKNOWN');
+  assert.equal(inbox.messagePreview({ ...base, media: [{ mimetype: 'video/mp4' }] }).text, 'Video');
+  assert.equal(
+    inbox.messagePreview({ ...base, text: 'Caption', media: [{ mimetype: 'image/jpeg' }] }).text,
+    'Caption',
+  );
+  const rows = [
+    { id: 'a', participant: { name: 'Alice' }, updatedAt: '2026-10-15T01:00:00Z' },
+    { id: 'b', participant: { name: 'Bob' }, updatedAt: '2026-10-15T02:00:00Z' },
+  ];
+  h.queryData.set(JSON.stringify(['chat', 'messages', 'b']), [{ text: 'Loaded needle' }]);
+  assert.deepEqual(
+    Array.from(inbox.localSearch(rows, '')).map((r) => r.id),
+    ['b', 'a'],
+  );
+  assert.deepEqual(
+    Array.from(inbox.localSearch(rows, 'needle')).map((r) => r.id),
+    ['b'],
+  );
+  assert.equal(inbox.LOCAL_SEARCH_LABEL, 'Local search');
+  for (const [focused, state, expected] of [
+    [true, 'active', true],
+    [false, 'active', false],
+    [true, 'background', false],
+    [true, 'inactive', false],
+  ])
+    assert.equal(inbox.pollingEnabled(focused, state), expected);
+  const screen = fs.readFileSync('src/features/chat/screens/ChatsScreen.tsx', 'utf8');
+  assert.match(screen, /accessibilityLabel={LOCAL_SEARCH_LABEL}/);
+  assert.match(screen, /useConversations\(visible\)/);
+});
+
+test('B many-chat load measures request payloads, caps prefetch and pauses between requests', async (t) => {
+  const h = chatHarness();
+  const inbox = h.load('src/features/chat/services/inbox.ts');
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  const people = Array.from({ length: 40 }, (_, i) => ({
+    _id: (i + 100).toString(16).padStart(24, '0'),
+    displayname: 'Peer ' + i,
+  }));
+  const groups = Array.from({ length: 10 }, (_, i) => ({
+    _id: (i + 500).toString(16).padStart(24, '0'),
+    name: 'Group ' + i,
+    admin: h.me,
+    createdAt: '2026-10-01T00:00:00Z',
+  }));
+  let http = 0,
+    bytes = 0,
+    histories = 0,
+    active = 0,
+    peak = 0;
+  h.apiClient.defaults.adapter = async (config) => {
+    http++;
+    const data = config.url === '/users/chatlist' ? { userChatlist: people } : groups;
+    const response = h.ok(config, data);
+    bytes += Buffer.byteLength(JSON.stringify(response.data));
+    return response;
+  };
+  const rows = await service.listConversations();
+  const load = async (key) => {
+    active++;
+    peak = Math.max(peak, active);
+    histories++;
+    const messages = Array.from({ length: 100 }, (_, i) =>
+      backendMessage(h.me, h.other, {
+        _id: (i + 1000).toString(16).padStart(24, '0'),
+        ...(key.startsWith('group:')
+          ? {
+              receiver: undefined,
+              groupId: key.slice(6),
+              sender: { _id: h.other, displayname: 'Group sender' },
+            }
+          : { sender: key.slice(5) }),
+        message: 'Synthetic message ' + i,
+      }),
+    );
+    bytes += Buffer.byteLength(JSON.stringify(messages));
+    h.history.set(key.split(':')[1], messages);
+    const result = await service.listMessages(key);
+    active--;
+    return result;
+  };
+  await inbox.prefetchInbox(rows, load, () => true);
+  assert.equal(peak, inbox.INBOX_PREFETCH_CONCURRENCY);
+  assert.equal(histories, 50);
+  assert.equal(http, 2);
+  await until(() => h.sockets[0].packets.filter((p) => p.name === 'getUnreadCount').length === 2);
+  const packets = h.sockets[0].packets;
+  t.diagnostic(
+    JSON.stringify({
+      fixture: '40 direct + 10 group; 100 messages/history',
+      httpRequests: http,
+      historyRequests: histories,
+      socketRequests: packets.length,
+      socketRequestJsonBytes: Buffer.byteLength(JSON.stringify(packets)),
+      jsonListAndHistoryResponseBytes: bytes,
+      peakPrefetch: peak,
+    }),
+  );
+  let visible = true,
+    calls = 0;
+  await inbox.prefetchInbox(
+    rows,
+    async () => {
+      calls++;
+      visible = false;
+      return [];
+    },
+    () => visible,
+    true,
+  );
+  assert.equal(calls, 1);
+  h.runtime.teardownSession();
 });
 
 test('socket history requests serialize uncorrelated server events and logout cancels pending requests', async () => {
@@ -1220,7 +1293,7 @@ test('server-echoed clientId reconciles messages; invalid keys are dropped', () 
   h.runtime.teardownSession();
 });
 
-test('history is paged: newest page keeps older loaded pages, older pages prepend', async () => {
+test('full histories reconcile snapshots and never send pagination fields', async () => {
   const h = chatHarness();
   const key = `user:${h.other}`;
   const { mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
@@ -1253,11 +1326,11 @@ test('history is paged: newest page keeps older loaded pages, older pages prepen
 
   await h.transport.getHistory(key);
   const request = h.sockets[0].packets.find((packet) => packet.name === 'getChatHistory');
-  assert.equal(request.payload.limit, 50);
+  assert.equal(JSON.stringify(request.payload), JSON.stringify({ user2: h.other }));
   h.runtime.teardownSession();
 });
 
-test('group unread counts once per delivered message and resets on read', async () => {
+test('group messages merge without inventing unsupported unread receipts', async () => {
   const h = chatHarness();
   await h.transport.ensureChatReady();
   const group = '333333333333333333333333';
@@ -1273,8 +1346,8 @@ test('group unread counts once per delivered message and resets on read', async 
     _id: 'cccccccccccccccccccccccc',
     sender: h.me,
   }); // own message
-  assert.equal(h.state.unreadFor(key), 1);
-  assert.equal(h.queryData.get(JSON.stringify(['chat', 'conversations']))[0].unreadCount, 1);
+  assert.equal(h.state.unreadFor(key), 0);
+  assert.equal(h.queryData.get(JSON.stringify(['chat', 'conversations']))[0].unreadCount, 0);
   socket.server('groupRead', { groupId: group }); // read on another device
   assert.equal(h.state.unreadFor(key), 0);
   h.runtime.teardownSession();

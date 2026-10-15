@@ -30,7 +30,15 @@ export type ChatParticipant = { id: string; name: string; age: number; avatarUri
 export type Conversation = {
   id: string;
   participant: ChatParticipant;
-  lastMessage: { text: string; senderId: string; createdAt: string } | null;
+  lastMessage: {
+    text: string;
+    senderId: string;
+    senderName?: string;
+    createdAt: string;
+    status?: MessageStatus;
+  } | null;
+  previewState?: 'loading' | 'loaded' | 'error';
+  historyLoaded?: boolean;
   unreadCount: number;
   presence: Presence | null;
   createdAt: string;

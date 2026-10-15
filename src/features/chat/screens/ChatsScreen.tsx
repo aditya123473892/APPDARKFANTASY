@@ -1,17 +1,18 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { Header, Screen } from '@/components/layout';
-import { EmptyState, Input, Skeleton, Button } from '@/components/ui';
+import { EmptyState, Input, Skeleton, Button, Text } from '@/components/ui';
 import { Can } from '@/features/auth/components/Access';
-import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { useDebounce } from '@/hooks/useDebounce';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { ChatListItem } from '../components/ChatListItem';
-import { useConversations, useMyId } from '../hooks/useChat';
+import { useConversations, useMyId, useChatVisibility } from '../hooks/useChat';
+import { INBOX_POLL_MS, LOCAL_SEARCH_LABEL, localSearch, prefetchInbox } from '../services/inbox';
+import { chatService } from '../services';
 import type { Conversation } from '../types';
 import { describeError } from '@/services/errors';
 
@@ -35,20 +36,39 @@ export function ChatsScreen(): React.JSX.Element {
   const router = useRouter();
   const { theme } = useTheme();
   const myId = useMyId();
-  const showPresence = usePreferences((state) => state.showActiveStatus);
+  const visible = useChatVisibility();
+  const visibility = useRef(visible);
+  useEffect(() => { visibility.current = visible; }, [visible]);
+  const [previewRefresh, setPreviewRefresh] = useState(0);
   const [search, setSearch] = useState('');
   const query = useDebounce(search.trim().toLowerCase(), 200);
   const { data, error, isPending, isError, isRefetchError, refetch, isRefetching } =
-    useConversations();
+    useConversations(visible);
+  const inboxKeys = data?.map((item) => item.id).join('|');
+  const latestData = useRef(data);
+  useEffect(() => { latestData.current = data; }, [data]);
+  useEffect(() => {
+    if (!visible) return;
+    const timer = setInterval(() => setPreviewRefresh((value) => value + 1), INBOX_POLL_MS);
+    return () => clearInterval(timer);
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || !latestData.current) return;
+    let mounted = true;
+    void prefetchInbox(
+      latestData.current,
+      (key) => chatService.listMessages(key),
+      () => mounted && visibility.current,
+      previewRefresh > 0,
+    ).catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, [inboxKeys, visible, previewRefresh]);
 
   // Most recent activity first; live messages update `updatedAt` between refetches.
-  const conversations = useMemo(
-    () =>
-      (data ?? [])
-        .filter((item) => !query || item.participant.name.toLowerCase().includes(query))
-        .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0)),
-    [data, query],
-  );
+  const conversations = useMemo(() => localSearch(data ?? [], query), [data, query]);
 
   const open = useCallback(
     (conversation: Conversation) => router.push(`/chat/${conversation.id}`),
@@ -75,14 +95,17 @@ export function ChatsScreen(): React.JSX.Element {
           />
         </Can>
         <Input
-          accessibilityLabel="Search conversations"
+          accessibilityLabel={LOCAL_SEARCH_LABEL}
           icon="search-outline"
-          placeholder="Search by name"
+          placeholder="Local search: loaded names and messages"
           value={search}
           onChangeText={setSearch}
           returnKeyType="search"
           clearButtonMode="while-editing"
         />
+        <Text variant="caption" color="muted">
+          {LOCAL_SEARCH_LABEL} · Loaded names and messages only
+        </Text>
       </View>
       {isRefetchError && data ? (
         <OfflineBanner message="Can't refresh right now. Showing saved conversations." />
@@ -107,7 +130,10 @@ export function ChatsScreen(): React.JSX.Element {
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
-              onRefresh={() => void refetch()}
+              onRefresh={() => {
+                void refetch();
+                setPreviewRefresh((value) => value + 1);
+              }}
               tintColor={theme.colors.primary}
               colors={[theme.colors.primary]}
               progressBackgroundColor={theme.colors.surfaceElevated}
@@ -117,7 +143,7 @@ export function ChatsScreen(): React.JSX.Element {
             query ? (
               <EmptyState
                 icon="search-outline"
-                title="No matches for that name"
+                title="No local matches"
                 message="Try a different spelling, or clear the search."
                 actionLabel="Clear search"
                 onAction={() => setSearch('')}
@@ -133,12 +159,7 @@ export function ChatsScreen(): React.JSX.Element {
             )
           }
           renderItem={({ item }) => (
-            <ChatListItem
-              conversation={item}
-              myId={myId}
-              showPresence={showPresence}
-              onPress={open}
-            />
+            <ChatListItem conversation={item} myId={myId} showPresence={false} onPress={open} />
           )}
         />
       )}
