@@ -81,7 +81,7 @@ test('paginated real user directory never falls back to fixtures and excludes cu
   assert.equal((await listRealUsers()).length, 0);
 });
 
-test('real group and message writes send confirmed DTOs without client-supplied identity or invented fields', async () => {
+test('real group and message writes send confirmed DTOs with idempotency keys and no client-supplied identity', async () => {
   let unreadRefreshes = 0;
   const h = harness({
     'react-native': { Platform: { OS: 'android' } },
@@ -114,11 +114,16 @@ test('real group and message writes send confirmed DTOs without client-supplied 
     );
   };
   const { groupService } = h.load('src/features/chat/services/groupService.ts');
-  const group = await groupService.create('  Server group  ', [other, other]);
+  const group = await groupService.create({
+    name: '  Server group  ',
+    description: '  ',
+    members: [other, other],
+    clientId: 'group-key-1',
+  });
   assert.equal(group.admin, me);
   assert.deepEqual(requests[0], {
     url: '/groups/create-group',
-    body: { name: 'Server group', members: [other] },
+    body: { name: 'Server group', members: [other], clientId: 'group-key-1' },
   });
   const { realChatService } = h.load('src/features/chat/services/chatService.real.ts');
   const sent = await realChatService.sendMessage({
@@ -128,12 +133,19 @@ test('real group and message writes send confirmed DTOs without client-supplied 
   });
   assert.deepEqual(requests[1], {
     url: '/chats/messages',
-    body: { receiver: other, message: 'Hello' },
+    body: { receiver: other, message: 'Hello', clientId: 'local-only' },
   });
   assert.equal(sent.id, '444444444444444444444444');
   assert.equal(sent.clientId, 'local-only');
   assert.equal(sent.status, 'sent');
   assert.equal(unreadRefreshes, 1);
+  // A malformed key is never sent; the server would reject it.
+  await realChatService.sendMessage({
+    conversationId: `user:${other}`,
+    text: 'Hello',
+    clientId: 'bad key!',
+  });
+  assert.deepEqual(requests[2].body, { receiver: other, message: 'Hello' });
 });
 
 test('REST inbox survives realtime outages without resetting unread or bypassing permission errors', async () => {
@@ -164,19 +176,68 @@ test('REST inbox survives realtime outages without resetting unread or bypassing
       isRead: false,
     },
   ]);
-  h.apiClient.defaults.adapter = async (config) =>
-    h.ok(
-      config,
-      config.url === '/users/chatlist'
-        ? { userChatlist: [{ _id: other, displayname: 'Peer' }] }
-        : [{ _id: '333333333333333333333333', name: 'Group', admin: me, members: [me, other] }],
-    );
+  const group = '333333333333333333333333';
+  let conversations = [
+    {
+      id: `group:${group}`,
+      kind: 'group',
+      group: {
+        _id: group,
+        name: 'Group',
+        admin: me,
+        memberCount: 2,
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+      },
+      lastMessage: {
+        _id: '555555555555555555555555',
+        sender: other,
+        groupId: group,
+        message: 'Group hi',
+        sentAt: '2026-10-15T02:00:00Z',
+      },
+      unreadCount: 3,
+      updatedAt: '2026-10-15T02:00:00Z',
+    },
+    {
+      id: `user:${other}`,
+      kind: 'direct',
+      peer: { _id: other, displayname: 'Peer', isOnline: true, username: 'private@example.test' },
+      lastMessage: {
+        _id: '444444444444444444444444',
+        sender: other,
+        receiver: me,
+        message: 'Unread',
+        sentAt: '2026-10-15T00:00:00Z',
+      },
+      unreadCount: 2,
+      updatedAt: '2026-10-15T00:00:00Z',
+    },
+  ];
+  const requested = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    requested.push(config.url);
+    return h.ok(config, { conversations });
+  };
   const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
   failure = new ServiceError('NETWORK');
   const rows = await service.listConversations();
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].participant.name, 'Peer');
-  assert.equal(rows[0].unreadCount, 1);
+  assert.deepEqual(requested, ['/chats/conversations']);
+  assert.deepEqual(
+    rows.map((row) => row.id),
+    [`group:${group}`, `user:${other}`],
+  );
+  // While realtime is down the server's counts are used for both kinds.
+  assert.equal(rows[0].unreadCount, 3);
+  assert.equal(rows[1].unreadCount, 2);
+  assert.equal(rows[0].lastMessage.text, 'Group hi');
+  assert.equal(rows[0].memberCount, 2);
+  assert.equal(rows[1].participant.name, 'Peer');
+  assert.equal(rows[1].presence.online, true);
+  assert.equal(rows[1].presence.lastSeenAt, null);
+  conversations = [{ ...conversations[1], kind: 'unknown' }];
+  await assert.rejects(service.listConversations(), (error) => error.code === 'UNKNOWN');
+  conversations = [];
   failure = new ServiceError('FORBIDDEN');
   await assert.rejects(service.listConversations(), (error) => error.code === 'FORBIDDEN');
   failure = new ServiceError('UNKNOWN');
@@ -253,6 +314,7 @@ test('each role has confirmed capabilities; unknown roles fail closed', () => {
     assert.equal(hasCapability([role], 'canShareMedia'), true);
     assert.equal(hasCapability([role], 'canModerate'), ['root', 'admin'].includes(role));
     assert.equal(hasCapability([role], 'canRequestConnection'), role === 'user');
+    assert.equal(hasCapability([role], 'canCreateGroups'), true);
   }
   assert.equal(hasRole(['root'], ['admin']), true);
   assert.equal(hasCapability([], 'canSendMessages'), false);
@@ -655,7 +717,7 @@ test('Stage A composer and attachment capabilities are independent', () => {
   assert.equal(sends, 1);
 });
 
-test('Stage A read hook gates focus, foreground, synchronization and direct chats at emission', async () => {
+test('Stage A read hook gates focus, foreground and synchronization; groups read without receipts', async () => {
   const preferences = { readReceipts: true };
   const usePreferences = (selector) => selector(preferences);
   usePreferences.getState = () => preferences;
@@ -711,11 +773,17 @@ test('Stage A read hook gates focus, foreground, synchronization and direct chat
   connection.ready = true;
   blur();
   assert.equal(reads[0].allowed(), false);
+  preferences.readReceipts = false;
+  useMarkConversationRead('user:222222222222222222222222', 'bbbbbbbbbbbbbbbbbbbbbbbb');
+  effects.splice(0).forEach((fn) => fn());
+  assert.equal(reads.length, 1); // direct receipts follow the reciprocal preference
   useMarkConversationRead('group:333333333333333333333333', 'aaaaaaaaaaaaaaaaaaaaaaaa');
   effects.splice(0).forEach((fn) => fn());
-  assert.equal(reads.length, 1);
+  assert.equal(reads.length, 2);
+  assert.equal(reads[1].key, 'group:333333333333333333333333');
   h.runtime.teardownSession();
   assert.equal(reads[0].allowed(), false);
+  assert.equal(reads[1].allowed(), false);
 });
 
 function harness(overrides = {}) {
@@ -756,6 +824,8 @@ function harness(overrides = {}) {
         },
         getQueryData: (key) => queryData.get(JSON.stringify(key)),
         cancelQueries: async () => {},
+        invalidateQueries: async () => {},
+        removeQueries: ({ queryKey }) => queryData.delete(JSON.stringify(queryKey)),
         clear: () => {
           queryData.clear();
           counters.queries++;
@@ -1075,4 +1145,152 @@ test('logout during GET backoff cancels retry instead of sending an old token', 
   await h.useAuthStore.getState().logout();
   await pending;
   assert.equal(calls, 1);
+});
+
+test('server-echoed clientId reconciles messages; invalid keys are dropped', () => {
+  const h = chatHarness();
+  const { parseMessage, mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
+  const raw = backendMessage(h.me, h.other, { clientId: 'abc123-xyz' });
+  assert.equal(parseMessage(raw).clientId, 'abc123-xyz');
+  assert.equal(mapMessage(raw, `user:${h.other}`).clientId, 'abc123-xyz');
+  assert.equal(parseMessage({ ...raw, clientId: 'x' }).clientId, undefined);
+  assert.equal(parseMessage({ ...raw, clientId: '<script>alert(1)</script>' }).clientId, undefined);
+  h.runtime.teardownSession();
+});
+
+test('history is paged: newest page keeps older loaded pages, older pages prepend', async () => {
+  const h = chatHarness();
+  const key = `user:${h.other}`;
+  const { mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
+  const message = (index) =>
+    mapMessage(
+      backendMessage(h.me, h.other, {
+        _id: index.toString(16).padStart(24, '0'),
+        sentAt: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
+        message: `m${index}`,
+      }),
+      key,
+    );
+  const page = (from, to) => Array.from({ length: to - from }, (_, i) => message(from + i));
+  const queryKey = JSON.stringify(['chat', 'messages', key]);
+
+  h.state.reconcileHistory(key, page(50, 100), h.state.historyVersion(), 50);
+  assert.equal(h.state.hasOlderHistory(key), true);
+  h.state.prependHistory(key, page(10, 50), 50);
+  assert.equal(h.state.hasOlderHistory(key), false);
+  assert.equal(h.queryData.get(queryKey).length, 90);
+  // A refresh of the newest page (one new message) must not drop older pages.
+  h.state.reconcileHistory(key, page(51, 101), h.state.historyVersion(), 50);
+  const rows = h.queryData.get(queryKey);
+  assert.equal(rows.length, 91);
+  assert.equal(rows[0].text, 'm10');
+  assert.equal(rows.at(-1).text, 'm100');
+  // A short page is the whole conversation: rows missing from it were deleted.
+  h.state.reconcileHistory(key, page(98, 101), h.state.historyVersion(), 50);
+  assert.equal(h.queryData.get(queryKey).length, 3);
+
+  await h.transport.getHistory(key);
+  const request = h.sockets[0].packets.find((packet) => packet.name === 'getChatHistory');
+  assert.equal(request.payload.limit, 50);
+  h.runtime.teardownSession();
+});
+
+test('group unread counts once per delivered message and resets on read', async () => {
+  const h = chatHarness();
+  await h.transport.ensureChatReady();
+  const group = '333333333333333333333333';
+  const key = `group:${group}`;
+  h.queryData.set(JSON.stringify(['chat', 'conversations']), [{ id: key, unreadCount: 0 }]);
+  const incoming = backendMessage(h.me, h.other, { receiver: undefined, groupId: group });
+  const socket = h.sockets[0];
+  socket.server('receiveGroupMessage', incoming);
+  socket.server('receiveGroupMessage', incoming); // duplicate delivery
+  socket.server('messageUpdated', { ...incoming, message: 'edited' }); // not a new message
+  socket.server('receiveGroupMessage', {
+    ...incoming,
+    _id: 'cccccccccccccccccccccccc',
+    sender: h.me,
+  }); // own message
+  assert.equal(h.state.unreadFor(key), 1);
+  assert.equal(h.queryData.get(JSON.stringify(['chat', 'conversations']))[0].unreadCount, 1);
+  socket.server('groupRead', { groupId: group }); // read on another device
+  assert.equal(h.state.unreadFor(key), 0);
+  h.runtime.teardownSession();
+});
+
+test('typing indicators come from other participants and clear on delivery', async () => {
+  const h = chatHarness();
+  await h.transport.ensureChatReady();
+  const typing = h.load('src/features/chat/store/typingStore.ts');
+  const socket = h.sockets[0];
+  const direct = `user:${h.other}`;
+  socket.server('typing', { sender: h.other, isTyping: true });
+  socket.server('typing', { sender: h.me, isTyping: true });
+  socket.server('typing', { sender: 'not-an-id', isTyping: true });
+  assert.deepEqual(Object.keys(typing.useTypingStore.getState().typing[direct]), [h.other]);
+  socket.server('receiveMessage', backendMessage(h.me, h.other));
+  assert.deepEqual(Object.keys(typing.useTypingStore.getState().typing[direct]), []);
+  socket.server('typing', { sender: h.other, groupId: '333333333333333333333333' });
+  assert.ok(typing.useTypingStore.getState().typing['group:333333333333333333333333'][h.other]);
+  h.runtime.teardownSession();
+  assert.equal(Object.keys(typing.useTypingStore.getState().typing).length, 0);
+});
+
+test('removal from a group drops it from the inbox and its cached history', async () => {
+  const h = chatHarness();
+  await h.transport.ensureChatReady();
+  const group = '333333333333333333333333';
+  const key = `group:${group}`;
+  h.queryData.set(JSON.stringify(['chat', 'conversations']), [
+    { id: key, unreadCount: 0 },
+    { id: `user:${h.other}`, unreadCount: 0 },
+  ]);
+  h.queryData.set(JSON.stringify(['chat', 'messages', key]), [{ id: 'x' }]);
+  h.sockets[0].server('groupRemoved', { groupId: group });
+  assert.deepEqual(
+    h.queryData.get(JSON.stringify(['chat', 'conversations'])).map((row) => row.id),
+    [`user:${h.other}`],
+  );
+  assert.equal(h.queryData.has(JSON.stringify(['chat', 'messages', key])), false);
+  h.runtime.teardownSession();
+});
+
+test('posts use the server like state and cached posts update in every list', () => {
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    '@/components/ui/Toast': { toast: { error: () => {}, success: () => {} } },
+  });
+  const me = '111111111111111111111111';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const { mapPost } = h.load('src/features/feed/services/feedService.real.ts');
+  const base = { _id: 'p1', user: '222222222222222222222222', createdAt: '2026-10-14T00:00:00Z' };
+  const liked = mapPost({ ...base, likes: ['like-id'], likeCount: 1, likedByMe: true });
+  assert.equal(liked.liked, true);
+  assert.equal(liked.likeStateKnown, true);
+  assert.equal(liked.likes, 1);
+  assert.equal(mapPost({ ...base, likes: [{ user: me }] }).liked, true);
+
+  const { updateCachedPost } = h.load('src/features/feed/hooks/useFeed.ts');
+  const store = new Map([
+    ['feed', { pages: [{ posts: [liked, { ...liked, id: 'p2' }], count: 2 }], pageParams: [0] }],
+    ['my-posts', [liked]],
+    ['user-posts', [{ ...liked, id: 'p3' }]],
+  ]);
+  const client = {
+    setQueriesData: ({ queryKey }, update) =>
+      store.set(queryKey[0], update(store.get(queryKey[0]))),
+  };
+  updateCachedPost(client, 'p1', (post) => ({ ...post, likes: 5 }));
+  assert.equal(store.get('feed').pages[0].posts[0].likes, 5);
+  assert.equal(store.get('my-posts')[0].likes, 5);
+  updateCachedPost(client, 'p1', () => null);
+  assert.deepEqual(
+    store.get('feed').pages[0].posts.map((post) => post.id),
+    ['p2'],
+  );
+  assert.deepEqual(store.get('my-posts'), []);
+  assert.deepEqual(
+    store.get('user-posts').map((post) => post.id),
+    ['p3'],
+  );
 });

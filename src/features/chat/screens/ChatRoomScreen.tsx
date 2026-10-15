@@ -15,7 +15,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
-import { Avatar, EmptyState, Skeleton, Text } from '@/components/ui';
+import { Avatar, EmptyState, Loader, Skeleton, Text } from '@/components/ui';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { isServiceError, describeError } from '@/services/errors';
 import { radius, spacing } from '@/theme';
@@ -33,11 +33,14 @@ import { useAuthStore } from '@/features/auth/store/authStore';
 import { hasCapability } from '@/features/auth/permissions';
 import { MessageBubble } from '../components/MessageBubble';
 import {
+  createClientId,
   useConversation,
   useMarkConversationRead,
   useMessages,
   useMyId,
   useSendMessage,
+  useTypingEmitter,
+  useTypingNames,
   useVisiblePresence,
 } from '../hooks/useChat';
 import { buildRows, type ChatRow as Row } from '../utils/buildRows';
@@ -85,7 +88,12 @@ export function ChatRoomScreen(): React.JSX.Element {
       const assets = await pickMedia();
       if (!assets.length || !allowed()) return;
       try {
-        await chatService.sendMessage({ conversationId, text: '', assets, clientId: '' });
+        await chatService.sendMessage({
+          conversationId,
+          text: '',
+          assets,
+          clientId: createClientId(),
+        });
       } catch (error) {
         if (isSessionCurrent(scope))
           toast.error(
@@ -106,7 +114,20 @@ export function ChatRoomScreen(): React.JSX.Element {
   const messagesQuery = useMessages(conversationId, !notFound);
   const { messages } = messagesQuery;
   const { send, retry, discard } = useSendMessage(conversationId);
+  const typing = useTypingEmitter(conversationId);
+  const typingNames = useTypingNames(conversationId);
+  const isGroup = conversation?.kind === 'group' || conversationId.startsWith('group:');
+  const typingLabel = typingNames.length
+    ? isGroup
+      ? typingNames.length === 1
+        ? `${typingNames[0]} is typing…`
+        : `${typingNames.length} people are typing…`
+      : 'typing…'
+    : null;
   const presence = formatPresence(useVisiblePresence(conversation));
+  const subtitle =
+    typingLabel ??
+    (isGroup && conversation?.memberCount ? `${conversation.memberCount} members` : presence);
 
   const latestIncomingId = useMemo(
     () =>
@@ -123,11 +144,17 @@ export function ChatRoomScreen(): React.JSX.Element {
 
   const onSend = useCallback(
     (text: string) => {
+      typing.stopTyping();
       send(text);
       requestAnimationFrame(scrollToLatest);
     },
-    [scrollToLatest, send],
+    [scrollToLatest, send, typing],
   );
+  const { hasOlder, loadOlder, loadingOlder, olderError } = messagesQuery;
+  const onEndReached = useCallback(() => {
+    // Inverted list: the end is the top, i.e. the oldest loaded message.
+    if (hasOlder && !olderError) void loadOlder();
+  }, [hasOlder, loadOlder, olderError]);
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     // Inverted list: offset 0 is the newest message at the bottom.
@@ -208,13 +235,16 @@ export function ChatRoomScreen(): React.JSX.Element {
               <Text variant="subheading" numberOfLines={1}>
                 {participant.name}
               </Text>
-              {presence ? (
+              {subtitle ? (
                 <Text
                   variant="caption"
-                  color={presence === 'Online now' ? 'success' : 'secondary'}
+                  color={
+                    typingLabel ? 'primary' : presence === 'Online now' ? 'success' : 'secondary'
+                  }
                   numberOfLines={1}
+                  accessibilityLiveRegion="polite"
                 >
-                  {presence}
+                  {subtitle}
                 </Text>
               ) : null}
             </View>
@@ -265,6 +295,23 @@ export function ChatRoomScreen(): React.JSX.Element {
               }}
               initialNumToRender={20}
               windowSize={11}
+              onEndReached={onEndReached}
+              onEndReachedThreshold={0.4}
+              ListFooterComponent={
+                loadingOlder ? (
+                  <Loader />
+                ) : olderError ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadOlder()}
+                    style={styles.older}
+                  >
+                    <Text variant="caption" color="primary">
+                      Couldn't load earlier messages. Tap to retry.
+                    </Text>
+                  </Pressable>
+                ) : null
+              }
             />
           )}
           {showJump ? (
@@ -292,6 +339,7 @@ export function ChatRoomScreen(): React.JSX.Element {
         </View>
         <ChatInput
           onSend={onSend}
+          onChangeText={typing.onChangeText}
           onAttach={canShareMedia ? () => attach.mutate() : undefined}
           canSendMessages={canSendMessages}
           canShareMedia={canShareMedia}
@@ -337,6 +385,7 @@ const styles = StyleSheet.create({
   skeletonBubble: { height: 40, borderRadius: radius.lg },
   skeletonMine: { alignSelf: 'flex-end' },
   jumpWrap: { position: 'absolute', right: spacing.lg, bottom: spacing.lg },
+  older: { alignItems: 'center', paddingVertical: spacing.md },
   jump: {
     width: 44,
     height: 44,

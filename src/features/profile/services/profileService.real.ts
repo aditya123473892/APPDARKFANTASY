@@ -30,9 +30,8 @@ export async function listRealUsers(): Promise<ProfileView[]> {
 export const realProfileService: ProfileService = {
   discover: listRealUsers,
   async get(id) {
-    const { user } = await getData<{ user: User }>(`/users/${id}`, {
-      viewerId: sessionIdentity.userId,
-    });
+    // The server evaluates visibility for the authenticated caller.
+    const { user } = await getData<{ user: User }>(`/users/${id}`);
     return mapProfile(user);
   },
   async updateMe(input) {

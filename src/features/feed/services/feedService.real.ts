@@ -5,7 +5,7 @@ import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
 import { displayName, type UserSummary } from '@/features/auth/userModel';
 import { ServiceError } from '@/services/errors';
-import type { Post } from '../types';
+import type { CommentPage, Post, PostAuthor, PostComment } from '../types';
 import type { FeedService } from './feedService';
 export type BackendPost = {
   _id: string;
@@ -16,59 +16,68 @@ export type BackendPost = {
   status?: string;
   media?: { url?: string; mimetype?: string }[];
   likes?: (string | { user?: string | UserSummary })[];
-  comments?: (string | { _id: string; content?: string; user?: string | UserSummary })[];
+  comments?: (string | BackendComment)[];
   likeCount?: number;
   commentCount?: number;
+  /** Server-computed like state of the requesting user. */
+  likedByMe?: boolean;
 };
-export function mapPost(raw: BackendPost, author?: UserSummary): Post {
-  if (!raw?._id || !raw.createdAt) throw new ServiceError('UNKNOWN');
+type BackendComment = {
+  _id: string;
+  content?: string;
+  user?: string | UserSummary;
+  createdAt?: string;
+};
+/** Posts per feed request. */
+export const FEED_PAGE = 20;
+
+function author(value: string | UserSummary | undefined, fallback?: UserSummary): PostAuthor {
   const user =
-    typeof raw.user === 'object' && raw.user
-      ? raw.user
-      : (author ?? userCache.get(String(raw.user)));
+    typeof value === 'object' && value ? value : (fallback ?? userCache.get(String(value ?? '')));
   if (user) userCache.put(user);
+  return {
+    id: user?._id ?? String(value ?? ''),
+    name: user ? displayName(user) : 'Unavailable user',
+    handle: user?.displayname ?? '',
+    avatarUri: mediaUrl(user?.avatar),
+  };
+}
+export function mapComment(comment: BackendComment): PostComment | null {
+  if (!comment?._id || typeof comment.content !== 'string') return null;
+  return {
+    id: comment._id,
+    content: comment.content,
+    author: author(comment.user),
+    createdAt: comment.createdAt,
+  };
+}
+export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
+  if (!raw?._id || !raw.createdAt) throw new ServiceError('UNKNOWN');
+  const likes = raw.likes ?? [];
+  const serverState = typeof raw.likedByMe === 'boolean';
   return {
     id: raw._id,
     body: raw.caption ?? '',
     createdAt: raw.createdAt,
-    user: {
-      id: user?._id ?? String(raw.user ?? ''),
-      name: user ? displayName(user) : 'Unavailable user',
-      handle: user?.displayname ?? '',
-      avatarUri: mediaUrl(user?.avatar),
-    },
+    user: author(raw.user, fallbackAuthor),
     media: (raw.media ?? [])
       .filter((m) => mediaUrl(m.url))
       .map((m) => ({ uri: mediaUrl(m.url), width: 16, height: 12, mimetype: m.mimetype })),
-    likes: raw.likeCount ?? raw.likes?.length ?? 0,
+    likes: raw.likeCount ?? likes.length,
     replies: raw.commentCount ?? raw.comments?.length ?? 0,
-    liked: (raw.likes ?? []).some(
-      (like) =>
-        typeof like === 'object' &&
-        (typeof like.user === 'object' ? like.user?._id : like.user) === sessionIdentity.userId,
-    ),
-    likeStateKnown: (raw.likes ?? []).every(
-      (like) => typeof like === 'object' && Boolean(like.user),
-    ),
+    liked: serverState
+      ? raw.likedByMe === true
+      : likes.some(
+          (like) =>
+            typeof like === 'object' &&
+            (typeof like.user === 'object' ? like.user?._id : like.user) === sessionIdentity.userId,
+        ),
+    likeStateKnown:
+      serverState || likes.every((like) => typeof like === 'object' && Boolean(like.user)),
     comments: (raw.comments ?? []).flatMap((comment) => {
-      if (typeof comment === 'string' || typeof comment.content !== 'string') return [];
-      const author =
-        typeof comment.user === 'object' && comment.user
-          ? comment.user
-          : userCache.get(comment.user ?? '');
-      if (author) userCache.put(author);
-      return [
-        {
-          id: comment._id,
-          content: comment.content,
-          author: {
-            id: author?._id ?? String(comment.user ?? ''),
-            name: author ? displayName(author) : 'Unavailable user',
-            handle: author?.displayname ?? '',
-            avatarUri: mediaUrl(author?.avatar),
-          },
-        },
-      ];
+      if (typeof comment === 'string') return [];
+      const mapped = mapComment(comment);
+      return mapped ? [mapped] : [];
     }),
     audience:
       raw.visibility === 'public'
@@ -85,25 +94,84 @@ export async function listMyPosts(): Promise<Post[]> {
   );
 }
 export async function listUserPosts(id: string): Promise<Post[]> {
+  // The server decides visibility for the authenticated viewer.
   const { user } = await getData<{ user: UserSummary & { usersPost: BackendPost[] } }>(
     `/users/${id}`,
-    { viewerId: sessionIdentity.userId },
   );
   userCache.put(user);
   return (user.usersPost ?? []).map((post) => mapPost(post, user));
 }
-export async function addComment(post: string, content: string): Promise<void> {
+/** Newest first; `before` is the last comment ID of the previous page. */
+export async function listComments(postId: string, before?: string): Promise<CommentPage> {
+  const page = await getData<{ comments: BackendComment[]; hasMore: boolean; count: number }>(
+    `/posts/${postId}/comments`,
+    { limit: 20, ...(before ? { before } : {}) },
+  );
+  if (!Array.isArray(page?.comments)) throw new ServiceError('UNKNOWN');
+  return {
+    comments: page.comments.flatMap((comment) => {
+      const mapped = mapComment(comment);
+      return mapped ? [mapped] : [];
+    }),
+    hasMore: page.hasMore === true,
+    count: typeof page.count === 'number' ? page.count : page.comments.length,
+  };
+}
+/** clientId makes a retried submission store the comment once. */
+export async function addComment(
+  post: string,
+  content: string,
+  clientId?: string,
+): Promise<PostComment> {
   try {
-    unwrap((await apiClient.post('/posts/comment', { post, content: content.trim() })).data);
+    const comment = mapComment(
+      unwrap<BackendComment>(
+        (
+          await apiClient.post('/posts/comment', {
+            post,
+            content: content.trim(),
+            ...(clientId ? { clientId } : {}),
+          })
+        ).data,
+      ),
+    );
+    if (!comment) throw new ServiceError('UNKNOWN');
+    return comment;
+  } catch (error) {
+    throw serviceError(error);
+  }
+}
+/** Resolves the post's remaining comment count. */
+export async function deleteComment(postId: string, commentId: string): Promise<number | null> {
+  try {
+    const result = unwrap<{ commentCount?: number }>(
+      (await apiClient.delete(`/posts/${postId}/comment/${commentId}`)).data,
+    );
+    return typeof result.commentCount === 'number' ? result.commentCount : null;
+  } catch (error) {
+    throw serviceError(error);
+  }
+}
+export async function deletePost(postId: string): Promise<void> {
+  try {
+    unwrap((await apiClient.delete(`/posts/${postId}`)).data);
   } catch (error) {
     throw serviceError(error);
   }
 }
 export const realFeedService: FeedService = {
-  async list() {
-    return (await getCollection<BackendPost>('/posts/public/feeds', 'posts'))
-      .map((post) => mapPost(post))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  async listPage(skip) {
+    const data = await getData<{ posts: BackendPost[]; count: number }>('/posts/public/feeds', {
+      limit: FEED_PAGE,
+      skip,
+      sortBy: 'createdAt',
+      order: 'desc',
+    });
+    if (!Array.isArray(data?.posts)) throw new ServiceError('UNKNOWN');
+    return {
+      posts: data.posts.map((post) => mapPost(post)),
+      count: typeof data.count === 'number' ? data.count : data.posts.length,
+    };
   },
   async create(input) {
     if (!input.assets?.length)
@@ -131,8 +199,13 @@ export const realFeedService: FeedService = {
   },
   async setLiked(id, liked) {
     try {
-      if (liked) await apiClient.post(`/posts/${id}/like`);
-      else await apiClient.delete(`/posts/${id}/unlike`);
+      const response = liked
+        ? await apiClient.post(`/posts/${id}/like`)
+        : await apiClient.delete(`/posts/${id}/unlike`);
+      const state = unwrap<{ liked?: boolean; likeCount?: number }>(response.data);
+      return typeof state.liked === 'boolean' && typeof state.likeCount === 'number'
+        ? { liked: state.liked, likeCount: state.likeCount }
+        : undefined;
     } catch (error) {
       throw serviceError(error);
     }

@@ -13,7 +13,7 @@ const statusLabel: Record<ChatMessage['status'], string> = {
   sent: 'Sent',
   delivered: 'Delivered',
   read: 'Read',
-  failed: 'Not delivered',
+  failed: 'Not sent',
 };
 
 export const MessageBubble = memo(function MessageBubble({
@@ -21,6 +21,7 @@ export const MessageBubble = memo(function MessageBubble({
   mine,
   first,
   last,
+  onRetry,
   onDiscard,
 }: {
   message: ChatMessage;
@@ -38,14 +39,12 @@ export const MessageBubble = memo(function MessageBubble({
   const openFailedActions = (): void => {
     if (!message.clientId) return;
     const clientId = message.clientId;
-    Alert.alert(
-      'Send status unknown',
-      'Refresh the conversation before sending again. The server may already have received this message.',
-      [
-        { text: 'Dismiss local copy', style: 'destructive', onPress: () => onDiscard(clientId) },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
+    // Retrying reuses the message's clientId, so the server never stores it twice.
+    Alert.alert('Message not sent', 'Try sending it again, or delete it from this device.', [
+      { text: 'Retry', onPress: () => onRetry(clientId) },
+      { text: 'Delete', style: 'destructive', onPress: () => onDiscard(clientId) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const statusIcon =

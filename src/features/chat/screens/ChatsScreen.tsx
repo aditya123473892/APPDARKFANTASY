@@ -4,7 +4,7 @@ import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { Header, Screen } from '@/components/layout';
-import { EmptyState, Input, Skeleton, Button, Text } from '@/components/ui';
+import { EmptyState, Input, Skeleton, Button } from '@/components/ui';
 import { Can } from '@/features/auth/components/Access';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -41,9 +41,12 @@ export function ChatsScreen(): React.JSX.Element {
   const { data, error, isPending, isError, isRefetchError, refetch, isRefetching } =
     useConversations();
 
+  // Most recent activity first; live messages update `updatedAt` between refetches.
   const conversations = useMemo(
     () =>
-      (data ?? []).filter((item) => !query || item.participant.name.toLowerCase().includes(query)),
+      (data ?? [])
+        .filter((item) => !query || item.participant.name.toLowerCase().includes(query))
+        .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0)),
     [data, query],
   );
 
@@ -62,24 +65,7 @@ export function ChatsScreen(): React.JSX.Element {
           size="sm"
           onPress={() => router.push('/chat/new')}
         />
-        <Can
-          capability="canCreateGroups"
-          fallback={
-            <View style={styles.groupAccess}>
-              <Button
-                label="New group"
-                icon="people-outline"
-                variant="secondary"
-                size="sm"
-                disabled
-                onPress={() => {}}
-              />
-              <Text variant="caption" color="muted">
-                Only admins can create groups. Ask an admin to add you to one.
-              </Text>
-            </View>
-          }
-        >
+        <Can capability="canCreateGroups">
           <Button
             label="New group"
             icon="people-outline"
@@ -140,7 +126,7 @@ export function ChatsScreen(): React.JSX.Element {
               <EmptyState
                 icon="chatbubbles-outline"
                 title="No conversations yet"
-                message="Start a message with a real user or join a group."
+                message="Start a conversation, or create a group with the people you know."
                 actionLabel="New message"
                 onAction={() => router.push('/chat/new')}
               />
@@ -162,7 +148,6 @@ export function ChatsScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   top: { paddingHorizontal: spacing.screen, paddingBottom: spacing.md, gap: spacing.xs },
-  groupAccess: { gap: spacing.xs },
   list: { paddingBottom: spacing.xxl },
   emptyList: { flexGrow: 1 },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: spacing.screen + 56 + spacing.md },

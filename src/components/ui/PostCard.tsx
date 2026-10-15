@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { memo, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import {
+  Alert,
   Pressable,
   ScrollView,
   Share,
@@ -23,12 +24,12 @@ import { formatRelativeTime } from '@/utils/formatters';
 import { Avatar } from './Avatar';
 import { Text } from './Text';
 import { RemoteMedia } from './RemoteMedia';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { addComment } from '@/features/feed/services/feedService.real';
-import { describeError } from '@/services/errors';
-import { toast } from './Toast';
+import { useAddComment, useComments, useDeleteComment } from '@/features/feed/hooks/useFeed';
+import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
+import { createClientId } from '@/utils/clientId';
 import { Input } from './Input';
 import { Button } from './Button';
+import { Loader } from './Loader';
 
 function RichText({ body }: { body: string }): React.JSX.Element {
   const chunks = body.split(/([#@][\w]+)/g);
@@ -101,29 +102,131 @@ function MediaGallery({ media }: { media: PostMedia[] }): React.JSX.Element {
   );
 }
 
+const COMMENT_MAX = 2000;
+
+function Comments({ post }: { post: Post }): React.JSX.Element {
+  const { theme } = useTheme();
+  const me = useCurrentUserId();
+  const [draft, setDraft] = useState('');
+  // Reused if the same draft is resubmitted after a failure, so it is stored once.
+  const pendingKey = useRef<{ text: string; clientId: string } | null>(null);
+  const comments = useComments(post.id, true);
+  const add = useAddComment(post.id);
+  const remove = useDeleteComment(post.id);
+  const rows = comments.data?.pages.flatMap((page) => page.comments) ?? [];
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || add.isPending) return;
+    if (pendingKey.current?.text !== text)
+      pendingKey.current = { text, clientId: createClientId() };
+    const { clientId } = pendingKey.current;
+    setDraft('');
+    add.mutate(
+      { content: text, clientId },
+      {
+        onSuccess: () => {
+          pendingKey.current = null;
+        },
+        onError: () => setDraft((current) => current || text),
+      },
+    );
+  };
+  const confirmDelete = (commentId: string) =>
+    Alert.alert('Delete this comment?', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => remove.mutate(commentId) },
+    ]);
+
+  return (
+    <View style={styles.comments}>
+      {comments.isPending ? (
+        <Loader />
+      ) : comments.isError ? (
+        <Pressable accessibilityRole="button" onPress={() => void comments.refetch()}>
+          <Text color="danger" variant="caption">
+            Couldn't load comments. Tap to retry.
+          </Text>
+        </Pressable>
+      ) : rows.length ? (
+        rows.map((item) => {
+          const canDelete = !item.pending && (item.author.id === me || post.user.id === me);
+          return (
+            <View key={item.id} style={[styles.comment, item.pending && styles.pending]}>
+              <View style={styles.commentCopy}>
+                <Text variant="caption" weight="bold">
+                  {item.author.name}
+                  {item.createdAt ? (
+                    <Text variant="caption" color="muted">
+                      {'  '}
+                      {item.pending ? 'Posting…' : formatRelativeTime(item.createdAt)}
+                    </Text>
+                  ) : null}
+                </Text>
+                <Text>{item.content}</Text>
+              </View>
+              {canDelete ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete comment"
+                  hitSlop={8}
+                  disabled={remove.isPending}
+                  onPress={() => confirmDelete(item.id)}
+                >
+                  <Ionicons name="trash-outline" size={16} color={theme.colors.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        })
+      ) : (
+        <Text color="muted" variant="caption">
+          No comments yet. Start the conversation.
+        </Text>
+      )}
+      {comments.hasNextPage ? (
+        <Button
+          label={comments.isFetchingNextPage ? 'Loading…' : 'Show earlier comments'}
+          variant="ghost"
+          size="sm"
+          disabled={comments.isFetchingNextPage}
+          onPress={() => void comments.fetchNextPage()}
+        />
+      ) : null}
+      <Input
+        accessibilityLabel="Write a comment"
+        placeholder="Write a comment"
+        value={draft}
+        onChangeText={setDraft}
+        multiline
+        maxLength={COMMENT_MAX}
+      />
+      <Button
+        label="Comment"
+        size="sm"
+        loading={add.isPending}
+        disabled={!draft.trim() || add.isPending}
+        onPress={submit}
+      />
+    </View>
+  );
+}
+
 export const PostCard = memo(function PostCard({
   post,
   onToggleLike,
   onOpenAuthor,
+  onDelete,
 }: {
   post: Post;
   onToggleLike?: (post: Post) => void;
   onOpenAuthor?: (post: Post) => void;
+  /** Shown for the viewer's own posts. */
+  onDelete?: (post: Post) => void;
 }): React.JSX.Element {
   const { theme } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [comment, setComment] = useState('');
-  const queryClient = useQueryClient();
-  const createComment = useMutation({
-    mutationFn: () => addComment(post.id, comment),
-    onSuccess: () => {
-      setComment('');
-      for (const queryKey of [['feed'], ['my-posts'], ['user-posts']])
-        void queryClient.invalidateQueries({ queryKey });
-    },
-    onError: (error) => toast.error(describeError(error, 'Unable to post your comment.')),
-  });
   const scale = useSharedValue(1);
   const likeStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const long = post.body.length > 220;
@@ -181,6 +284,22 @@ export const PostCard = memo(function PostCard({
           </Text>
         </View>
       </Pressable>
+      {onDelete ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Delete post"
+          hitSlop={8}
+          onPress={() =>
+            Alert.alert('Delete this post?', 'Its likes and comments are removed too.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => onDelete(post) },
+            ])
+          }
+          style={styles.delete}
+        >
+          <Ionicons name="trash-outline" size={18} color={theme.colors.textMuted} />
+        </Pressable>
+      ) : null}
 
       <Pressable
         disabled={!long || expanded}
@@ -242,41 +361,7 @@ export const PostCard = memo(function PostCard({
           <Ionicons name="share-outline" size={20} color={theme.colors.textSecondary} />
         </Pressable>
       </View>
-      {showComments ? (
-        <View style={{ gap: 12, paddingBottom: 12 }}>
-          {post.comments?.map((item) => (
-            <View key={item.id} style={{ gap: 4 }}>
-              <Text variant="caption" weight="bold">
-                {item.author.name}
-              </Text>
-              <Text>{item.content}</Text>
-            </View>
-          ))}
-          {!post.comments?.length ? (
-            <Text color="muted" variant="caption">
-              {post.replies
-                ? 'Comment details are not included in this response.'
-                : 'No comments yet.'}
-            </Text>
-          ) : null}
-          <Input
-            accessibilityLabel="Write a comment"
-            placeholder="Write a comment"
-            value={comment}
-            onChangeText={setComment}
-            multiline
-            maxLength={2000}
-            editable={!createComment.isPending}
-          />
-          <Button
-            label="Comment"
-            size="sm"
-            loading={createComment.isPending}
-            disabled={!comment.trim() || createComment.isPending}
-            onPress={() => createComment.mutate()}
-          />
-        </View>
-      ) : null}
+      {showComments ? <Comments post={post} /> : null}
     </View>
   );
 });
@@ -321,5 +406,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   grow: { flex: 1 },
+  delete: { position: 'absolute', top: spacing.lg, right: spacing.lg },
+  comments: { gap: spacing.md, paddingBottom: spacing.md },
+  comment: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
+  commentCopy: { flex: 1, gap: spacing.xxs },
+  pending: { opacity: 0.6 },
   pressed: { opacity: 0.6 },
 });

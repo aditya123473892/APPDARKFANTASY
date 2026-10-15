@@ -1,6 +1,6 @@
 import type { UserSummary } from '@/features/auth/userModel';
 import { displayName } from '@/features/auth/userModel';
-import { userCache } from '@/features/auth/userCache';
+import { userCache, senderId } from '@/features/auth/userCache';
 import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRuntime';
 import { apiClient } from '@/services/api/apiClient';
 import { getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
@@ -8,9 +8,31 @@ import { isServiceError, ServiceError } from '@/services/errors';
 import { appendAsset } from '@/services/api/multipart';
 import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
-import { joinGroup, getHistory, socketRequest, refreshUnread } from './socketSession';
-import { mapMessage, parseUserSummary, type BackendMessage } from './chatPayload';
-import { acceptUnread, mergeMessage, markPeerRead, unreadFor } from './chatState';
+import {
+  emitTyping,
+  getHistory,
+  getOlderHistory,
+  refreshUnread,
+  socketAck,
+  socketRequest,
+} from './socketSession';
+import {
+  conversationKey,
+  isObjectId,
+  mapMessage,
+  parseMessage,
+  parseUserSummary,
+  type BackendMessage,
+} from './chatPayload';
+import {
+  acceptServerUnread,
+  acceptUnread,
+  hasOlderHistory,
+  markGroupRead,
+  markPeerRead,
+  mergeMessage,
+  unreadFor,
+} from './chatState';
 import type { ChatService } from './chatService';
 import type { Conversation, Message } from '../types';
 export { conversationKey, mapMessage } from './chatPayload';
@@ -18,12 +40,33 @@ export type { BackendMessage } from './chatPayload';
 export type BackendGroup = {
   _id: string;
   name: string;
+  description?: string;
   groupIcon?: string;
   admin: string;
-  members: (string | UserSummary)[];
+  members?: (string | UserSummary)[];
+  memberCount?: number;
   createdAt: string;
   updatedAt: string;
 };
+type BackendConversation =
+  | {
+      id: string;
+      kind: 'direct';
+      peer: UserSummary & { isOnline?: boolean; lastSeen?: string };
+      lastMessage: unknown;
+      unreadCount: number;
+      updatedAt: string;
+    }
+  | {
+      id: string;
+      kind: 'group';
+      group: BackendGroup;
+      lastMessage: unknown;
+      unreadCount: number;
+      updatedAt: string;
+    };
+const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
+
 export function directConversation(user: UserSummary): Conversation {
   userCache.put(user);
   return {
@@ -47,8 +90,9 @@ export function groupConversation(group: BackendGroup): Conversation {
     id: `group:${group._id}`,
     kind: 'group',
     groupId: group._id,
-    ownerId: group.admin,
-    memberCount: group.members.length,
+    ownerId: String(group.admin),
+    memberCount: group.memberCount ?? group.members?.length ?? 0,
+    description: group.description || undefined,
     participant: { id: group._id, name: group.name, avatarUri: mediaUrl(group.groupIcon), age: 0 },
     lastMessage: null,
     unreadCount: 0,
@@ -57,46 +101,75 @@ export function groupConversation(group: BackendGroup): Conversation {
     updatedAt: group.updatedAt,
   };
 }
+function preview(value: unknown, key: string): Conversation['lastMessage'] {
+  const raw = parseMessage(value);
+  if (!raw || conversationKey(raw) !== key) return null;
+  return {
+    text: raw.message || (raw.media?.length ? 'Attachment' : ''),
+    senderId: senderId(raw.sender),
+    createdAt: raw.sentAt,
+  };
+}
+function mapConversation(row: BackendConversation): Conversation | null {
+  if (!row || typeof row !== 'object' || typeof row.id !== 'string') return null;
+  let conversation: Conversation;
+  if (row.kind === 'group') {
+    if (!row.group || !isObjectId(row.group._id) || typeof row.group.name !== 'string') return null;
+    conversation = groupConversation(row.group);
+  } else if (row.kind === 'direct') {
+    const peer = parseUserSummary(row.peer);
+    if (!peer) return null;
+    conversation = directConversation(peer);
+    if (typeof row.peer.isOnline === 'boolean')
+      conversation.presence = { online: row.peer.isOnline, lastSeenAt: row.peer.lastSeen ?? null };
+  } else return null;
+  if (conversation.id !== row.id) return null;
+  conversation.lastMessage = preview(row.lastMessage, row.id);
+  if (typeof row.updatedAt === 'string') conversation.updatedAt = row.updatedAt;
+  return conversation;
+}
+const target = (key: string) => {
+  const [kind, id] = key.split(':');
+  if (!isObjectId(id) || !['group', 'user'].includes(kind ?? ''))
+    throw new ServiceError('NOT_FOUND');
+  return kind === 'group' ? { groupId: id } : { receiver: id };
+};
+
 export const realChatService: ChatService = {
   async listConversations() {
     const scope = sessionIdentity.generation;
-    const [users, groups, unread] = await Promise.all([
-      getData<{ userChatlist: UserSummary[] }>('/users/chatlist'),
-      getData<BackendGroup[]>('/groups/my-groups'),
+    const [data, unread] = await Promise.all([
+      getData<{ conversations: BackendConversation[] }>('/chats/conversations'),
       socketRequest<BackendMessage[]>('getUnreadCount', 'unreadMessageCount').catch((error) => {
-        // The REST inbox remains usable while realtime reconnects. Keep the last
-        // confirmed unread state; never substitute an invented zero/count payload.
+        // The REST inbox stays usable while realtime reconnects: the server's
+        // counts are used until a realtime unread list arrives.
         if (isServiceError(error, 'NETWORK')) return undefined;
         throw error;
       }),
     ]);
     assertSessionCurrent(scope);
-    if (
-      (unread !== undefined && !acceptUnread(unread)) ||
-      !Array.isArray(users.userChatlist) ||
-      !Array.isArray(groups)
-    )
-      throw new ServiceError('UNKNOWN');
-    const summaries = users.userChatlist.map(parseUserSummary);
-    if (summaries.some((user) => !user)) throw new ServiceError('UNKNOWN');
-    const result = [
-      ...summaries.map((user) => directConversation(user!)),
-      ...groups.map(groupConversation),
-    ];
-    // Join existing groups for incoming group events, even before opening a room.
-    await Promise.all(
-      groups.map((group) =>
-        joinGroup(group._id).catch((error) => {
-          if (!isServiceError(error, 'NETWORK')) throw error;
-        }),
-      ),
-    );
-    assertSessionCurrent(scope);
+    if (!Array.isArray(data?.conversations)) throw new ServiceError('UNKNOWN');
+    const rows = data.conversations.map(mapConversation);
+    if (rows.some((row) => !row)) throw new ServiceError('UNKNOWN');
+    const result = rows as Conversation[];
+    const groupCounts = new Map<string, number>();
+    const directCounts = new Map<string, number>();
+    data.conversations.forEach((row) => {
+      const count = Number.isInteger(row.unreadCount) && row.unreadCount > 0 ? row.unreadCount : 0;
+      (row.kind === 'group' ? groupCounts : directCounts).set(row.id, count);
+    });
+    if (unread !== undefined && !acceptUnread(unread)) throw new ServiceError('UNKNOWN');
+    acceptServerUnread(unread === undefined ? directCounts : null, groupCounts);
     for (const conversation of result) {
       conversation.unreadCount = unreadFor(conversation.id);
+      // A live message newer than the server snapshot wins.
       const history = queryClient.getQueryData<Message[]>(queryKeys.messages(conversation.id));
       const latest = history?.[history.length - 1];
-      if (latest) {
+      if (
+        latest &&
+        (!conversation.lastMessage ||
+          Date.parse(latest.createdAt) > Date.parse(conversation.lastMessage.createdAt))
+      ) {
         conversation.lastMessage = {
           text: latest.text || (latest.media?.length ? 'Attachment' : ''),
           senderId: latest.senderId,
@@ -105,8 +178,7 @@ export const realChatService: ChatService = {
         conversation.updatedAt = latest.createdAt;
       }
     }
-    // A preview is fetched only when history has actually been loaded; never fabricate one.
-    return result;
+    return result.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
   },
   async getConversation(key) {
     const scope = sessionIdentity.generation;
@@ -118,29 +190,34 @@ export const realChatService: ChatService = {
       return groupConversation(group);
     }
     if (kind !== 'user') throw new ServiceError('NOT_FOUND');
-    const { user } = await getData<{ user: UserSummary }>(`/users/${id}`, {
-      viewerId: sessionIdentity.userId,
-    });
+    const { user } = await getData<{ user: UserSummary }>(`/users/${id}`);
     assertSessionCurrent(scope);
     const safe = parseUserSummary(user);
     if (!safe) throw new ServiceError('UNKNOWN');
     return directConversation(safe);
   },
   listMessages: getHistory,
+  async loadOlderMessages(key) {
+    const scope = sessionIdentity.generation;
+    const oldest = queryClient.getQueryData<Message[]>(queryKeys.messages(key))?.[0];
+    if (!oldest) return false;
+    await getOlderHistory(key, oldest.id);
+    assertSessionCurrent(scope);
+    return hasOlderHistory(key);
+  },
   async sendMessage(input) {
     const scope = sessionIdentity.generation;
     assertSessionCurrent(scope);
-    const [kind, id] = input.conversationId.split(':');
-    if (!id || !/^[a-f\d]{24}$/i.test(id) || !['group', 'user'].includes(kind ?? ''))
-      throw new ServiceError('NOT_FOUND');
+    const to = target(input.conversationId);
+    const clientId = CLIENT_ID.test(input.clientId) ? input.clientId : undefined;
     try {
-      const payload = { [kind === 'group' ? 'groupId' : 'receiver']: id, message: input.text };
+      const payload = { ...to, message: input.text, ...(clientId ? { clientId } : {}) };
       let body: FormData | typeof payload = payload;
       if (input.assets?.length) {
-        body = new FormData();
-        body.append(kind === 'group' ? 'groupId' : 'receiver', id);
-        body.append('message', input.text);
-        input.assets.forEach((asset) => appendAsset(body as FormData, asset));
+        const form = new FormData();
+        for (const [field, value] of Object.entries(payload)) form.append(field, value);
+        input.assets.forEach((asset) => appendAsset(form, asset));
+        body = form;
       }
       const response = await apiClient.post(
         '/chats/messages',
@@ -150,7 +227,6 @@ export const realChatService: ChatService = {
           : undefined,
       );
       assertSessionCurrent(scope);
-      // clientId is local correlation only. Backend does not implement idempotent retries.
       const message: Message = {
         ...mapMessage(unwrap<BackendMessage>(response.data), input.conversationId),
         clientId: input.clientId,
@@ -166,7 +242,16 @@ export const realChatService: ChatService = {
   },
   async markRead(key, allowed) {
     const scope = sessionIdentity.generation;
-    if (key.startsWith('group:')) return; // No group read receipt endpoint exists.
+    if (key.startsWith('group:')) {
+      // Group read cursors are private: they clear the viewer's own unread count.
+      const groupId = key.slice(6);
+      if (!isObjectId(groupId)) throw new ServiceError('NOT_FOUND');
+      const reply = await socketAck<{ groupId?: string }>('markGroupAsRead', { groupId }, allowed);
+      assertSessionCurrent(scope);
+      if (reply?.groupId !== groupId) throw new ServiceError('UNKNOWN');
+      markGroupRead(key);
+      return;
+    }
     const unread = await socketRequest(
       'markAsRead',
       'unreadMessageCount',
@@ -176,5 +261,12 @@ export const realChatService: ChatService = {
     assertSessionCurrent(scope);
     if (!acceptUnread(unread)) throw new ServiceError('UNKNOWN');
     markPeerRead(key);
+  },
+  setTyping(key, isTyping) {
+    try {
+      emitTyping({ ...target(key), isTyping });
+    } catch {
+      // Typing is best effort; an invalid key has nothing to notify.
+    }
   },
 };

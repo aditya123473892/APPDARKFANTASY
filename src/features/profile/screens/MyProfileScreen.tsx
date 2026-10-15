@@ -15,7 +15,7 @@ import {
 } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useConversations } from '@/features/chat/hooks/useChat';
-import { useMyPosts, useToggleLike } from '@/features/feed/hooks/useFeed';
+import { useDeletePost, useMyPosts, useToggleLike } from '@/features/feed/hooks/useFeed';
 import { useQuery } from '@tanstack/react-query';
 import { getData } from '@/services/api/backend';
 import { ErrorState } from '@/components/feedback/ErrorState';
@@ -64,6 +64,8 @@ export function MyProfileScreen(): React.JSX.Element {
   });
   const conversations = useConversations();
   const toggleLike = useToggleLike();
+  const removePost = useDeletePost();
+  const onDeletePost = useCallback((post: Post) => removePost.mutate(post.id), [removePost]);
 
   const myPosts = useMemo(
     () => feed.data?.filter((post) => post.user.id === user?.id),
@@ -162,7 +164,12 @@ export function MyProfileScreen(): React.JSX.Element {
           ) : myPosts?.length ? (
             <View style={styles.posts}>
               {myPosts.map((post) => (
-                <PostCard key={post.id} post={post} onToggleLike={onToggleLike} />
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onToggleLike={onToggleLike}
+                  onDelete={onDeletePost}
+                />
               ))}
             </View>
           ) : (

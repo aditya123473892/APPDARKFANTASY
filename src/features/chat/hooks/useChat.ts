@@ -5,7 +5,10 @@ import { AppState } from 'react-native';
 import { useAppState } from '@/hooks/useAppState';
 import { useCan } from '@/features/auth/hooks/useCurrentUser';
 import { hasCapability } from '@/features/auth/permissions';
-import { useChatConnection } from '../services/chatState';
+import { hasOlderHistory, useChatConnection } from '../services/chatState';
+import { useTypingUsers } from '../store/typingStore';
+import { userCache } from '@/features/auth/userCache';
+import { displayName } from '@/features/auth/userModel';
 import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
@@ -15,7 +18,8 @@ import { useOutbox, type OutboxItem } from '../store/outboxStore';
 import type { Conversation, LocalMessageStatus, Message } from '../types';
 import { sessionIdentity, isSessionCurrent } from '@/features/auth/sessionRuntime';
 import { toast } from '@/components/ui/Toast';
-import { describeError } from '@/services/errors';
+import { describeError, isServiceError } from '@/services/errors';
+import { createClientId } from '@/utils/clientId';
 
 /** A message as rendered: either server-confirmed or still in the local outbox. */
 export type ChatMessage = Omit<Message, 'status'> & { status: LocalMessageStatus; local: boolean };
@@ -108,11 +112,30 @@ export function useMessages(conversationId: string, enabled = true) {
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }, [conversationId, myId, outbox, query.data, readReceipts]);
 
-  return { ...query, messages };
+  // Older pages are loaded on demand when the reader scrolls to the top.
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState(false);
+  const loading = useRef(false);
+  const hasOlder = Boolean(query.data?.length) && hasOlderHistory(conversationId);
+  const loadOlder = useCallback(async () => {
+    if (loading.current || !hasOlderHistory(conversationId)) return;
+    loading.current = true;
+    setLoadingOlder(true);
+    setOlderError(false);
+    try {
+      await chatService.loadOlderMessages(conversationId);
+    } catch {
+      setOlderError(true);
+    } finally {
+      loading.current = false;
+      setLoadingOlder(false);
+    }
+  }, [conversationId]);
+
+  return { ...query, messages, hasOlder, loadOlder, loadingOlder, olderError };
 }
 
-const createClientId = (): string =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+export { createClientId } from '@/utils/clientId';
 
 export function useSendMessage(conversationId: string) {
   const queryClient = useQueryClient();
@@ -147,13 +170,11 @@ export function useSendMessage(conversationId: string) {
         useOutbox.getState().remove(item.clientId);
       } catch (error) {
         if (!isSessionCurrent(scope)) return;
-        useOutbox.getState().setStatus(item.clientId, 'failed');
-        toast.error(
-          describeError(
-            error,
-            'Send status is unknown. Refresh this conversation before sending again.',
-          ),
-        );
+        // Connection failures are retried automatically once the chat reconnects;
+        // the clientId makes a retry of an already-stored message harmless.
+        const retryable = isServiceError(error, 'NETWORK') || isServiceError(error, 'UNKNOWN');
+        useOutbox.getState().setStatus(item.clientId, 'failed', retryable);
+        if (!retryable) toast.error(describeError(error, "This message couldn't be sent."));
       } finally {
         inFlight.current.delete(item.clientId);
       }
@@ -188,7 +209,60 @@ export function useSendMessage(conversationId: string) {
 
   const discard = useCallback((clientId: string) => useOutbox.getState().remove(clientId), []);
 
+  // Resend messages that failed for connection reasons when the chat reconnects.
+  const ready = useChatConnection((state) => state.ready);
+  useEffect(() => {
+    if (!ready) return;
+    for (const item of Object.values(useOutbox.getState().items))
+      if (item.conversationId === conversationId && item.status === 'failed' && item.retryable)
+        void deliver(item);
+  }, [conversationId, deliver, ready]);
+
   return { send, retry, discard };
+}
+
+/** Names of the people typing in a conversation, excluding the viewer. */
+export function useTypingNames(conversationId: string): string[] {
+  const ids = useTypingUsers(conversationId);
+  const myId = useMyId();
+  return useMemo(
+    () =>
+      ids
+        .filter((id) => id !== myId)
+        .map((id) => {
+          const user = userCache.get(id);
+          return user ? displayName(user) : 'Someone';
+        }),
+    [ids, myId],
+  );
+}
+
+const TYPING_REFRESH_MS = 3000;
+
+/** Tells the other participants while the viewer is typing; throttled, and stops on send or clear. */
+export function useTypingEmitter(conversationId: string) {
+  const lastSent = useRef(0);
+  const stop = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const stopTyping = useCallback(() => {
+    clearTimeout(stop.current);
+    if (lastSent.current) chatService.setTyping(conversationId, false);
+    lastSent.current = 0;
+  }, [conversationId]);
+  const onChangeText = useCallback(
+    (text: string) => {
+      if (!text.trim()) return stopTyping();
+      const now = Date.now();
+      if (now - lastSent.current > TYPING_REFRESH_MS) {
+        lastSent.current = now;
+        chatService.setTyping(conversationId, true);
+      }
+      clearTimeout(stop.current);
+      stop.current = setTimeout(stopTyping, TYPING_REFRESH_MS + 1000);
+    },
+    [conversationId, stopTyping],
+  );
+  useEffect(() => stopTyping, [stopTyping]);
+  return { onChangeText, stopTyping };
 }
 
 /** Recheck focus/foreground/session at emission, after any queued socket work. */
@@ -215,21 +289,24 @@ export function useMarkConversationRead(
     }, []),
   );
   useEffect(() => {
+    // Direct read receipts are visible to the sender, so they follow the
+    // reciprocal preference. A group read cursor is private to the viewer.
+    const group = conversationId.startsWith('group:');
     const allowed = () =>
       focus.current &&
       AppState.currentState === 'active' &&
       useChatConnection.getState().ready &&
       isSessionCurrent(scope) &&
-      usePreferences.getState().readReceipts &&
+      (group || usePreferences.getState().readReceipts) &&
       useAuthStore.getState().status === 'authenticated';
     if (
-      conversationId.startsWith('user:') &&
+      (group || conversationId.startsWith('user:')) &&
       latestIncomingId &&
       focused &&
       appState === 'active' &&
       ready &&
       canSend &&
-      receipts
+      (group || receipts)
     ) {
       void chatService.markRead(conversationId, allowed).catch(() => undefined);
     }

@@ -1,110 +1,336 @@
-import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { FlatList, Pressable, View } from 'react-native';
-import { Header, Screen } from '@/components/layout';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ErrorState } from '@/components/feedback/ErrorState';
+import { Header, KeyboardAvoidingScreen, Screen } from '@/components/layout';
 import { Avatar, Button, EmptyState, Input, Loader, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
-import { ErrorState } from '@/components/feedback/ErrorState';
 import { ProtectedRoute } from '@/features/auth/components/Access';
+import { createClientId } from '@/features/chat/hooks/useChat';
+import {
+  GROUP_DESCRIPTION_MAX,
+  GROUP_MEMBERS_MAX,
+  GROUP_NAME_MAX,
+  groupService,
+} from '@/features/chat/services/groupService';
+import { pickImage } from '@/features/create-post/pickMedia';
+import type { UploadAsset } from '@/features/feed/types';
 import { useDiscoverProfiles } from '@/features/profile/hooks/useProfiles';
-import { groupService } from '@/features/chat/services/groupService';
-import { queryKeys } from '@/services/queryKeys';
+import type { ProfileView } from '@/features/profile/types';
+import { useDebounce } from '@/hooks/useDebounce';
 import { describeError } from '@/services/errors';
+import { queryKeys } from '@/services/queryKeys';
+import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
-function NewGroup() {
-  const [name, setName] = useState('');
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
-  const users = useDiscoverProfiles();
-  const { theme } = useTheme();
-  const client = useQueryClient();
+
+/** The creator is always a member, so this many others can be selected. */
+const MAX_SELECTED = GROUP_MEMBERS_MAX - 1;
+
+function NewGroup(): React.JSX.Element {
   const router = useRouter();
+  const client = useQueryClient();
+  const { theme } = useTheme();
+  const users = useDiscoverProfiles();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [photo, setPhoto] = useState<UploadAsset | null>(null);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<ProfileView[]>([]);
+  const [submitted, setSubmitted] = useState(false);
+  // One key per group being created: a retry after a lost response returns the
+  // group the server already made instead of creating a duplicate.
+  const clientId = useRef(createClientId());
+  const query = useDebounce(search.trim().toLowerCase(), 150);
+
+  const nameError = submitted && !name.trim() ? 'Give the group a name.' : undefined;
+  const membersError = submitted && !selected.length ? 'Choose at least one member.' : undefined;
+  const selectedIds = useMemo(() => new Set(selected.map((user) => user.id)), [selected]);
+  const results = useMemo(
+    () => (users.data ?? []).filter((user) => !query || user.name.toLowerCase().includes(query)),
+    [query, users.data],
+  );
+
   const create = useMutation({
-    mutationFn: () => groupService.create(name, selected),
-    onSuccess: (group) => {
+    mutationFn: async () => {
+      const group = await groupService.create({
+        name,
+        description,
+        members: selected.map((user) => user.id),
+        clientId: clientId.current,
+      });
+      let photoFailed = false;
+      if (photo) {
+        try {
+          await groupService.uploadIcon(group._id, photo);
+        } catch {
+          photoFailed = true;
+        }
+      }
+      return { group, photoFailed };
+    },
+    onSuccess: ({ group, photoFailed }) => {
       void client.invalidateQueries({ queryKey: queryKeys.conversations });
+      if (photoFailed)
+        toast.error('Group created, but the photo could not be uploaded. Add it from group info.');
+      else toast.success('Group created');
       router.replace(`/chat/group:${group._id}`);
     },
-    onError: (error) => toast.error(describeError(error, 'Unable to create the group.')),
+    onError: (error) =>
+      toast.error(describeError(error, "We couldn't create the group. Please try again.")),
   });
-  return (
-    <Screen padded={false}>
-      <View style={{ padding: 20, gap: 12 }}>
-        <Header title="New group" back backFallback="/chats" />
-        <Input label="Group name" value={name} onChangeText={setName} maxLength={100} />
-        <Input
-          accessibilityLabel="Search members"
-          placeholder="Search real users"
-          value={search}
-          onChangeText={setSearch}
+
+  const toggle = useCallback((user: ProfileView) => {
+    setSelected((current) => {
+      if (current.some((item) => item.id === user.id))
+        return current.filter((item) => item.id !== user.id);
+      if (current.length >= MAX_SELECTED) {
+        toast.error(`A group can have up to ${GROUP_MEMBERS_MAX} members.`);
+        return current;
+      }
+      return [...current, user];
+    });
+  }, []);
+
+  const choosePhoto = async () => {
+    try {
+      const asset = await pickImage();
+      if (asset) setPhoto(asset);
+    } catch {
+      toast.error("Couldn't open your photos.");
+    }
+  };
+
+  const submit = () => {
+    setSubmitted(true);
+    if (!name.trim() || !selected.length || create.isPending) return;
+    create.mutate();
+  };
+
+  const busy = create.isPending;
+  const form = (
+    <View style={styles.form}>
+      <View style={styles.identity}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={photo ? 'Change group photo' : 'Add a group photo'}
+          disabled={busy}
+          onPress={() => void choosePhoto()}
+          style={[styles.photo, { backgroundColor: theme.colors.surfaceElevated }]}
+        >
+          {photo ? (
+            <Avatar uri={photo.uri} label="Group photo" size={72} />
+          ) : (
+            <Ionicons name="camera-outline" size={28} color={theme.colors.textSecondary} />
+          )}
+        </Pressable>
+        <View style={styles.identityFields}>
+          <Input
+            label="Group name"
+            value={name}
+            onChangeText={setName}
+            maxLength={GROUP_NAME_MAX}
+            error={nameError}
+            editable={!busy}
+            returnKeyType="next"
+          />
+        </View>
+      </View>
+      {photo ? (
+        <Button
+          label="Remove photo"
+          variant="ghost"
+          size="sm"
+          fullWidth={false}
+          disabled={busy}
+          onPress={() => setPhoto(null)}
         />
-        <Text variant="caption" color="secondary">
-          {selected.length} selected. You are included as the group owner.
+      ) : null}
+      <Input
+        label="Description (optional)"
+        value={description}
+        onChangeText={setDescription}
+        maxLength={GROUP_DESCRIPTION_MAX}
+        multiline
+        showCount
+        editable={!busy}
+      />
+      <View style={styles.membersHeading}>
+        <Text variant="subheading">Members</Text>
+        <Text variant="caption" color={membersError ? 'danger' : 'secondary'}>
+          {membersError ?? `${selected.length} selected · you'll be the owner`}
         </Text>
       </View>
-      {users.isPending ? (
-        <Loader />
-      ) : users.isError ? (
-        <ErrorState onRetry={() => void users.refetch()} />
-      ) : (
-        <FlatList
-          data={users.data?.filter((u) => u.name.toLowerCase().includes(search.toLowerCase()))}
-          keyExtractor={(u) => u.id}
-          contentContainerStyle={{ paddingHorizontal: 20, gap: 8, paddingBottom: 20 }}
-          ListEmptyComponent={
-            <EmptyState
-              compact
-              icon="people-outline"
-              title="No users found"
-              message="Pull down to refresh the user list."
-            />
-          }
-          onRefresh={() => void users.refetch()}
-          refreshing={users.isRefetching}
-          renderItem={({ item }) => (
+      {selected.length ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chips}
+          keyboardShouldPersistTaps="handled"
+        >
+          {selected.map((user) => (
             <Pressable
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: selected.includes(item.id) }}
-              disabled={create.isPending}
-              onPress={() =>
-                setSelected((ids) =>
-                  ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id],
-                )
-              }
-              style={{
-                flexDirection: 'row',
-                gap: 12,
-                alignItems: 'center',
-                padding: 12,
-                borderRadius: 12,
-                backgroundColor: selected.includes(item.id)
-                  ? theme.colors.primarySoft
-                  : theme.colors.surface,
-              }}
+              key={user.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${user.name}`}
+              disabled={busy}
+              onPress={() => toggle(user)}
+              style={[styles.chip, { backgroundColor: theme.colors.primarySoft }]}
             >
-              <Avatar uri={item.avatarUri} label={item.name} />
-              <Text style={{ flex: 1 }}>{item.name}</Text>
-              <Text>{selected.includes(item.id) ? '✓' : '+'}</Text>
+              <Avatar uri={user.avatarUri} label={user.name} size={24} />
+              <Text variant="label" numberOfLines={1} style={styles.chipName}>
+                {user.name}
+              </Text>
+              <Ionicons name="close" size={16} color={theme.colors.text} />
             </Pressable>
-          )}
-        />
-      )}
-      <View style={{ padding: 20 }}>
-        <Button
-          label="Create group"
-          loading={create.isPending}
-          disabled={!name.trim() || !selected.length || create.isPending || users.isError}
-          onPress={() => create.mutate()}
-        />
+          ))}
+        </ScrollView>
+      ) : null}
+      <Input
+        accessibilityLabel="Search people"
+        icon="search-outline"
+        placeholder="Search people"
+        value={search}
+        onChangeText={setSearch}
+        returnKeyType="search"
+        clearButtonMode="while-editing"
+      />
+    </View>
+  );
+
+  return (
+    <Screen padded={false}>
+      <View style={styles.header}>
+        <Header title="New group" back backFallback="/chats" />
       </View>
+      <KeyboardAvoidingScreen>
+        {users.isPending ? (
+          <>
+            {form}
+            <Loader />
+          </>
+        ) : users.isError ? (
+          <>
+            {form}
+            <ErrorState
+              onRetry={() => void users.refetch()}
+              message={describeError(users.error, "We couldn't load people to add.")}
+            />
+          </>
+        ) : (
+          <FlatList
+            data={results}
+            keyExtractor={(user) => user.id}
+            ListHeaderComponent={form}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            contentContainerStyle={styles.list}
+            onRefresh={() => void users.refetch()}
+            refreshing={users.isRefetching}
+            ListEmptyComponent={
+              <EmptyState
+                compact
+                icon="people-outline"
+                title={query ? 'No one matches that name' : 'No people to add yet'}
+                message={query ? 'Try a different spelling.' : 'Pull down to refresh.'}
+              />
+            }
+            renderItem={({ item }) => {
+              const checked = selectedIds.has(item.id);
+              return (
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked, disabled: busy }}
+                  accessibilityLabel={item.name}
+                  disabled={busy}
+                  onPress={() => toggle(item)}
+                  style={({ pressed }) => [
+                    styles.row,
+                    {
+                      backgroundColor: checked
+                        ? theme.colors.primarySoft
+                        : pressed
+                          ? theme.colors.surfacePressed
+                          : theme.colors.surface,
+                    },
+                  ]}
+                >
+                  <Avatar uri={item.avatarUri} label={item.name} />
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Ionicons
+                    name={checked ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={24}
+                    color={checked ? theme.colors.primary : theme.colors.textMuted}
+                  />
+                </Pressable>
+              );
+            }}
+          />
+        )}
+        <View style={[styles.footer, { borderTopColor: theme.colors.divider }]}>
+          <Button
+            label={busy ? 'Creating group…' : 'Create group'}
+            loading={busy}
+            disabled={busy}
+            onPress={submit}
+          />
+        </View>
+      </KeyboardAvoidingScreen>
     </Screen>
   );
 }
-export default function NewGroupRoute() {
+
+export default function NewGroupRoute(): React.JSX.Element {
   return (
     <ProtectedRoute capability="canCreateGroups">
       <NewGroup />
     </ProtectedRoute>
   );
 }
+
+const styles = StyleSheet.create({
+  header: { paddingHorizontal: spacing.screen },
+  form: { gap: spacing.md, paddingBottom: spacing.md },
+  identity: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  identityFields: { flex: 1 },
+  photo: {
+    width: 72,
+    height: 72,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginTop: spacing.lg,
+  },
+  membersHeading: { gap: spacing.xxs, marginTop: spacing.sm },
+  chips: { gap: spacing.sm, paddingVertical: spacing.xxs },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingLeft: spacing.xs,
+    paddingRight: spacing.sm,
+    minHeight: 36,
+    borderRadius: radius.pill,
+    maxWidth: 180,
+  },
+  chipName: { flexShrink: 1 },
+  list: { paddingHorizontal: spacing.screen, gap: spacing.sm, paddingBottom: spacing.lg },
+  row: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    alignItems: 'center',
+    padding: spacing.md,
+    borderRadius: radius.md,
+    minHeight: spacing.touch + 16,
+  },
+  rowName: { flex: 1 },
+  footer: {
+    paddingHorizontal: spacing.screen,
+    paddingVertical: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+});

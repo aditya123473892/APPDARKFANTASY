@@ -7,9 +7,12 @@ const member = {
   canModerate: false,
   canViewAdminScreens: false,
   canRequestConnection: false,
-  canCreateGroups: false,
+  canCreateGroups: true,
 };
-/** Chat/media require JWT, not a role; resource membership/ownership remains server enforced. */
+/**
+ * Chat/media/groups require a JWT, not a role. Any member can create a group
+ * and owns it; membership and ownership are enforced by the server.
+ */
 export const permissions = {
   user: { ...member, canRequestConnection: true },
   manager: { ...member },

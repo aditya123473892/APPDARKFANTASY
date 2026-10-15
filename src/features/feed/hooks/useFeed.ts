@@ -1,17 +1,67 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { toast } from '@/components/ui/Toast';
 import { describeError } from '@/services/errors';
 import { queryKeys } from '@/services/queryKeys';
 import { feedService } from '../services';
-import { listMyPosts } from '../services/feedService.real';
-import type { CreatePostInput, Post } from '../types';
+import {
+  addComment,
+  deleteComment,
+  deletePost,
+  listComments,
+  listMyPosts,
+} from '../services/feedService.real';
+import type { CommentPage, CreatePostInput, FeedPage, Post, PostComment } from '../types';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
+import { useAuthStore } from '@/features/auth/store/authStore';
 
+/** The public feed, loaded page by page. `data` is the flattened, de-duplicated list. */
 export function useFeed() {
-  return useQuery({ queryKey: queryKeys.feed, queryFn: () => feedService.list() });
+  return useInfiniteQuery({
+    queryKey: queryKeys.feed,
+    queryFn: ({ pageParam }) => feedService.listPage(pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last: FeedPage, pages: FeedPage[]) => {
+      const loaded = pages.reduce((total, page) => total + page.posts.length, 0);
+      return last.posts.length && loaded < last.count ? loaded : undefined;
+    },
+    // New posts shift offsets, so a later page can repeat a post already shown.
+    select: (data) => {
+      const seen = new Set<string>();
+      return data.pages.flatMap((page) =>
+        page.posts.filter((post) => !seen.has(post.id) && seen.add(post.id)),
+      );
+    },
+  });
 }
 export function useMyPosts() {
-  return useQuery({ queryKey: ['my-posts'], queryFn: listMyPosts });
+  return useQuery({ queryKey: queryKeys.myPosts, queryFn: listMyPosts });
+}
+
+/**
+ * Applies a change to one post in every cached list that shows it (feed,
+ * own profile, other profiles). Returning null removes the post.
+ */
+export function updateCachedPost(
+  client: QueryClient,
+  postId: string,
+  update: (post: Post) => Post | null,
+): void {
+  const apply = (posts: Post[]) =>
+    posts.flatMap((post) => (post.id === postId ? (update(post) ?? []) : [post]));
+  client.setQueriesData<InfiniteData<FeedPage>>({ queryKey: queryKeys.feed }, (data) =>
+    data
+      ? { ...data, pages: data.pages.map((page) => ({ ...page, posts: apply(page.posts) })) }
+      : data,
+  );
+  for (const queryKey of [queryKeys.myPosts, ['user-posts']])
+    client.setQueriesData<Post[]>({ queryKey }, (posts) => (posts ? apply(posts) : posts));
 }
 
 export function useCreatePost() {
@@ -23,40 +73,167 @@ export function useCreatePost() {
     onSuccess: (post, _input, identity) => {
       if (!identity || identity !== sessionIdentity.userId) return;
       if (post.status === 'approved' && post.audience === 'everyone')
-        queryClient.setQueryData<Post[]>(queryKeys.feed, (current) =>
-          current ? [post, ...current] : current,
+        queryClient.setQueryData<InfiniteData<FeedPage>>(queryKeys.feed, (data) =>
+          data?.pages.length
+            ? {
+                ...data,
+                pages: [
+                  { ...data.pages[0]!, posts: [post, ...data.pages[0]!.posts] },
+                  ...data.pages.slice(1),
+                ],
+              }
+            : data,
         );
-      void queryClient.invalidateQueries({ queryKey: ['my-posts'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.myPosts });
       void queryClient.invalidateQueries({ queryKey: queryKeys.feed });
     },
   });
 }
 
-/** Optimistic like toggle that rolls back and tells the user if the server rejects it. */
+/** The most recent like/unlike the user asked for, per post. */
+const likeIntent = new Map<string, boolean>();
+
+/**
+ * Optimistic like toggle. Requests run one at a time in tap order, so rapid
+ * taps cannot reach the server out of order; the server's confirmed state is
+ * applied once it matches the user's latest intent, and a failure of the
+ * latest intent rolls the UI back.
+ */
 export function useToggleLike() {
   const queryClient = useQueryClient();
-  const patch = (postId: string, liked: boolean) =>
-    queryClient.setQueryData<Post[]>(queryKeys.feed, (current) =>
-      current?.map((post) =>
-        post.id === postId && post.liked !== liked
-          ? { ...post, liked, likes: post.likes + (liked ? 1 : -1) }
-          : post,
-      ),
-    );
+  const show = (postId: string, liked: boolean, count?: number) =>
+    updateCachedPost(queryClient, postId, (post) => ({
+      ...post,
+      liked,
+      likes:
+        count ?? (post.liked === liked ? post.likes : Math.max(0, post.likes + (liked ? 1 : -1))),
+    }));
   return useMutation({
+    scope: { id: 'post-like' },
     mutationFn: ({ postId, liked }: { postId: string; liked: boolean }) =>
       feedService.setLiked(postId, liked),
-    onMutate: async ({ postId, liked }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.feed });
-      patch(postId, liked);
+    onMutate: ({ postId, liked }) => {
+      likeIntent.set(postId, liked);
+      show(postId, liked);
+    },
+    onSuccess: (state, { postId }) => {
+      if (state && likeIntent.get(postId) === state.liked)
+        show(postId, state.liked, state.likeCount);
     },
     onError: (error, { postId, liked }) => {
-      patch(postId, !liked);
+      if (likeIntent.get(postId) === liked) {
+        likeIntent.set(postId, !liked);
+        show(postId, !liked);
+      }
       toast.error(describeError(error, "Couldn't update that like."));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.feed });
-      void queryClient.invalidateQueries({ queryKey: ['my-posts'] });
+  });
+}
+
+/** Comments of one post, newest first, loaded page by page when opened. */
+export function useComments(postId: string, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.comments(postId),
+    queryFn: ({ pageParam }) => listComments(postId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: CommentPage) =>
+      last.hasMore ? last.comments[last.comments.length - 1]?.id : undefined,
+    enabled,
+  });
+}
+
+function setComments(
+  client: QueryClient,
+  postId: string,
+  update: (comments: PostComment[]) => PostComment[],
+) {
+  client.setQueryData<InfiniteData<CommentPage>>(queryKeys.comments(postId), (data) =>
+    data?.pages.length
+      ? {
+          ...data,
+          pages: data.pages.map((page, index) =>
+            index === 0 ? { ...page, comments: update(page.comments) } : page,
+          ),
+        }
+      : data,
+  );
+}
+
+/** Adds a comment immediately and replaces it with the server's copy once stored. */
+export function useAddComment(postId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ content, clientId }: { content: string; clientId: string }) =>
+      addComment(postId, content, clientId),
+    onMutate: ({ content, clientId }) => {
+      const me = useAuthStore.getState().user;
+      const pending: PostComment = {
+        id: `local-${clientId}`,
+        content: content.trim(),
+        createdAt: new Date().toISOString(),
+        pending: true,
+        author: {
+          id: me?.id ?? '',
+          name: me?.name ?? 'You',
+          handle: '',
+          avatarUri: me?.avatarUri ?? '',
+        },
+      };
+      setComments(client, postId, (comments) => [pending, ...comments]);
+      updateCachedPost(client, postId, (post) => ({ ...post, replies: post.replies + 1 }));
+      return pending.id;
     },
+    onSuccess: (comment, _variables, pendingId) =>
+      setComments(client, postId, (comments) =>
+        comments
+          .filter((item) => item.id !== comment.id)
+          .map((item) => (item.id === pendingId ? comment : item)),
+      ),
+    onError: (error, _variables, pendingId) => {
+      setComments(client, postId, (comments) => comments.filter((item) => item.id !== pendingId));
+      updateCachedPost(client, postId, (post) => ({
+        ...post,
+        replies: Math.max(0, post.replies - 1),
+      }));
+      toast.error(describeError(error, "Couldn't post your comment."));
+    },
+  });
+}
+
+export function useDeleteComment(postId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (commentId: string) => deleteComment(postId, commentId),
+    onSuccess: (count, commentId) => {
+      client.setQueryData<InfiniteData<CommentPage>>(queryKeys.comments(postId), (data) =>
+        data
+          ? {
+              ...data,
+              pages: data.pages.map((page) => ({
+                ...page,
+                comments: page.comments.filter((comment) => comment.id !== commentId),
+              })),
+            }
+          : data,
+      );
+      updateCachedPost(client, postId, (post) => ({
+        ...post,
+        replies: count ?? Math.max(0, post.replies - 1),
+      }));
+    },
+    onError: (error) => toast.error(describeError(error, "Couldn't delete that comment.")),
+  });
+}
+
+export function useDeletePost() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (postId: string) => deletePost(postId),
+    onSuccess: (_result, postId) => {
+      updateCachedPost(client, postId, () => null);
+      client.removeQueries({ queryKey: queryKeys.comments(postId) });
+      toast.success('Post deleted');
+    },
+    onError: (error) => toast.error(describeError(error, "Couldn't delete that post.")),
   });
 }

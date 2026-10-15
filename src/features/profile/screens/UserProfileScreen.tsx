@@ -10,6 +10,7 @@ import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useProfile } from '../hooks/useProfiles';
 import { ProfileHeader } from '../components/ProfileHeader';
 import { listUserPosts } from '@/features/feed/services/feedService.real';
+import { useToggleLike } from '@/features/feed/hooks/useFeed';
 import { followUser } from '@/features/requests/services/requestsService.real';
 import { describeError } from '@/services/errors';
 import { useTheme } from '@/theme/useTheme';
@@ -24,6 +25,7 @@ export function UserProfileScreen() {
     queryFn: () => listUserPosts(id),
     enabled: Boolean(id) && id !== myId,
   });
+  const toggleLike = useToggleLike();
   const follow = useMutation({
     mutationFn: () => followUser(id),
     onSuccess: () => toast.success('Follow request sent'),
@@ -82,7 +84,15 @@ export function UserProfileScreen() {
             ) : posts.isError ? (
               <ErrorState onRetry={() => void posts.refetch()} />
             ) : posts.data?.length ? (
-              posts.data.map((post) => <PostCard key={post.id} post={post} />)
+              posts.data.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onToggleLike={(item) =>
+                    toggleLike.mutate({ postId: item.id, liked: !item.liked })
+                  }
+                />
+              ))
             ) : (
               <EmptyState
                 compact

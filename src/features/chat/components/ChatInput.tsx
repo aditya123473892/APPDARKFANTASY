@@ -10,6 +10,7 @@ const MAX_LENGTH = 2000;
 
 export function ChatInput({
   onSend,
+  onChangeText,
   onAttach,
   bottomInset,
   disabled = false,
@@ -18,6 +19,8 @@ export function ChatInput({
   placeholder = 'Write a message…',
 }: {
   onSend: (value: string) => void;
+  /** Called with the draft as it changes (e.g. for typing indicators). */
+  onChangeText?: (value: string) => void;
   onAttach?: () => void;
   /** Gesture/navigation bar height. Pass 0 while the keyboard is open. */
   bottomInset: number;
@@ -85,7 +88,10 @@ export function ChatInput({
           maxLength={MAX_LENGTH}
           maxFontSizeMultiplier={typography.maxFontScale}
           value={value}
-          onChangeText={setValue}
+          onChangeText={(text) => {
+            setValue(text);
+            onChangeText?.(text);
+          }}
           textAlignVertical="center"
           style={[styles.input, { color: theme.colors.text }]}
         />

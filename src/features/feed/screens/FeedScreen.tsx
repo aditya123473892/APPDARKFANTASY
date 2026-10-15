@@ -4,7 +4,7 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-nat
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { BrandHeader, Screen } from '@/components/layout';
-import { Avatar, EmptyState, PostCard, Skeleton, Text } from '@/components/ui';
+import { Avatar, EmptyState, Loader, PostCard, Skeleton, Text } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -35,7 +35,18 @@ export function FeedScreen(): React.JSX.Element {
   const router = useRouter();
   const { theme } = useTheme();
   const me = useAuthStore((state) => state.user);
-  const { data, isPending, isError, isRefetching, isRefetchError, refetch } = useFeed();
+  const {
+    data,
+    isPending,
+    isError,
+    isRefetching,
+    isRefetchError,
+    refetch,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useFeed();
   const toggleLike = useToggleLike();
 
   const onToggleLike = useCallback(
@@ -89,6 +100,25 @@ export function FeedScreen(): React.JSX.Element {
           ListHeaderComponentStyle={styles.header}
           initialNumToRender={5}
           windowSize={9}
+          onEndReached={() => {
+            if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
+          }}
+          onEndReachedThreshold={0.6}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <Loader />
+            ) : isFetchNextPageError ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void fetchNextPage()}
+                style={styles.more}
+              >
+                <Text variant="caption" color="primary">
+                  Couldn't load more posts. Tap to retry.
+                </Text>
+              </Pressable>
+            ) : null
+          }
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
@@ -119,6 +149,7 @@ const styles = StyleSheet.create({
   empty: { flexGrow: 1 },
   header: { marginBottom: spacing.md },
   gap: { height: spacing.md },
+  more: { alignItems: 'center', paddingVertical: spacing.lg },
   composer: {
     minHeight: 56,
     flexDirection: 'row',

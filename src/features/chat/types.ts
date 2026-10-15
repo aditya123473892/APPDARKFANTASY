@@ -6,7 +6,7 @@ export type LocalMessageStatus = MessageStatus | 'sending' | 'failed';
 
 export type Message = {
   id: string;
-  /** Local correlation only; the backend does not echo it or make retries idempotent. */
+  /** Idempotency key: the server stores a message once per key and echoes it back. */
   clientId?: string;
   conversationId: string;
   senderId: string;
@@ -39,6 +39,7 @@ export type Conversation = {
   groupId?: string;
   ownerId?: string;
   memberCount?: number;
+  description?: string;
 };
 
 export type SendMessageInput = {

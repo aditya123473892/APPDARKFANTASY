@@ -11,12 +11,14 @@ export type OutboxItem = {
   text: string;
   createdAt: string;
   status: 'sending' | 'failed';
+  /** The last failure was a connection problem: resend automatically after reconnecting. */
+  retryable?: boolean;
 };
 
 type OutboxState = {
   items: Record<string, OutboxItem>;
   upsert: (item: OutboxItem) => void;
-  setStatus: (clientId: string, status: OutboxItem['status']) => void;
+  setStatus: (clientId: string, status: OutboxItem['status'], retryable?: boolean) => void;
   remove: (clientId: string) => void;
   clear: () => void;
 };
@@ -24,10 +26,12 @@ type OutboxState = {
 export const useOutbox = create<OutboxState>((set) => ({
   items: {},
   upsert: (item) => set((state) => ({ items: { ...state.items, [item.clientId]: item } })),
-  setStatus: (clientId, status) =>
+  setStatus: (clientId, status, retryable) =>
     set((state) => {
       const item = state.items[clientId];
-      return item ? { items: { ...state.items, [clientId]: { ...item, status } } } : state;
+      return item
+        ? { items: { ...state.items, [clientId]: { ...item, status, retryable } } }
+        : state;
     }),
   remove: (clientId) =>
     set((state) => {

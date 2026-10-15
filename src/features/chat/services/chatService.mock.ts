@@ -9,6 +9,9 @@ export const mockChatService: ChatService = {
   listConversations: () => respond(() => db.conversations()),
   getConversation: (conversationId) => respond(() => db.conversation(conversationId), 250),
   listMessages: (conversationId) => respond(() => db.messages(conversationId)),
+  // The fixture database returns whole conversations in one page.
+  loadOlderMessages: () => respond(() => false),
+  setTyping: () => {},
   sendMessage: ({ conversationId, text, clientId }) =>
     respond(() => {
       if (text.trim() === MOCK_FAIL_MESSAGE)
