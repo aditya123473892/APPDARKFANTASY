@@ -36,6 +36,24 @@ backend and check for guest-network isolation or a VPN. The portable Node runtim
 and system Node executable require separate firewall allowances. Update the URL
 if the PC's Wi-Fi address changes. Release builds still require HTTPS.
 
+If the phone can open port 8081 but port 9000 times out, the local development
+launcher supports an API proxy through Metro. Set `.env.mobile` to:
+
+```dotenv
+EXPO_PUBLIC_API_URL=http://<PC-Wi-Fi-IP>:8081/api
+EXPO_DEV_API_PROXY=true
+EXPO_PUBLIC_DEV_API_PROXY=true
+```
+
+Restart with `npm start -- --clear --lan`. Metro forwards `/api`, `/uploads`,
+and Socket.IO polling to `127.0.0.1:9000`; the backend keeps running on 9000.
+This proxy runs only with the development launcher. Chat uses polling while
+the proxy is enabled. For direct backend access, restore port 9000 and set both
+proxy flags to `false`.
+
+Mobile signup now calls `/auth/signup` with the required profile fields. After
+creation, verify your email if required and sign in; signup does not return a token.
+
 Mock login accepts the prefilled credentials. To test a generic auth failure, use `error@example.com` or password `wrongpass`. The mock invitation code is `NIGHT42`.
 
 ## Structure

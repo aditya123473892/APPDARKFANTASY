@@ -13,6 +13,7 @@ web-build/
 .env.*
 !.env.mobile.example
 npm-debug.log*
+expo-proxy.*.log
 
 # Keep this repository mobile-only.
 backenddf/

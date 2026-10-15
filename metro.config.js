@@ -1,6 +1,12 @@
 const path = require('node:path');
 const { getDefaultConfig } = require('expo/metro-config');
 const config = getDefaultConfig(__dirname);
+if (process.env.EXPO_DEV_API_PROXY === 'true' && process.env.APP_VARIANT === 'development') {
+  const { createDevApiProxy } = require('./scripts/dev-api-proxy.cjs');
+  const enhance = config.server.enhanceMiddleware;
+  config.server.enhanceMiddleware = (middleware, server) =>
+    createDevApiProxy(enhance ? enhance(middleware, server) : middleware);
+}
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const existing = config.resolver.blockList;
 // These are separate server/desktop projects, not mobile dependencies.

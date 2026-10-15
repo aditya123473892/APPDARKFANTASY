@@ -12,6 +12,8 @@ if (
 if (!__DEV__ && parsed.protocol !== 'https:') throw new Error('Release API must use HTTPS');
 export const env = {
   apiUrl: apiUrl.replace(/\/$/, ''),
+  // Metro's HTTP proxy carries Socket.IO polling on the same reachable port.
+  localApiProxy: __DEV__ && process.env.EXPO_PUBLIC_DEV_API_PROXY === 'true',
   authMode:
     (process.env.EXPO_PUBLIC_AUTH_MODE ?? Constants.expoConfig?.extra?.authMode) === 'invite_only'
       ? ('invite_only' as const)

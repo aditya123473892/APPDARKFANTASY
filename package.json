@@ -10,6 +10,7 @@
     "web": "node scripts/expo.mjs start --web",
     "typecheck": "tsc --noEmit",
     "test:auth": "node --test scripts/test-auth.cjs",
+    "test:network": "node --test scripts/test-dev-api-proxy.cjs",
     "lint": "eslint app src",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

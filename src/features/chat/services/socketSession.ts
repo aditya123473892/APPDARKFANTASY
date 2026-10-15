@@ -181,7 +181,7 @@ export async function connectSocket(): Promise<Socket> {
       callback(isSessionCurrent(scope) ? { token: sessionIdentity.getToken() } : {}),
     reconnection: true,
     timeout: 10000,
-    transports: ['websocket'],
+    transports: env.localApiProxy ? ['polling'] : ['websocket'],
   });
   const current = socket;
   const valid = () => isSessionCurrent(scope) && current === socket;

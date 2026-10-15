@@ -7,6 +7,68 @@ const ts = require('typescript');
 const axios = require('axios');
 const { validateAuthBuild } = require('./auth-build-config.cjs');
 
+test('signup sends the backend DTO, clears passwords, and does not invent a session', async () => {
+  const h = harness();
+  const requests = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    requests.push({ url: config.url, body: JSON.parse(config.data) });
+    return h.ok(config, { message: 'Account created, Please check your email and verify!' });
+  };
+  const input = {
+    name: ' Test ',
+    lastName: ' User ',
+    age: '25',
+    gender: 'Other',
+    email: ' test@example.test ',
+    password: 'Private123',
+  };
+  assert.equal(await h.service.register(input), undefined);
+  assert.deepEqual(requests, [
+    {
+      url: '/auth/signup',
+      body: {
+        username: 'test@example.test',
+        password: 'Private123',
+        firstName: 'Test',
+        lastName: 'User',
+        age: 25,
+        gender: 'Other',
+        roles: ['user'],
+      },
+    },
+  ]);
+  assert.equal(input.password, '');
+  assert.equal(h.secure.size, 0);
+  assert.equal(h.runtime.getRuntimeToken(), null);
+});
+
+test('signup distinguishes duplicate emails and network failures and clears passwords', async () => {
+  for (const failure of ['EMAIL_IN_USE', 'NETWORK']) {
+    const h = harness();
+    h.apiClient.defaults.adapter = async (config) => {
+      if (failure === 'NETWORK') throw new axios.AxiosError('offline', 'ERR_NETWORK', config);
+      return {
+        ...h.ok(config, null),
+        data: {
+          error: true,
+          statusCode: 400,
+          message: 'Account already exists with this email!, go to login',
+        },
+      };
+    };
+    const input = {
+      name: 'Test',
+      lastName: 'User',
+      age: '25',
+      gender: 'Other',
+      email: 'test@example.test',
+      password: 'Private123',
+    };
+    await assert.rejects(h.service.register(input), (error) => error.code === failure);
+    assert.equal(input.password, '');
+  }
+});
+
 test('real backend mappings preserve identities, media types, like state and conversation boundaries', () => {
   const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
   const me = '111111111111111111111111';

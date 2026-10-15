@@ -38,7 +38,15 @@ export type Session = {
 };
 export type AuthResult = { user: BackendUser; session: Session };
 export type LoginInput = { email: string; password: string; strategy: 'email_password' };
-export type RegisterInput = { name: string; email: string; password: string; inviteCode?: string };
+export type RegisterInput = {
+  name: string;
+  lastName: string;
+  age: string;
+  gender: string;
+  email: string;
+  password: string;
+  inviteCode?: string;
+};
 
 export class AuthError extends Error {
   constructor(

@@ -73,7 +73,7 @@ export function LoginForm(): React.JSX.Element {
         onPress={submit}
       />
       <Text color="muted" variant="caption">
-        For account creation or password reset, use the desktop website.
+        For password reset, use the desktop website.
       </Text>
     </View>
   );

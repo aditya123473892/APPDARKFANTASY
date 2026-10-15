@@ -76,8 +76,29 @@ export const realAuthService: AuthService = {
   async refreshSession() {
     throw new AuthError('SESSION_EXPIRED');
   },
-  async register() {
-    throw new AuthError('ACCOUNT_UNAVAILABLE');
+  async register(input) {
+    const body = {
+      username: input.email.trim(),
+      password: input.password,
+      firstName: input.name.trim(),
+      lastName: input.lastName.trim(),
+      age: Number(input.age),
+      gender: input.gender.trim(),
+      roles: ['user'],
+    };
+    input.password = '';
+    try {
+      const response = await apiClient.post<Envelope<{ message: string }>>('/auth/signup', body);
+      response.config.data = undefined;
+      if (response.data.message === 'Account already exists with this email!, go to login')
+        throw new AuthError('EMAIL_IN_USE');
+      unwrap(response.data);
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.config) error.config.data = undefined;
+      throw translate(error);
+    } finally {
+      body.password = '';
+    }
   },
   async requestPasswordReset() {
     throw new AuthError('ACCOUNT_UNAVAILABLE');
