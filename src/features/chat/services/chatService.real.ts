@@ -22,6 +22,7 @@ import {
   mapMessage,
   parseMessage,
   parseUserSummary,
+  previewText,
   type BackendMessage,
 } from './chatPayload';
 import {
@@ -105,7 +106,7 @@ function preview(value: unknown, key: string): Conversation['lastMessage'] {
   const raw = parseMessage(value);
   if (!raw || conversationKey(raw) !== key) return null;
   return {
-    text: raw.message || (raw.media?.length ? 'Attachment' : ''),
+    text: previewText(raw),
     senderId: senderId(raw.sender),
     createdAt: raw.sentAt,
   };
@@ -171,7 +172,7 @@ export const realChatService: ChatService = {
           Date.parse(latest.createdAt) > Date.parse(conversation.lastMessage.createdAt))
       ) {
         conversation.lastMessage = {
-          text: latest.text || (latest.media?.length ? 'Attachment' : ''),
+          text: previewText(latest),
           senderId: latest.senderId,
           createdAt: latest.createdAt,
         };
@@ -211,11 +212,17 @@ export const realChatService: ChatService = {
     const to = target(input.conversationId);
     const clientId = CLIENT_ID.test(input.clientId) ? input.clientId : undefined;
     try {
-      const payload = { ...to, message: input.text, ...(clientId ? { clientId } : {}) };
+      const payload = {
+        ...to,
+        message: input.text,
+        ...(clientId ? { clientId } : {}),
+        ...(input.ttlSeconds ? { ttlSeconds: input.ttlSeconds } : {}),
+        ...(input.viewOnce ? { viewOnce: true } : {}),
+      };
       let body: FormData | typeof payload = payload;
       if (input.assets?.length) {
         const form = new FormData();
-        for (const [field, value] of Object.entries(payload)) form.append(field, value);
+        for (const [field, value] of Object.entries(payload)) form.append(field, String(value));
         input.assets.forEach((asset) => appendAsset(form, asset));
         body = form;
       }

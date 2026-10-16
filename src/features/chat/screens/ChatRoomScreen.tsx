@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -44,6 +45,25 @@ import {
   useVisiblePresence,
 } from '../hooks/useChat';
 import { buildRows, type ChatRow as Row } from '../utils/buildRows';
+import { TimerSheet } from '../components/TimerSheet';
+import { timerShortLabel } from '../disappearing';
+
+/** Asks how to send one picked photo or video. Resolves null when cancelled. */
+function chooseViewOnce(type?: string | null): Promise<boolean | null> {
+  const kind = type?.startsWith('video/') ? 'video' : 'photo';
+  return new Promise((resolve) =>
+    Alert.alert(
+      `Send ${kind}`,
+      `A view-once ${kind} can be opened a single time by the recipient, then it's deleted. They may still capture it with another device.`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+        { text: 'View once', onPress: () => resolve(true) },
+        { text: 'Send', onPress: () => resolve(false) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(null) },
+    ),
+  );
+}
 
 function MessagesSkeleton(): React.JSX.Element {
   return (
@@ -73,6 +93,10 @@ export function ChatRoomScreen(): React.JSX.Element {
   const myId = useMyId();
   const canSendMessages = useCan('canSendMessages');
   const canShareMedia = useCan('canShareMedia');
+  const isDirect = conversationId.startsWith('user:');
+  // Disappearing-message timer for what the viewer sends next in this chat.
+  const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
+  const [timerSheet, setTimerSheet] = useState(false);
   const attach = useMutation({
     mutationFn: async () => {
       const scope = sessionIdentity.generation;
@@ -87,12 +111,18 @@ export function ChatRoomScreen(): React.JSX.Element {
       if (!allowed()) return;
       const assets = await pickMedia();
       if (!assets.length || !allowed()) return;
+      // A single photo or video in a direct chat can be sent as view-once.
+      const viewOnce =
+        isDirect && assets.length === 1 ? await chooseViewOnce(assets[0]?.type) : false;
+      if (viewOnce === null || !allowed()) return;
       try {
         await chatService.sendMessage({
           conversationId,
           text: '',
           assets,
           clientId: createClientId(),
+          ...(ttlSeconds ? { ttlSeconds } : {}),
+          ...(viewOnce ? { viewOnce: true } : {}),
         });
       } catch (error) {
         if (isSessionCurrent(scope))
@@ -145,10 +175,10 @@ export function ChatRoomScreen(): React.JSX.Element {
   const onSend = useCallback(
     (text: string) => {
       typing.stopTyping();
-      send(text);
+      send(text, ttlSeconds);
       requestAnimationFrame(scrollToLatest);
     },
-    [scrollToLatest, send, typing],
+    [scrollToLatest, send, ttlSeconds, typing],
   );
   const { hasOlder, loadOlder, loadingOlder, olderError } = messagesQuery;
   const onEndReached = useCallback(() => {
@@ -352,8 +382,16 @@ export function ChatRoomScreen(): React.JSX.Element {
           }
           bottomInset={keyboardVisible ? 0 : insets.bottom}
           placeholder={participant ? `Message ${participant.name}…` : 'Write a message…'}
+          timerLabel={timerShortLabel(ttlSeconds)}
+          onTimerPress={() => setTimerSheet(true)}
         />
       </KeyboardAvoidingScreen>
+      <TimerSheet
+        visible={timerSheet}
+        value={ttlSeconds}
+        onChange={setTtlSeconds}
+        onClose={() => setTimerSheet(false)}
+      />
     </SafeAreaView>
   );
 }

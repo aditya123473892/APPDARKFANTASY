@@ -6,7 +6,7 @@ import { senderId, userCache } from '@/features/auth/userCache';
 import { displayName } from '@/features/auth/userModel';
 import { mediaUrl } from '@/services/api/backend';
 import type { Conversation, Message } from '../types';
-import { conversationKey, isObjectId, mapMessage, parseMessage } from './chatPayload';
+import { conversationKey, isObjectId, mapMessage, parseMessage, previewText } from './chatPayload';
 
 /** Messages per history request; fewer rows than this means the start of the conversation. */
 export const HISTORY_PAGE = 50;
@@ -75,7 +75,7 @@ function updatePreview(key: string, rows: Message[]): void {
           ? item.lastMessage
           : latest
             ? {
-                text: latest.text || (latest.media?.length ? 'Attachment' : ''),
+                text: previewText(latest),
                 senderId: latest.senderId,
                 createdAt: latest.createdAt,
               }
@@ -104,6 +104,47 @@ export function mergeMessage(message: Message, deleted = false): void {
     return rows;
   });
   updatePreview(key, queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? []);
+}
+export const isExpired = (message: Pick<Message, 'expiresAt'>, now = Date.now()) =>
+  Boolean(message.expiresAt) && Date.parse(message.expiresAt!) <= now;
+/**
+ * Removes disappearing messages whose timer has run out from a loaded
+ * conversation. The server already stops returning them; this keeps the
+ * device from showing them until the next refetch. Returns the next expiry.
+ */
+export function purgeExpiredMessages(key: string, now = Date.now()): number | null {
+  const rows = queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [];
+  let next: number | null = null;
+  const removed = new Set<string>();
+  for (const message of rows) {
+    if (!message.expiresAt) continue;
+    if (isExpired(message, now)) {
+      mergeMessage(message, true);
+      removed.add(message.createdAt);
+    } else next = Math.min(next ?? Infinity, Date.parse(message.expiresAt));
+  }
+  if (removed.size) {
+    // updatePreview keeps a newer server preview; an expired one must go.
+    const remaining = queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [];
+    const latest = remaining[remaining.length - 1];
+    queryClient.setQueryData<Conversation[]>(queryKeys.conversations, (items) =>
+      items?.map((item) =>
+        item.id === key && item.lastMessage && removed.has(item.lastMessage.createdAt)
+          ? {
+              ...item,
+              lastMessage: latest
+                ? {
+                    text: previewText(latest),
+                    senderId: latest.senderId,
+                    createdAt: latest.createdAt,
+                  }
+                : null,
+            }
+          : item,
+      ),
+    );
+  }
+  return next;
 }
 /**
  * Applies a server message event. `received` marks a newly delivered message

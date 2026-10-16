@@ -17,11 +17,16 @@ export function ChatInput({
   canSendMessages = false,
   canShareMedia = false,
   placeholder = 'Write a message…',
+  timerLabel,
+  onTimerPress,
 }: {
   onSend: (value: string) => void;
   /** Called with the draft as it changes (e.g. for typing indicators). */
   onChangeText?: (value: string) => void;
   onAttach?: () => void;
+  /** Short label of the active disappearing-message timer, e.g. "5m"; null when off. */
+  timerLabel?: string | null;
+  onTimerPress?: () => void;
   /** Gesture/navigation bar height. Pass 0 while the keyboard is open. */
   bottomInset: number;
   disabled?: boolean;
@@ -69,6 +74,34 @@ export function ChatInput({
             size={24}
             color={disabled ? theme.colors.textMuted : theme.colors.primary}
           />
+        </Pressable>
+      ) : null}
+      {onTimerPress && canSendMessages ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            timerLabel ? `Disappearing messages: ${timerLabel}` : 'Disappearing messages: off'
+          }
+          disabled={disabled}
+          onPress={onTimerPress}
+          style={styles.timer}
+        >
+          <Ionicons
+            name={timerLabel ? 'timer' : 'timer-outline'}
+            size={22}
+            color={
+              disabled
+                ? theme.colors.textMuted
+                : timerLabel
+                  ? theme.colors.primary
+                  : theme.colors.textMuted
+            }
+          />
+          {timerLabel ? (
+            <Text variant="caption" color="primary" style={styles.timerLabel}>
+              {timerLabel}
+            </Text>
+          ) : null}
         </Pressable>
       ) : null}
       <View
@@ -158,6 +191,8 @@ const styles = StyleSheet.create({
     lineHeight: typography.lineHeight.md - 2,
   },
   counter: { position: 'absolute', right: spacing.md, top: spacing.xs },
+  timer: { width: 36, height: 44, justifyContent: 'center', alignItems: 'center' },
+  timerLabel: { fontSize: 10, lineHeight: 12, marginTop: -2 },
   send: {
     width: 46,
     height: 46,

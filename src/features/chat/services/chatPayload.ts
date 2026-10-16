@@ -16,6 +16,9 @@ export type BackendMessage = {
   media?: ChatMedia[];
   /** Sender-generated idempotency key echoed by the server. */
   clientId?: string;
+  expiresAt?: string;
+  viewOnce?: boolean;
+  viewedAt?: string;
 };
 const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
 export const isObjectId = (value: unknown): value is string =>
@@ -53,6 +56,9 @@ export function parseMessage(value: unknown): BackendMessage | null {
     return null;
   if (raw.isRead !== undefined && typeof raw.isRead !== 'boolean') return null;
   if (raw.media != null && !Array.isArray(raw.media)) return null;
+  if (raw.expiresAt != null && !date(raw.expiresAt)) return null;
+  if (raw.viewedAt != null && !date(raw.viewedAt)) return null;
+  if (raw.viewOnce != null && typeof raw.viewOnce !== 'boolean') return null;
   const media: ChatMedia[] = [];
   for (const value of (raw.media ?? []) as unknown[]) {
     const item = record(value);
@@ -88,7 +94,23 @@ export function parseMessage(value: unknown): BackendMessage | null {
     media,
     clientId:
       typeof raw.clientId === 'string' && CLIENT_ID.test(raw.clientId) ? raw.clientId : undefined,
+    expiresAt: typeof raw.expiresAt === 'string' ? raw.expiresAt : undefined,
+    viewOnce: raw.viewOnce === true || undefined,
+    viewedAt: typeof raw.viewedAt === 'string' ? raw.viewedAt : undefined,
   };
+}
+/** Inbox preview text for a message; view-once content is never previewed. */
+export function previewText(message: {
+  text?: string;
+  message?: string;
+  media?: ChatMedia[];
+  viewOnce?: boolean;
+}): string {
+  if (message.viewOnce)
+    return message.media?.[0]?.mimetype?.startsWith('video/')
+      ? 'View-once video'
+      : 'View-once photo';
+  return message.text || message.message || (message.media?.length ? 'Attachment' : '');
 }
 export function conversationKey(raw: BackendMessage): string | null {
   if (raw.groupId) return `group:${raw.groupId}`;
@@ -114,5 +136,8 @@ export function mapMessage(value: unknown, key: string): Message {
     createdAt: raw.sentAt,
     status: !raw.groupId && raw.isRead ? 'read' : 'sent',
     media: raw.media ?? [],
+    ...(raw.expiresAt ? { expiresAt: raw.expiresAt } : {}),
+    ...(raw.viewOnce ? { viewOnce: true } : {}),
+    ...(raw.viewedAt ? { viewedAt: raw.viewedAt } : {}),
   };
 }

@@ -13,6 +13,8 @@ export type OutboxItem = {
   status: 'sending' | 'failed';
   /** The last failure was a connection problem: resend automatically after reconnecting. */
   retryable?: boolean;
+  /** Disappearing-message timer chosen when the message was written. */
+  ttlSeconds?: number;
 };
 
 type OutboxState = {

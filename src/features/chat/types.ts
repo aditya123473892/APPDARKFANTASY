@@ -15,6 +15,12 @@ export type Message = {
   status: MessageStatus;
   senderName?: string;
   media?: ChatMedia[];
+  /** Disappearing message: the server stops returning it after this time. */
+  expiresAt?: string;
+  /** View-once media: the recipient can open it a single time. */
+  viewOnce?: boolean;
+  /** When the recipient opened the view-once media. */
+  viewedAt?: string;
 };
 export type ChatMedia = {
   _id: string;
@@ -47,4 +53,8 @@ export type SendMessageInput = {
   text: string;
   clientId: string;
   assets?: import('@/features/feed/types').UploadAsset[];
+  /** Disappearing-message timer in seconds; one of MESSAGE_TIMERS. */
+  ttlSeconds?: number;
+  /** Send the single attachment as view-once (direct chats only). */
+  viewOnce?: boolean;
 };

@@ -5,7 +5,12 @@ import { AppState } from 'react-native';
 import { useAppState } from '@/hooks/useAppState';
 import { useCan } from '@/features/auth/hooks/useCurrentUser';
 import { hasCapability } from '@/features/auth/permissions';
-import { hasOlderHistory, useChatConnection } from '../services/chatState';
+import {
+  hasOlderHistory,
+  isExpired,
+  purgeExpiredMessages,
+  useChatConnection,
+} from '../services/chatState';
 import { useTypingUsers } from '../store/typingStore';
 import { userCache } from '@/features/auth/userCache';
 import { displayName } from '@/features/auth/userModel';
@@ -81,10 +86,24 @@ export function useMessages(conversationId: string, enabled = true) {
     ),
   );
 
+  // Disappearing messages leave the cache when their timer runs out; the
+  // server stops returning them at the same moment.
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    if (!conversationId) return;
+    const next = purgeExpiredMessages(conversationId);
+    if (next === null) return;
+    const timer = setTimeout(
+      () => setClock(Date.now()),
+      Math.min(Math.max(0, next - Date.now()) + 50, 2_147_483_647),
+    );
+    return () => clearTimeout(timer);
+  }, [conversationId, query.data, clock]);
+
   const messages = useMemo<ChatMessage[]>(() => {
     // Defensive: never render a message that belongs to another conversation.
     const confirmed = (query.data ?? []).filter(
-      (message) => message.conversationId === conversationId,
+      (message) => message.conversationId === conversationId && !isExpired(message, clock),
     );
     const confirmedClientIds = new Set(
       confirmed.map((message) => message.clientId).filter(Boolean),
@@ -110,7 +129,8 @@ export function useMessages(conversationId: string, enabled = true) {
       })),
       ...pending,
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }, [conversationId, myId, outbox, query.data, readReceipts]);
+    // `clock` advances when the next disappearing message expires.
+  }, [conversationId, myId, outbox, query.data, readReceipts, clock]);
 
   // Older pages are loaded on demand when the reader scrolls to the top.
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -160,6 +180,7 @@ export function useSendMessage(conversationId: string) {
           conversationId: item.conversationId,
           text: item.text,
           clientId: item.clientId,
+          ...(item.ttlSeconds ? { ttlSeconds: item.ttlSeconds } : {}),
         });
         if (!isSessionCurrent(scope)) return;
         queryClient.setQueryData<Message[]>(queryKeys.messages(item.conversationId), (current) =>
@@ -183,7 +204,7 @@ export function useSendMessage(conversationId: string) {
   );
 
   const send = useCallback(
-    (text: string): void => {
+    (text: string, ttlSeconds?: number | null): void => {
       const body = text.trim();
       if (!body || !conversationId) return;
       const item: OutboxItem = {
@@ -192,6 +213,7 @@ export function useSendMessage(conversationId: string) {
         text: body,
         createdAt: new Date().toISOString(),
         status: 'sending',
+        ...(ttlSeconds ? { ttlSeconds } : {}),
       };
       useOutbox.getState().upsert(item);
       void deliver(item);

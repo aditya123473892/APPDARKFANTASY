@@ -7,6 +7,9 @@ import { useTheme } from '@/theme/useTheme';
 import { formatMessageTime } from '@/utils/formatters';
 import type { ChatMessage } from '../hooks/useChat';
 import { ChatAttachment } from './ChatAttachment';
+import { ExpiryCountdown } from './ExpiryCountdown';
+import { previewText } from '../services/chatPayload';
+import { ViewOnceAttachment } from './ViewOnceAttachment';
 
 const statusLabel: Record<ChatMessage['status'], string> = {
   sending: 'Sending',
@@ -73,7 +76,7 @@ export const MessageBubble = memo(function MessageBubble({
       <Pressable
         accessible
         accessibilityRole={failed ? 'button' : 'text'}
-        accessibilityLabel={`${mine ? 'You' : 'Them'}: ${message.text}. ${time}${mine ? `. ${statusLabel[message.status]}` : ''}`}
+        accessibilityLabel={`${mine ? 'You' : 'Them'}: ${previewText(message)}. ${time}${mine ? `. ${statusLabel[message.status]}` : ''}`}
         accessibilityHint={failed ? 'Opens options to retry or delete' : undefined}
         disabled={!failed}
         onPress={openFailedActions}
@@ -99,16 +102,33 @@ export const MessageBubble = memo(function MessageBubble({
             {message.senderName}
           </Text>
         ) : null}
-        <Text selectable style={{ color: mine ? theme.colors.onPrimary : theme.colors.text }}>
-          {message.text}
-        </Text>
-        {message.media?.map((media) => (
-          <ChatAttachment
-            key={`${media._id}:${media.expiresAt ?? ''}:${media.status ?? ''}`}
-            media={media}
+        {message.text ? (
+          <Text selectable style={{ color: mine ? theme.colors.onPrimary : theme.colors.text }}>
+            {message.text}
+          </Text>
+        ) : null}
+        {message.viewOnce && message.media?.[0] ? (
+          <ViewOnceAttachment
+            media={message.media[0]}
             messageId={message.id}
+            mine={mine}
+            viewedAt={message.viewedAt}
           />
-        ))}
+        ) : (
+          message.media?.map((media) => (
+            <ChatAttachment
+              key={`${media._id}:${media.expiresAt ?? ''}:${media.status ?? ''}`}
+              media={media}
+              messageId={message.id}
+            />
+          ))
+        )}
+        {message.expiresAt && !message.viewOnce ? (
+          <ExpiryCountdown
+            expiresAt={message.expiresAt}
+            color={mine ? theme.colors.onPrimary : theme.colors.textMuted}
+          />
+        ) : null}
       </Pressable>
       {last || failed ? (
         <View style={[styles.meta, mine && styles.metaMine]}>
