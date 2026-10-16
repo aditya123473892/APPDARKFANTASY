@@ -4,6 +4,7 @@ import { queryKeys } from '@/services/queryKeys';
 import { assertSessionCurrent, sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
 import { displayName } from '@/features/auth/userModel';
+import { previewText } from './chatPayload';
 
 // Uncorrelated history replies require one request at a time on this connection.
 export const INBOX_PREFETCH_CONCURRENCY = 1;
@@ -17,7 +18,7 @@ export function messagePreview(message: Message): NonNullable<Conversation['last
   const user = userCache.get(message.senderId);
   return {
     text:
-      message.text ||
+      (message.viewOnce ? previewText(message) : message.text) ||
       (attachment?.mimetype?.startsWith('image/')
         ? 'Photo'
         : attachment?.mimetype?.startsWith('video/')

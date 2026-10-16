@@ -14,6 +14,7 @@ export type OutboxItem = {
   status: 'sending' | 'failed-definitive' | 'uncertain';
   resync?: 'present' | 'absent';
   baselineIds?: string[];
+  ttlSeconds?: number;
 };
 
 type OutboxState = {

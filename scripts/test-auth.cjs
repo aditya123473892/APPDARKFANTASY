@@ -952,6 +952,7 @@ function harness(overrides = {}) {
     '@/config/env': {
       env: { apiUrl: 'https://api.example.test/api', pinningEnabled: false, pins: [] },
     },
+    '@/config/featureFlags': { featureFlags: { ENABLE_EPHEMERAL_CHAT: false } },
     'expo-secure-store': {
       WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'device-only',
       getItemAsync: async (key) => secure.get(key) ?? null,
@@ -1028,6 +1029,7 @@ function harness(overrides = {}) {
         __DEV__: false,
         URL,
         AbortController,
+        FormData,
         Date: overrides.__date ?? Date,
         setTimeout: overrides.__setTimeout ?? setTimeout,
         clearTimeout: overrides.__clearTimeout ?? clearTimeout,
@@ -1713,6 +1715,8 @@ test('C uncertain UI offers Send again only after absent resync and never offers
     '@expo/vector-icons': { Ionicons: 'Icon' },
     '@/components/ui': { Text: 'Text' },
     './ChatAttachment': { ChatAttachment: 'Attachment' },
+    './ViewOnceAttachment': { ViewOnceAttachment: 'ViewOnceAttachment' },
+    './ExpiryCountdown': { ExpiryCountdown: 'ExpiryCountdown' },
     '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
   });
   const { MessageBubble } = h.load('src/features/chat/components/MessageBubble.tsx');
@@ -1825,4 +1829,167 @@ test('C real HTTP sends distinguish definitive rejection, server failure, and no
     assert.equal(h.logs.length, 0);
     h.runtime.teardownSession();
   }
+});
+
+test('disappearing and view-once fields are parsed strictly and view-once is never previewed', () => {
+  const h = chatHarness();
+  const { parseMessage, mapMessage, previewText } = h.load(
+    'src/features/chat/services/chatPayload.ts',
+  );
+  const key = `user:${h.other}`;
+  const raw = backendMessage(h.me, h.other, {
+    message: '',
+    expiresAt: '2026-10-28T01:00:00Z',
+    viewOnce: true,
+    viewedAt: '2026-10-14T01:01:00Z',
+    media: [{ _id: 'bbbbbbbbbbbbbbbbbbbbbbbb', mimetype: 'video/mp4', status: 'active' }],
+  });
+  const mapped = mapMessage(raw, key);
+  assert.equal(mapped.expiresAt, '2026-10-28T01:00:00Z');
+  assert.equal(mapped.viewOnce, true);
+  assert.equal(mapped.viewedAt, '2026-10-14T01:01:00Z');
+  assert.equal(previewText(mapped), 'View-once video');
+  assert.equal(previewText({ ...mapped, viewOnce: undefined }), 'Attachment');
+  assert.equal(parseMessage({ ...raw, expiresAt: 'soon' }), null);
+  assert.equal(parseMessage({ ...raw, viewOnce: 'true' }), null);
+  assert.equal(parseMessage({ ...raw, viewedAt: 5 }), null);
+  const plain = mapMessage(backendMessage(h.me, h.other), key);
+  assert.equal('expiresAt' in plain || 'viewOnce' in plain || 'viewedAt' in plain, false);
+  h.runtime.teardownSession();
+});
+
+test('expired disappearing messages leave the cache and the inbox preview', () => {
+  const h = chatHarness();
+  const key = `user:${h.other}`;
+  const { mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
+  const row = (id, message, sentAt, expiresAt) =>
+    mapMessage(backendMessage(h.me, h.other, { _id: id, message, sentAt, expiresAt }), key);
+  const kept = row('a00000000000000000000001', 'kept', '2026-10-14T01:00:00Z');
+  const later = row(
+    'a00000000000000000000002',
+    'later',
+    '2026-10-14T01:30:00Z',
+    '2026-10-14T03:00:00Z',
+  );
+  const gone = row(
+    'a00000000000000000000003',
+    'gone',
+    '2026-10-14T01:40:00Z',
+    '2026-10-14T01:59:00Z',
+  );
+  h.queryData.set(JSON.stringify(['chat', 'messages', key]), [kept, later, gone]);
+  h.queryData.set(JSON.stringify(['chat', 'conversations']), [
+    {
+      id: key,
+      lastMessage: { text: 'gone', senderId: h.other, createdAt: gone.createdAt },
+      unreadCount: 0,
+    },
+  ]);
+  const next = h.state.purgeExpiredMessages(key, Date.parse('2026-10-14T02:00:00Z'));
+  assert.equal(next, Date.parse('2026-10-14T03:00:00Z'));
+  assert.deepEqual(
+    h.queryData
+      .get(JSON.stringify(['chat', 'messages', key]))
+      .map((m) => m.text)
+      .join(),
+    'kept,later',
+  );
+  assert.equal(
+    h.queryData.get(JSON.stringify(['chat', 'conversations']))[0].lastMessage.text,
+    'later',
+  );
+  // Nothing left to expire: no timer is needed.
+  assert.equal(h.state.purgeExpiredMessages(key, Date.parse('2026-10-14T04:00:00Z')), null);
+  assert.deepEqual(
+    h.queryData
+      .get(JSON.stringify(['chat', 'messages', key]))
+      .map((m) => m.text)
+      .join(),
+    'kept',
+  );
+  h.runtime.teardownSession();
+});
+
+test('bundled backend mode refuses ephemeral sends before transport', async () => {
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    './socketSession': { refreshUnread: async () => {}, getHistory: async () => [] },
+  });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  let requests = 0;
+  h.apiClient.defaults.adapter = async () => {
+    requests++;
+    throw new Error('unexpected request');
+  };
+  const { realChatService } = h.load('src/features/chat/services/chatService.real.ts');
+  for (const options of [{ ttlSeconds: 30 }, { viewOnce: true }]) {
+    await assert.rejects(
+      realChatService.sendMessage({
+        conversationId: `user:${other}`,
+        text: 'Hi',
+        clientId: 'guard-key-1',
+        ...options,
+      }),
+      (error) => error.code === 'VALIDATION',
+    );
+  }
+  assert.equal(requests, 0);
+  h.runtime.teardownSession();
+});
+
+test('sends carry the disappearing timer and view-once flag only when chosen', async () => {
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    '@/config/featureFlags': { featureFlags: { ENABLE_EPHEMERAL_CHAT: true } },
+    './socketSession': { refreshUnread: async () => {}, getHistory: async () => [] },
+  });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const bodies = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    bodies.push(config.data);
+    return h.ok(config, {
+      _id: '444444444444444444444444',
+      sender: me,
+      receiver: other,
+      message: 'Hi',
+      sentAt: '2026-10-14T01:00:00Z',
+      expiresAt: '2026-10-14T01:05:00Z',
+      isRead: false,
+    });
+  };
+  const { realChatService } = h.load('src/features/chat/services/chatService.real.ts');
+  const sent = await realChatService.sendMessage({
+    conversationId: `user:${other}`,
+    text: 'Hi',
+    clientId: 'timer-key-1',
+    ttlSeconds: 300,
+  });
+  assert.deepEqual(JSON.parse(bodies[0]), {
+    receiver: other,
+    message: 'Hi',
+    ttlSeconds: 300,
+  });
+  assert.equal(sent.expiresAt, '2026-10-14T01:05:00Z');
+  await realChatService.sendMessage({
+    conversationId: `user:${other}`,
+    text: '',
+    clientId: 'view-once-1',
+    viewOnce: true,
+    ttlSeconds: 30,
+    assets: [{ uri: 'file:///photo.jpg', name: 'photo.jpg', type: 'image/jpeg' }],
+  });
+  const form = bodies[1];
+  assert.equal(form.get('viewOnce'), 'true');
+  assert.equal(form.get('ttlSeconds'), '30');
+  assert.equal(form.get('receiver'), other);
+  await realChatService.sendMessage({
+    conversationId: `user:${other}`,
+    text: 'Plain',
+    clientId: 'plain-key-1',
+  });
+  assert.deepEqual(Object.keys(JSON.parse(bodies[2])).sort(), ['message', 'receiver']);
 });

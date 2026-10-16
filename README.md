@@ -1,5 +1,16 @@
 # DARKFANTASY Mobile
 
+## Claude merge compatibility
+
+The merged disappearing-message and view-once UI is disabled by default. The bundled
+backend does not enforce these contracts. Set
+`EXPO_PUBLIC_CHAT_EPHEMERAL_ENABLED=true` only after connecting a backend that enforces
+message TTL and atomic recipient consumption. Ordinary messages retain the existing
+wire format, local drafts, message actions, and explicit resend/resync behavior.
+
+The incoming `dfbackend` Git link has no `.gitmodules` repository URL. It does not
+update the canonical backend at `backenddf/df-backend-pm-be`.
+
 An Expo Router mobile app connected to the Dark Fantasy backend. Active authentication, profiles, feeds, follow requests, direct chats, and groups use backend data only. See [REAL_DATA_INTEGRATION.md](REAL_DATA_INTEGRATION.md) for current endpoints, validation, and limitations. The older scaffold notes below describe unused fixture services and are superseded by that integration report.
 
 ## Stack

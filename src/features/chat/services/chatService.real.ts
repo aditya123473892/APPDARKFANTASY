@@ -1,5 +1,7 @@
 import type { UserSummary } from '@/features/auth/userModel';
 import axios from 'axios';
+import { featureFlags } from '@/config/featureFlags';
+import { MESSAGE_TIMERS } from '../disappearing';
 import { displayName } from '@/features/auth/userModel';
 import { userCache } from '@/features/auth/userCache';
 import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRuntime';
@@ -175,12 +177,26 @@ export const realChatService: ChatService = {
     const scope = sessionIdentity.generation;
     assertSessionCurrent(scope);
     const to = target(input.conversationId);
+    if ((input.ttlSeconds || input.viewOnce) && !featureFlags.ENABLE_EPHEMERAL_CHAT)
+      throw new ServiceError(
+        'VALIDATION',
+        'This backend does not support disappearing or view-once messages.',
+      );
+    if (input.ttlSeconds && !MESSAGE_TIMERS.some((timer) => timer.seconds === input.ttlSeconds))
+      throw new ServiceError('VALIDATION');
+    if (input.viewOnce && (!input.conversationId.startsWith('user:') || input.assets?.length !== 1))
+      throw new ServiceError('VALIDATION');
     try {
-      const payload = { ...to, message: input.text };
+      const payload = {
+        ...to,
+        message: input.text,
+        ...(input.ttlSeconds ? { ttlSeconds: input.ttlSeconds } : {}),
+        ...(input.viewOnce ? { viewOnce: true } : {}),
+      };
       let body: FormData | typeof payload = payload;
       if (input.assets?.length) {
         const form = new FormData();
-        for (const [field, value] of Object.entries(payload)) form.append(field, value);
+        for (const [field, value] of Object.entries(payload)) form.append(field, String(value));
         input.assets.forEach((asset) => appendAsset(form, asset));
         body = form;
       }

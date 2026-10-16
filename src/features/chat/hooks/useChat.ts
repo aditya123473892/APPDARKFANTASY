@@ -14,7 +14,7 @@ import { useFocusEffect } from 'expo-router';
 import { AppState } from 'react-native';
 import { useAppState } from '@/hooks/useAppState';
 import { useCan } from '@/features/auth/hooks/useCurrentUser';
-import { useChatConnection } from '../services/chatState';
+import { isExpired, purgeExpiredMessages, useChatConnection } from '../services/chatState';
 import { useTypingUsers } from '../store/typingStore';
 import { userCache } from '@/features/auth/userCache';
 import { displayName } from '@/features/auth/userModel';
@@ -112,10 +112,22 @@ export function useMessages(conversationId: string, enabled = true) {
     ),
   );
 
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    if (!conversationId) return;
+    const next = purgeExpiredMessages(conversationId);
+    if (next === null) return;
+    const timer = setTimeout(
+      () => setClock(Date.now()),
+      Math.min(Math.max(0, next - Date.now()) + 50, 2_147_483_647),
+    );
+    return () => clearTimeout(timer);
+  }, [conversationId, query.data, clock]);
+
   const messages = useMemo<ChatMessage[]>(() => {
     // Defensive: never render a message that belongs to another conversation.
     const confirmed = (query.data ?? []).filter(
-      (message) => message.conversationId === conversationId,
+      (message) => message.conversationId === conversationId && !isExpired(message, clock),
     );
     const confirmedClientIds = new Set(
       confirmed.map((message) => message.clientId).filter(Boolean),
@@ -142,7 +154,7 @@ export function useMessages(conversationId: string, enabled = true) {
       })),
       ...pending,
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }, [conversationId, myId, outbox, query.data, readReceipts]);
+  }, [conversationId, myId, outbox, query.data, readReceipts, clock]);
 
   const count = useConversationState(
     (state) => state.rooms[conversationId]?.window ?? LOCAL_WINDOW,
@@ -166,8 +178,8 @@ export { createClientId } from '@/utils/clientId';
 export function useSendMessage(conversationId: string) {
   const scope = sessionIdentity.generation;
   const send = useCallback(
-    (text: string) => {
-      if (isSessionCurrent(scope)) startSend(conversationId, text, chatService);
+    (text: string, ttlSeconds?: number | null) => {
+      if (isSessionCurrent(scope)) startSend(conversationId, text, chatService, ttlSeconds);
     },
     [conversationId, scope],
   );

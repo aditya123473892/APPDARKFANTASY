@@ -90,6 +90,20 @@ export function mergeMessage(message: Message, deleted = false): void {
   });
   updatePreview(key, queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? []);
 }
+export const isExpired = (message: Pick<Message, 'expiresAt'>, now = Date.now()) =>
+  Boolean(message.expiresAt) && Date.parse(message.expiresAt!) <= now;
+
+/** Remove expired server messages while preserving the local history/preview merge. */
+export function purgeExpiredMessages(key: string, now = Date.now()): number | null {
+  const rows = queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [];
+  let next: number | null = null;
+  for (const message of rows) {
+    if (!message.expiresAt) continue;
+    if (isExpired(message, now)) mergeMessage(message, true);
+    else next = Math.min(next ?? Infinity, Date.parse(message.expiresAt));
+  }
+  return next;
+}
 /**
  * Applies a server message event. `received` marks a newly delivered message
  * (receiveMessage/receiveGroupMessage) as opposed to an edit or deletion.

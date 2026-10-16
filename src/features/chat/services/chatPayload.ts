@@ -14,6 +14,9 @@ export type BackendMessage = {
   sentAt: string;
   isRead?: boolean;
   media?: ChatMedia[];
+  expiresAt?: string;
+  viewOnce?: boolean;
+  viewedAt?: string;
 };
 export const isObjectId = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
@@ -50,6 +53,9 @@ export function parseMessage(value: unknown): BackendMessage | null {
     return null;
   if (raw.isRead !== undefined && typeof raw.isRead !== 'boolean') return null;
   if (raw.media != null && !Array.isArray(raw.media)) return null;
+  if (raw.expiresAt != null && !date(raw.expiresAt)) return null;
+  if (raw.viewedAt != null && !date(raw.viewedAt)) return null;
+  if (raw.viewOnce != null && typeof raw.viewOnce !== 'boolean') return null;
   const media: ChatMedia[] = [];
   for (const value of (raw.media ?? []) as unknown[]) {
     const item = record(value);
@@ -83,7 +89,23 @@ export function parseMessage(value: unknown): BackendMessage | null {
     sentAt: raw.sentAt,
     isRead: raw.isRead === true,
     media,
+    expiresAt: typeof raw.expiresAt === 'string' ? raw.expiresAt : undefined,
+    viewOnce: raw.viewOnce === true || undefined,
+    viewedAt: typeof raw.viewedAt === 'string' ? raw.viewedAt : undefined,
   };
+}
+/** View-once content must never appear in an inbox preview. */
+export function previewText(message: {
+  text?: string;
+  message?: string;
+  media?: ChatMedia[];
+  viewOnce?: boolean;
+}): string {
+  if (message.viewOnce)
+    return message.media?.[0]?.mimetype?.startsWith('video/')
+      ? 'View-once video'
+      : 'View-once photo';
+  return message.text || message.message || (message.media?.length ? 'Attachment' : '');
 }
 export function conversationKey(raw: BackendMessage): string | null {
   if (raw.groupId) return `group:${raw.groupId}`;
@@ -108,5 +130,8 @@ export function mapMessage(value: unknown, key: string): Message {
     createdAt: raw.sentAt,
     status: !raw.groupId && raw.isRead ? 'read' : 'sent',
     media: raw.media ?? [],
+    ...(raw.expiresAt ? { expiresAt: raw.expiresAt } : {}),
+    ...(raw.viewOnce ? { viewOnce: true } : {}),
+    ...(raw.viewedAt ? { viewedAt: raw.viewedAt } : {}),
   };
 }

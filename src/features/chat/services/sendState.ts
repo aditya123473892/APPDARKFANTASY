@@ -46,7 +46,12 @@ export async function deliver(item: OutboxItem, service: ChatService): Promise<v
     inFlight.delete(item.clientId);
   }
 }
-export function startSend(key: string, text: string, service: ChatService): void {
+export function startSend(
+  key: string,
+  text: string,
+  service: ChatService,
+  ttlSeconds?: number | null,
+): void {
   if (!text.trim() || !allowed()) return;
   const baseline = queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [];
   const item: OutboxItem = {
@@ -56,6 +61,7 @@ export function startSend(key: string, text: string, service: ChatService): void
     createdAt: new Date().toISOString(),
     status: 'sending',
     baselineIds: baseline.map((row) => row.id),
+    ...(ttlSeconds ? { ttlSeconds } : {}),
   };
   useOutbox.getState().upsert(item);
   void deliver(item, service);
