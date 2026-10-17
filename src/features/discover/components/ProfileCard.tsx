@@ -77,19 +77,29 @@ export const ProfileCard = memo(function ProfileCard({
         </View>
       ) : null}
       <View style={styles.info}>
-        <Text variant="subheading" weight="bold" numberOfLines={1}>
+        <Text
+          variant="subheading"
+          serif
+          weight="bold"
+          numberOfLines={1}
+          style={{ color: theme.colors.onImage }}
+        >
           {profile.name}, {profile.age}
         </Text>
         {subtitle ? (
           <View style={styles.row}>
-            <Ionicons name="location-outline" size={12} color={theme.colors.textSecondary} />
-            <Text variant="caption" color="secondary" numberOfLines={1} style={styles.flex}>
+            <Ionicons name="location-outline" size={18} color={theme.colors.imageGold} />
+            <Text
+              variant="caption"
+              numberOfLines={1}
+              style={[styles.flex, { color: theme.colors.imageGold }]}
+            >
               {subtitle}
             </Text>
           </View>
         ) : null}
         {profile.interests[0] ? (
-          <Text variant="caption" numberOfLines={1} style={{ color: theme.colors.secondary }}>
+          <Text variant="caption" numberOfLines={1} style={{ color: theme.colors.imageMuted }}>
             {profile.interests.slice(0, 2).join(' · ')}
           </Text>
         ) : null}
@@ -140,7 +150,7 @@ export const ProfileCard = memo(function ProfileCard({
 const styles = StyleSheet.create({
   card: {
     aspectRatio: 0.68,
-    borderRadius: radius.lg,
+    borderRadius: radius.card,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
     justifyContent: 'flex-end',

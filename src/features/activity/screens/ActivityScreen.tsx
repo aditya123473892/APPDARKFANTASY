@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FlatList, RefreshControl, View } from 'react-native';
+import { RefreshControl, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
+import { spacing, radius } from '@/theme';
 import { useRouter } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
 import { Avatar, Button, Text, EmptyState, Loader } from '@/components/ui';
@@ -27,18 +29,18 @@ export function ActivityScreen() {
   });
   return (
     <Screen padded={false}>
-      <View style={{ paddingHorizontal: 20 }}>
-        <Header title="Follow requests" align="left" />
+      <View style={{ paddingHorizontal: spacing.screen }}>
+        <Header title="Likes" subtitle="People who want to know you" align="left" />
       </View>
       {query.isPending ? (
         <Loader />
       ) : query.isError ? (
         <ErrorState onRetry={() => void query.refetch()} />
       ) : (
-        <FlatList
+        <FlashList
           data={query.data}
           keyExtractor={(f) => f._id}
-          contentContainerStyle={{ padding: 20, flexGrow: 1, gap: 20 }}
+          contentContainerStyle={{ padding: spacing.screen }}
           refreshControl={
             <RefreshControl
               refreshing={query.isRefetching}
@@ -58,13 +60,17 @@ export function ActivityScreen() {
               style={{
                 gap: 12,
                 padding: 16,
-                borderRadius: 16,
+                borderRadius: radius.card,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                marginBottom: spacing.lg,
                 backgroundColor: theme.colors.surface,
               }}
             >
               <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
                 <Avatar uri={mediaUrl(item.follower.avatar)} label={displayName(item.follower)} />
                 <Text
+                  serif
                   style={{ flex: 1 }}
                   onPress={() => router.push(`/profile/${item.follower._id}`)}
                 >

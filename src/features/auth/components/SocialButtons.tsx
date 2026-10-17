@@ -5,6 +5,8 @@ export function SocialButtons(): React.JSX.Element {
       label="Continue with a social account"
       icon="people-outline"
       variant="secondary"
+      disabled
+      accessibilityLabel="Social sign-in is currently unavailable"
       onPress={() => undefined}
     />
   );

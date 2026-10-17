@@ -14,6 +14,7 @@ import { useToggleLike } from '@/features/feed/hooks/useFeed';
 import { followUser } from '@/features/requests/services/requestsService.real';
 import { describeError } from '@/services/errors';
 import { useTheme } from '@/theme/useTheme';
+import { spacing } from '@/theme';
 export function UserProfileScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const myId = useCurrentUserId();
@@ -36,7 +37,7 @@ export function UserProfileScreen() {
   return (
     <Screen padded={false}>
       <ScrollView
-        contentContainerStyle={{ padding: 20, gap: 20 }}
+        contentContainerStyle={{ padding: spacing.screen, gap: spacing.lg }}
         refreshControl={
           <RefreshControl
             refreshing={profile.isRefetching || posts.isRefetching}
@@ -55,13 +56,13 @@ export function UserProfileScreen() {
           <ErrorState onRetry={() => void profile.refetch()} />
         ) : (
           <>
-            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
-              <Avatar uri={profile.data.avatarUri} label={profile.data.name} size={88} />
-              <View style={{ flex: 1 }}>
-                <ProfileHeader user={profile.data} />
+            <View style={{ gap: spacing.lg, alignItems: 'center' }}>
+              <Avatar uri={profile.data.avatarUri} label={profile.data.name} size={112} ring />
+              <View style={{ alignSelf: 'stretch' }}>
+                <ProfileHeader user={profile.data} centered />
               </View>
             </View>
-            {profile.data.bio ? <Text>{profile.data.bio}</Text> : null}
+            {profile.data.bio ? <Text center>{profile.data.bio}</Text> : null}
             <InterestChips interests={profile.data.interests} />
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <Button

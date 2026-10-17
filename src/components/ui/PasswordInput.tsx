@@ -86,12 +86,17 @@ const styles = StyleSheet.create({
   group: { gap: spacing.sm },
   wrapper: {
     minHeight: 52,
-    borderRadius: radius.md,
+    borderRadius: radius.input,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  input: { flex: 1, minHeight: spacing.touch, fontSize: typography.size.md },
+  input: {
+    flex: 1,
+    minHeight: spacing.touch,
+    fontSize: typography.size.md,
+    fontFamily: typography.fontFamily,
+  },
 });

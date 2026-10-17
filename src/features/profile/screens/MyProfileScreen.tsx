@@ -27,18 +27,14 @@ import { EditProfileForm } from '../components/EditProfileForm';
 import { InterestChips } from '../components/InterestChips';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { ProfileHeader } from '../components/ProfileHeader';
+import { SettingsGroup, SettingsRow } from '@/features/settings/components/SettingsRow';
 
 type ProfileTab = 'Posts' | 'Photos';
 
 function Stat({ value, label }: { value: number | undefined; label: string }): React.JSX.Element {
   const { theme } = useTheme();
   return (
-    <View
-      style={[
-        styles.stat,
-        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-      ]}
-    >
+    <View style={[styles.stat, { borderColor: theme.colors.border }]}>
       {value === undefined ? (
         <Skeleton style={styles.statSkeleton} />
       ) : (
@@ -110,10 +106,10 @@ export function MyProfileScreen(): React.JSX.Element {
             }
           />
           <View style={styles.identity}>
-            <Avatar uri={user.avatarUri} label={`${user.name}'s photo`} size={96} ring />
+            <Avatar uri={user.avatarUri} label={`${user.name}'s photo`} size={112} ring />
             <View style={styles.identityCopy}>
-              <ProfileHeader user={user} />
-              <Text variant="caption" color="muted">
+              <ProfileHeader user={user} centered />
+              <Text variant="caption" color="muted" center>
                 @{toHandle(user.name)}
               </Text>
             </View>
@@ -148,6 +144,22 @@ export function MyProfileScreen(): React.JSX.Element {
               INTERESTS
             </Text>
             <InterestChips interests={user.interests} />
+          </View>
+          <View style={styles.section}>
+            <SettingsGroup>
+              <SettingsRow
+                icon="settings-outline"
+                title="Settings & appearance"
+                subtitle="Make this space your own"
+                onPress={() => router.push('/settings')}
+              />
+              <SettingsRow
+                icon="shield-checkmark-outline"
+                title="Privacy"
+                onPress={() => router.push('/settings/privacy')}
+                last
+              />
+            </SettingsGroup>
           </View>
         </View>
 
@@ -193,16 +205,15 @@ export function MyProfileScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   scroll: { paddingBottom: spacing.xxxl },
   padded: { paddingHorizontal: spacing.screen },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, paddingTop: spacing.md },
-  identityCopy: { flex: 1, gap: spacing.xs },
-  bio: { paddingTop: spacing.lg },
+  identity: { alignItems: 'center', gap: spacing.lg, paddingTop: spacing.xl },
+  identityCopy: { alignSelf: 'stretch', gap: spacing.xs },
+  bio: { paddingTop: spacing.lg, textAlign: 'center' },
   stats: { flexDirection: 'row', gap: spacing.sm, paddingTop: spacing.lg },
   stat: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 2,
   },
   statSkeleton: { width: 28, height: 26 },
@@ -210,6 +221,6 @@ const styles = StyleSheet.create({
   button: { flex: 1 },
   section: { gap: spacing.sm, paddingTop: spacing.xl },
   tabs: { paddingTop: spacing.xl, paddingBottom: spacing.lg },
-  posts: { gap: spacing.md },
+  posts: { gap: 0 },
   postSkeleton: { height: 160, borderRadius: radius.lg },
 });

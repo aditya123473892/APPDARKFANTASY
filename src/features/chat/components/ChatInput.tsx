@@ -118,6 +118,19 @@ export function ChatInput({
           { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border },
         ]}
       >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Insert smile emoji"
+          disabled={disabled || !canSendMessages}
+          onPress={() => {
+            const next = `${value}😊`.slice(0, MAX_LENGTH);
+            setValue(next);
+            onChangeText?.(next);
+          }}
+          style={styles.emoji}
+        >
+          <Ionicons name="happy-outline" size={22} color={theme.colors.textMuted} />
+        </Pressable>
         <TextInput
           accessibilityLabel="Message"
           placeholder={placeholder}
@@ -148,7 +161,7 @@ export function ChatInput({
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Send message"
+        accessibilityLabel={value.trim() ? 'Send message' : 'Voice messages unavailable'}
         accessibilityState={{ disabled: !canSend }}
         disabled={!canSend}
         onPress={send}
@@ -164,7 +177,7 @@ export function ChatInput({
         ]}
       >
         <Ionicons
-          name="arrow-up"
+          name={value.trim() ? 'send-outline' : 'mic-outline'}
           size={22}
           color={canSend ? theme.colors.onPrimary : theme.colors.textMuted}
         />
@@ -185,12 +198,16 @@ const styles = StyleSheet.create({
   field: {
     flex: 1,
     minHeight: 46,
-    borderRadius: radius.xl,
+    borderRadius: radius.input,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.lg,
     justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   input: {
+    flex: 1,
+    fontFamily: typography.fontFamily,
     maxHeight: 132,
     minHeight: 44,
     paddingTop: spacing.md - 1,
@@ -199,6 +216,7 @@ const styles = StyleSheet.create({
     lineHeight: typography.lineHeight.md - 2,
   },
   counter: { position: 'absolute', right: spacing.md, top: spacing.xs },
+  emoji: { minHeight: 44, width: 32, alignItems: 'flex-start', justifyContent: 'center' },
   timer: { width: 36, height: 44, justifyContent: 'center', alignItems: 'center' },
   timerLabel: { fontSize: 10, lineHeight: 12, marginTop: -2 },
   send: {

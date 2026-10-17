@@ -9,6 +9,8 @@ import { spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { useRoles } from '@/features/auth/hooks/useCurrentUser';
 import { hasCapability, type Capability } from '@/features/auth/permissions';
+import { TabBar } from '@/components/ui/TabBar';
+import { Text } from '@/components/ui/Text';
 const tabCapabilities: Record<string, Capability> = {
   home: 'canUseApp',
   discover: 'canUseApp',
@@ -22,8 +24,15 @@ const icons: Record<string, [IconName, IconName]> = {
   home: ['home', 'home-outline'],
   discover: ['compass', 'compass-outline'],
   chats: ['chatbubbles', 'chatbubbles-outline'],
-  activity: ['notifications', 'notifications-outline'],
+  activity: ['heart', 'heart-outline'],
   profile: ['person-circle', 'person-circle-outline'],
+};
+const labels: Record<string, string> = {
+  home: 'Home',
+  discover: 'Discover',
+  chats: 'Chats',
+  activity: 'Likes',
+  profile: 'Profile',
 };
 
 export default function TabsLayout(): React.JSX.Element {
@@ -37,6 +46,7 @@ export default function TabsLayout(): React.JSX.Element {
 
   return (
     <Tabs
+      tabBar={(props) => <TabBar {...props} />}
       backBehavior="history"
       screenListeners={{
         tabPress: () => {
@@ -53,6 +63,17 @@ export default function TabsLayout(): React.JSX.Element {
           tabBarInactiveTintColor: theme.colors.textMuted,
           tabBarHideOnKeyboard: true,
           tabBarLabelStyle: styles.label,
+          tabBarLabel: ({ focused }) => (
+            <Text
+              variant="caption"
+              style={[
+                styles.label,
+                { color: focused ? theme.colors.primaryText : theme.colors.textMuted },
+              ]}
+            >
+              {labels[route.name] ?? route.name}
+            </Text>
+          ),
           tabBarAllowFontScaling: false,
           tabBarBadgeStyle: {
             backgroundColor: theme.colors.primary,
@@ -78,11 +99,11 @@ export default function TabsLayout(): React.JSX.Element {
       }}
     >
       <Tabs.Screen name="home" options={{ title: 'Home', tabBarAccessibilityLabel: 'Home feed' }} />
-      <Tabs.Screen name="discover" options={{ title: 'People' }} />
+      <Tabs.Screen name="discover" options={{ title: 'Discover' }} />
       <Tabs.Screen
         name="chats"
         options={{
-          title: 'Messages',
+          title: 'Chats',
           tabBarBadge: badge(unreadMessages),
           tabBarAccessibilityLabel: unreadMessages
             ? `Messages, ${unreadMessages} unread`
@@ -92,7 +113,7 @@ export default function TabsLayout(): React.JSX.Element {
       <Tabs.Screen
         name="activity"
         options={{
-          title: 'Activity',
+          title: 'Likes',
           tabBarBadge: badge(activityBadge),
           tabBarAccessibilityLabel: activityBadge ? `Activity, ${activityBadge} new` : 'Activity',
         }}
@@ -103,5 +124,5 @@ export default function TabsLayout(): React.JSX.Element {
 }
 const styles = StyleSheet.create({
   item: { minHeight: spacing.touch },
-  label: { fontSize: typography.size.xs - 1, fontWeight: '600', marginTop: 2 },
+  label: { fontSize: typography.size.xs - 1, fontFamily: typography.family.semibold, marginTop: 2 },
 });

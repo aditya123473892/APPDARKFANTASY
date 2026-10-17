@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
   group: { gap: spacing.sm },
   wrapper: {
     minHeight: 52,
-    borderRadius: radius.md,
+    borderRadius: radius.input,
     borderWidth: 1,
     paddingHorizontal: spacing.md + 2,
     alignItems: 'center',
@@ -111,7 +111,12 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   multilineWrapper: { alignItems: 'flex-start', paddingVertical: spacing.sm },
-  input: { flex: 1, minHeight: spacing.touch - 4, fontSize: typography.size.md },
+  input: {
+    flex: 1,
+    minHeight: spacing.touch - 4,
+    fontSize: typography.size.md,
+    fontFamily: typography.fontFamily,
+  },
   multiline: { minHeight: 96, maxHeight: 180, paddingTop: spacing.sm },
   meta: { flexDirection: 'row', gap: spacing.sm },
   metaText: { flex: 1 },

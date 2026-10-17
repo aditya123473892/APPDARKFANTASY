@@ -30,6 +30,8 @@ import { createClientId } from '@/utils/clientId';
 import { Input } from './Input';
 import { Button } from './Button';
 import { Loader } from './Loader';
+import { Badge } from './Badge';
+import { ThreadLine } from './ThreadLine';
 
 function RichText({ body }: { body: string }): React.JSX.Element {
   const chunks = body.split(/([#@][\w]+)/g);
@@ -250,9 +252,20 @@ export const PostCard = memo(function PostCard({
     <View
       style={[
         styles.card,
-        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+        { backgroundColor: theme.colors.background, borderColor: theme.colors.border },
       ]}
     >
+      <View style={styles.avatarColumn}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`View ${post.user.name}'s profile`}
+          disabled={!onOpenAuthor}
+          onPress={() => onOpenAuthor?.(post)}
+        >
+          <Avatar uri={post.user.avatarUri} label={post.user.name} size={40} />
+        </Pressable>
+        <ThreadLine />
+      </View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`View ${post.user.name}'s profile`}
@@ -260,24 +273,18 @@ export const PostCard = memo(function PostCard({
         onPress={() => onOpenAuthor?.(post)}
         style={styles.header}
       >
-        <Avatar uri={post.user.avatarUri} label={post.user.name} size={42} />
         <View style={styles.headerCopy}>
           <View style={styles.nameRow}>
-            <Text variant="label" numberOfLines={1} style={styles.name}>
+            <Text variant="label" serif numberOfLines={1} style={styles.name}>
               {post.user.name}
             </Text>
-            {post.user.verified ? (
-              <Ionicons
-                name="checkmark-circle"
-                size={15}
-                color={theme.colors.primary}
-                accessibilityLabel="Verified"
-              />
-            ) : null}
+            {post.user.verified ? <Badge variant="verified" /> : null}
+            <Text variant="caption" color="muted">
+              · {formatRelativeTime(post.createdAt)}
+            </Text>
           </View>
           <Text variant="caption" color="muted" numberOfLines={1}>
             {post.user.handle ? `@${post.user.handle} · ` : ''}
-            {formatRelativeTime(post.createdAt)}
             {post.audience === 'connections' ? ' · Connections' : ''}
             {post.audience === 'private' ? ' · Private' : ''}
             {post.status && post.status !== 'approved' ? ` · ${post.status}` : ''}
@@ -368,11 +375,20 @@ export const PostCard = memo(function PostCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: spacing.lg,
+    borderRadius: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.lg,
+    paddingLeft: 56,
     paddingBottom: spacing.xs,
     gap: spacing.md,
+  },
+  avatarColumn: {
+    position: 'absolute',
+    top: spacing.lg,
+    bottom: spacing.md,
+    left: 0,
+    width: 40,
+    alignItems: 'center',
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   headerCopy: { flex: 1, gap: 2 },
@@ -392,7 +408,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
     marginHorizontal: -spacing.xs,
     paddingTop: spacing.xs,
   },

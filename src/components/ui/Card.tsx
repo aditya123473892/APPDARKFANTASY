@@ -21,5 +21,5 @@ export function Card({
   );
 }
 const styles = StyleSheet.create({
-  base: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, padding: spacing.lg },
+  base: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.card, padding: spacing.lg },
 });

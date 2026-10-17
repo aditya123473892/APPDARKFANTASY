@@ -1,8 +1,14 @@
-import { useState } from 'react';
-import { FlatList, Pressable, RefreshControl, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { RefreshControl, View } from 'react-native';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import type { ProfileView } from '@/features/profile/types';
 import { useRouter } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
-import { Avatar, Button, EmptyState, Input, Loader, Text } from '@/components/ui';
+import { Button, EmptyState, Input, Loader } from '@/components/ui';
+import { SwipeCard } from '../components/SwipeCard';
+import { ActionButtons } from '../components/ActionButtons';
+import { spacing } from '@/theme';
+import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { useDiscoverProfiles } from '@/features/profile/hooks/useProfiles';
 import { useTheme } from '@/theme/useTheme';
@@ -10,15 +16,20 @@ import { describeError } from '@/services/errors';
 export function DiscoverScreen() {
   const router = useRouter();
   const { theme } = useTheme();
+  const showDistance = usePreferences((state) => state.showDistance);
+  const showPresence = usePreferences((state) => state.showActiveStatus);
   const [search, setSearch] = useState('');
+  const list = useRef<FlashListRef<ProfileView>>(null);
   const query = useDiscoverProfiles();
   const users = (query.data ?? []).filter((u) =>
     u.name.toLowerCase().includes(search.trim().toLowerCase()),
   );
   return (
     <Screen padded={false}>
-      <View style={{ paddingHorizontal: 20, paddingBottom: 16, gap: 8 }}>
-        <Header title="People" align="left" />
+      <View
+        style={{ paddingHorizontal: spacing.screen, paddingBottom: spacing.lg, gap: spacing.sm }}
+      >
+        <Header title="Discover" subtitle="A connection worth finding" align="left" />
         <Input
           accessibilityLabel="Search users"
           placeholder="Search by display name"
@@ -36,10 +47,11 @@ export function DiscoverScreen() {
           onRetry={() => void query.refetch()}
         />
       ) : (
-        <FlatList
+        <FlashList
+          ref={list}
           data={users}
           keyExtractor={(u) => u.id}
-          contentContainerStyle={{ padding: 20, flexGrow: 1, gap: 12 }}
+          contentContainerStyle={{ padding: spacing.screen }}
           refreshControl={
             <RefreshControl
               refreshing={query.isRefetching}
@@ -54,31 +66,49 @@ export function DiscoverScreen() {
               message="Try another name or pull down to refresh."
             />
           }
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
             <View
               style={{
-                padding: 16,
-                borderRadius: 16,
-                gap: 12,
-                backgroundColor: theme.colors.surface,
+                marginBottom: spacing.xl,
+                gap: spacing.md,
               }}
             >
-              <Pressable
+              <View style={{ height: 440 }}>
+                <SwipeCard
+                  profile={item}
+                  showDistance={showDistance}
+                  showPresence={showPresence}
+                  onPass={
+                    users.length > 1
+                      ? () => {
+                          void list.current?.scrollToIndex({
+                            index: (index + 1) % users.length,
+                            animated: true,
+                          });
+                        }
+                      : undefined
+                  }
+                />
+              </View>
+              <ActionButtons
+                unavailableActions={['like', 'super']}
+                onAction={(action) => {
+                  if (action === 'pass' && users.length > 1)
+                    void list.current?.scrollToIndex({
+                      index: (index + 1) % users.length,
+                      animated: true,
+                    });
+                }}
+                disabled={users.length < 2}
+              />
+              <Button
+                label="View profile"
+                variant="secondary"
                 onPress={() => router.push(`/profile/${item.id}`)}
-                style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}
-              >
-                <Avatar uri={item.avatarUri} label={item.name} />
-                <View style={{ flex: 1, gap: 4 }}>
-                  <Text variant="subheading">{item.name}</Text>
-                  {item.bio ? (
-                    <Text numberOfLines={2} color="secondary">
-                      {item.bio}
-                    </Text>
-                  ) : null}
-                </View>
-              </Pressable>
+              />
               <Button
                 label="Message"
+                icon="chatbubble-outline"
                 size="sm"
                 onPress={() => router.push(`/chat/user:${item.id}`)}
               />

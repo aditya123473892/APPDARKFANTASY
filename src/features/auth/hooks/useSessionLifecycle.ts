@@ -4,16 +4,16 @@ import * as ScreenCapture from 'expo-screen-capture';
 import { useAuthStore } from '../store/authStore';
 import { EXPIRY_MARGIN_MS } from '../session';
 import { env } from '@/config/env';
+import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
 
 export function useSessionLifecycle(): boolean {
   const [privateScreen, setPrivateScreen] = useState(AppState.currentState !== 'active');
   const session = useAuthStore((state) => state.session);
+  useScreenshotProtection('privacy', Platform.OS === 'android');
   useEffect(() => {
     // Native protection applies before JS receives background notifications.
     if (Platform.OS === 'ios')
       void ScreenCapture.enableAppSwitcherProtectionAsync().catch(() => undefined);
-    if (Platform.OS === 'android')
-      void ScreenCapture.preventScreenCaptureAsync('privacy').catch(() => undefined);
     let backgroundAt: number | null = null;
     const subscription = AppState.addEventListener('change', (state) => {
       if (state !== 'active') {
@@ -38,8 +38,6 @@ export function useSessionLifecycle(): boolean {
       subscription.remove();
       if (Platform.OS === 'ios')
         void ScreenCapture.disableAppSwitcherProtectionAsync().catch(() => undefined);
-      if (Platform.OS === 'android')
-        void ScreenCapture.allowScreenCaptureAsync('privacy').catch(() => undefined);
     };
   }, []);
   useEffect(() => {

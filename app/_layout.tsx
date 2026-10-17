@@ -1,6 +1,12 @@
 import 'react-native-reanimated';
 import { useEffect } from 'react';
 import { View } from 'react-native';
+import { useFonts } from 'expo-font';
+import { PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/600SemiBold';
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
+import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -17,7 +23,14 @@ import { useToastStore } from '@/components/ui/Toast';
 void SplashScreen.preventAutoHideAsync();
 
 function RootNavigator(): React.JSX.Element {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
+  const [fontsLoaded, fontError] = useFonts({
+    PlayfairDisplay_600SemiBold,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
   const privateScreen = useSessionLifecycle();
   const sessionRevision = useAuthStore((state) => state.sessionRevision);
   const status = useAuthStore((state) => state.status);
@@ -43,13 +56,15 @@ function RootNavigator(): React.JSX.Element {
       segments[0] !== 'account-state'
     )
       router.replace('/account-state');
-    void SplashScreen.hideAsync();
-  }, [router, segments, status]);
+    if (fontsLoaded || fontError) void SplashScreen.hideAsync();
+  }, [router, segments, status, fontsLoaded, fontError]);
   const inTabs = (segments as string[])[1] === '(tabs)';
+  if (!fontsLoaded && !fontError)
+    return <View style={{ flex: 1, backgroundColor: theme.colors.background }} />;
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
       {/* Edge-to-edge: the status bar is transparent and draws over our dark background. */}
-      <StatusBar style="light" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       {status === 'loading' ? (
         <Loader label="Preparing your space…" />
       ) : (

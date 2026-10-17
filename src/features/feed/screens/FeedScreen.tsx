@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useCallback } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { BrandHeader, Screen } from '@/components/layout';
@@ -66,14 +67,14 @@ export function FeedScreen(): React.JSX.Element {
       style={({ pressed }) => [
         styles.composer,
         {
-          backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface,
+          backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.background,
           borderColor: theme.colors.border,
         },
       ]}
     >
       <Avatar uri={me.avatarUri} label="You" size={36} />
       <Text color="muted" style={styles.composerText}>
-        Share something about your day…
+        Start a post…
       </Text>
     </Pressable>
   ) : null;
@@ -89,7 +90,7 @@ export function FeedScreen(): React.JSX.Element {
       ) : isError && !data ? (
         <ErrorState onRetry={() => void refetch()} message="We couldn't load your feed." />
       ) : (
-        <FlatList<Post>
+        <FlashList<Post>
           data={data}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
@@ -98,8 +99,6 @@ export function FeedScreen(): React.JSX.Element {
           ItemSeparatorComponent={() => <View style={styles.gap} />}
           ListHeaderComponent={composer}
           ListHeaderComponentStyle={styles.header}
-          initialNumToRender={5}
-          windowSize={9}
           onEndReached={() => {
             if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
           }}
@@ -148,7 +147,7 @@ const styles = StyleSheet.create({
   list: { padding: spacing.screen, paddingBottom: spacing.xxxl },
   empty: { flexGrow: 1 },
   header: { marginBottom: spacing.md },
-  gap: { height: spacing.md },
+  gap: { height: 0 },
   more: { alignItems: 'center', paddingVertical: spacing.lg },
   composer: {
     minHeight: 56,
@@ -156,8 +155,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   composerText: { flex: 1 },
   skeleton: { padding: spacing.screen, gap: spacing.md },

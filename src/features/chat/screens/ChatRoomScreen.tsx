@@ -5,14 +5,13 @@ import {
   Alert,
   Modal,
   TextInput,
-  FlatList,
   Pressable,
   StyleSheet,
   View,
-  type ListRenderItem,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorState } from '@/components/feedback/ErrorState';
@@ -21,7 +20,8 @@ import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
 import { Avatar, EmptyState, Loader, Skeleton, Text } from '@/components/ui';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { isServiceError, describeError } from '@/services/errors';
-import { radius, spacing } from '@/theme';
+import { radius, spacing, typography } from '@/theme';
+import { TypingDots } from '../components/TypingDots';
 import { useTheme } from '@/theme/useTheme';
 import * as Clipboard from 'expo-clipboard';
 import { messageActions } from '../utils/messageActions';
@@ -145,7 +145,7 @@ export function ChatRoomScreen(): React.JSX.Element {
       }
     },
   });
-  const listRef = useRef<FlatList<Row>>(null);
+  const listRef = useRef<FlashListRef<Row>>(null);
   const [showJump, setShowJump] = useState(false);
 
   const conversationQuery = useConversation(conversationId);
@@ -360,21 +360,24 @@ export function ChatRoomScreen(): React.JSX.Element {
   }, [allMessages, myId, showJump]);
 
   const renderItem = useCallback<ListRenderItem<Row>>(
-    ({ item }) =>
-      item.type === 'divider' ? (
-        <DateDivider label={item.label} />
-      ) : (
-        <MessageBubble
-          message={item.message}
-          mine={item.message.senderId === myId}
-          first={item.first}
-          last={item.last}
-          onRetry={retry}
-          onResync={resync}
-          onActions={openActions}
-          group={isGroup}
-        />
-      ),
+    ({ item }) => (
+      <View style={styles.inverted}>
+        {item.type === 'divider' ? (
+          <DateDivider label={item.label} />
+        ) : (
+          <MessageBubble
+            message={item.message}
+            mine={item.message.senderId === myId}
+            first={item.first}
+            last={item.last}
+            onRetry={retry}
+            onResync={resync}
+            onActions={openActions}
+            group={isGroup}
+          />
+        )}
+      </View>
+    ),
     [isGroup, myId, retry, resync, openActions],
   );
 
@@ -427,7 +430,7 @@ export function ChatRoomScreen(): React.JSX.Element {
           >
             <Avatar uri={participant.avatarUri} label={participant.name} size={40} />
             <View style={styles.personCopy}>
-              <Text variant="subheading" numberOfLines={1}>
+              <Text variant="subheading" serif numberOfLines={1}>
                 {participant.name}
               </Text>
               {subtitle ? (
@@ -468,7 +471,7 @@ export function ChatRoomScreen(): React.JSX.Element {
             flex: 1,
             justifyContent: 'center',
             padding: 24,
-            backgroundColor: 'rgba(0,0,0,0.6)',
+            backgroundColor: theme.colors.overlay,
           }}
         >
           <View
@@ -486,7 +489,7 @@ export function ChatRoomScreen(): React.JSX.Element {
               maxLength={2000}
               value={editText}
               onChangeText={setEditText}
-              style={{ color: theme.colors.text, minHeight: 80 }}
+              style={{ color: theme.colors.text, minHeight: 80, fontFamily: typography.fontFamily }}
             />
             <Pressable accessibilityRole="button" onPress={saveEdit}>
               <Text color="primary">Save edit</Text>
@@ -524,9 +527,9 @@ export function ChatRoomScreen(): React.JSX.Element {
               message={`Start the conversation in ${participant.name}.`}
             />
           ) : (
-            <FlatList
+            <FlashList
               ref={listRef}
-              inverted
+              style={styles.inverted}
               data={rows}
               keyExtractor={(item) => item.key}
               renderItem={renderItem}
@@ -534,42 +537,29 @@ export function ChatRoomScreen(): React.JSX.Element {
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
               onScroll={onScroll}
-              onScrollToIndexFailed={(info) => {
-                if (!isSessionCurrent(renderScope)) return;
-                listRef.current?.scrollToOffset({
-                  offset: info.averageItemLength * info.index,
-                  animated: false,
-                });
-                clearTimeout(scrollRetry.current);
-                scrollRetry.current = setTimeout(() => {
-                  if (isSessionCurrent(renderScope))
-                    listRef.current?.scrollToIndex({ index: info.index, animated: true });
-                }, 200);
-              }}
               scrollEventThrottle={64}
               // Keep the reader's place when new messages arrive, but follow along if they're at the bottom.
               maintainVisibleContentPosition={{
-                minIndexForVisible: 0,
                 autoscrollToTopThreshold: 120,
               }}
-              initialNumToRender={20}
-              windowSize={11}
               onEndReached={onEndReached}
               onEndReachedThreshold={0.4}
               ListFooterComponent={
-                loadingOlder ? (
-                  <Loader />
-                ) : olderError ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => void loadOlder()}
-                    style={styles.older}
-                  >
-                    <Text variant="caption" color="primary">
-                      Couldn't load earlier messages. Tap to retry.
-                    </Text>
-                  </Pressable>
-                ) : null
+                <View style={styles.inverted}>
+                  {loadingOlder ? (
+                    <Loader />
+                  ) : olderError ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => void loadOlder()}
+                      style={styles.older}
+                    >
+                      <Text variant="caption" color="primary">
+                        Couldn't load earlier messages. Tap to retry.
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               }
             />
           )}
@@ -597,6 +587,7 @@ export function ChatRoomScreen(): React.JSX.Element {
             </Animated.View>
           ) : null}
         </View>
+        {typingLabel ? <TypingDots /> : null}
         <ChatInput
           timerLabel={timerShortLabel(ttlSeconds)}
           onTimerPress={featureFlags.ENABLE_EPHEMERAL_CHAT ? () => setTimerSheet(true) : undefined}
@@ -631,6 +622,8 @@ export function ChatRoomScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  // FlashList v2 uses a mirrored viewport and cells for newest-first chat rows.
+  inverted: { transform: [{ scaleY: -1 }] },
   root: { flex: 1 },
   header: {
     minHeight: 60,

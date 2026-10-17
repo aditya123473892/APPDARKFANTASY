@@ -35,7 +35,7 @@ export function Chip({
       <Text
         variant={size === 'sm' ? 'caption' : 'label'}
         weight="medium"
-        style={{ color: selected ? theme.colors.primary : theme.colors.text }}
+        style={{ color: selected ? theme.colors.primaryText : theme.colors.textSecondary }}
       >
         {label}
       </Text>
@@ -45,7 +45,7 @@ export function Chip({
 const styles = StyleSheet.create({
   base: {
     minHeight: 36,
-    borderRadius: radius.full,
+    borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: spacing.md + 2,
     alignItems: 'center',

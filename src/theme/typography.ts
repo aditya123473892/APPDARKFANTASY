@@ -1,5 +1,12 @@
 export const typography = {
-  fontFamily: undefined,
+  fontFamily: 'Inter_400Regular',
+  headingFamily: 'PlayfairDisplay_600SemiBold',
+  family: {
+    regular: 'Inter_400Regular',
+    medium: 'Inter_500Medium',
+    semibold: 'Inter_600SemiBold',
+    bold: 'Inter_700Bold',
+  },
   size: { xs: 12, sm: 14, md: 15, lg: 17, xl: 20, xxl: 28, display: 34 },
   lineHeight: { xs: 16, sm: 19, md: 22, lg: 23, xl: 26, xxl: 34, display: 40 },
   weight: { regular: '400', medium: '500', semibold: '600', bold: '700', black: '700' },

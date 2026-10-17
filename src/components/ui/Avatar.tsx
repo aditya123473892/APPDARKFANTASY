@@ -65,7 +65,7 @@ export function Avatar({ uri, size = 48, online, ring, label }: AvatarProps): Re
             {
               width: dot,
               height: dot,
-              backgroundColor: theme.colors.success,
+              backgroundColor: theme.colors.online,
               borderColor: theme.colors.background,
             },
           ]}

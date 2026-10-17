@@ -250,6 +250,7 @@ const styles = StyleSheet.create({
   composer: { flexDirection: 'row', gap: spacing.md },
   inputColumn: { flex: 1, gap: spacing.xs },
   input: {
+    fontFamily: typography.fontFamily,
     minHeight: 160,
     fontSize: typography.size.lg,
     lineHeight: typography.lineHeight.lg + 2,

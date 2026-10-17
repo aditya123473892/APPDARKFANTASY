@@ -8,10 +8,12 @@ import { toast } from '@/components/ui/Toast';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { spacing } from '@/theme';
 import { APP_NAME } from '@/utils/constants';
+import { useTheme } from '@/theme/useTheme';
 import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
 
 export function SettingsScreen(): React.JSX.Element {
   const router = useRouter();
+  const { mode, setMode } = useTheme();
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -36,6 +38,28 @@ export function SettingsScreen(): React.JSX.Element {
     <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
       <Header title="Settings" back backFallback="/profile" />
       <View style={styles.content}>
+        <SettingsGroup title="Appearance">
+          <SettingsRow
+            icon="moon-outline"
+            title="Dark"
+            subtitle="Velvet Noir"
+            value={mode === 'dark'}
+            onValueChange={() => setMode('dark')}
+          />
+          <SettingsRow
+            icon="sunny-outline"
+            title="Light"
+            value={mode === 'light'}
+            onValueChange={() => setMode('light')}
+          />
+          <SettingsRow
+            icon="phone-portrait-outline"
+            title="Use device appearance"
+            value={mode === 'system'}
+            onValueChange={() => setMode('system')}
+            last
+          />
+        </SettingsGroup>
         <SettingsGroup title="Account">
           <SettingsRow
             icon="person-outline"

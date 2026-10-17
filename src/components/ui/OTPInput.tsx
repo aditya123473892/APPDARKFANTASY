@@ -1,5 +1,6 @@
 import { StyleSheet, TextInput, View } from 'react-native';
 import { useTheme } from '@/theme/useTheme';
+import { typography, radius } from '@/theme';
 export function OTPInput({
   value,
   onChangeText,
@@ -44,9 +45,9 @@ const styles = StyleSheet.create({
     minWidth: 44,
     height: 54,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: radius.card,
     textAlign: 'center',
     fontSize: 20,
-    fontWeight: '700',
+    fontFamily: typography.family.bold,
   },
 });

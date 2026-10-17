@@ -64,7 +64,7 @@ export function Tabs<T extends string>({
               <View
                 style={[
                   styles.indicator,
-                  { backgroundColor: active ? theme.colors.primary : 'transparent' },
+                  { backgroundColor: active ? theme.colors.primary : theme.palette.transparent },
                 ]}
               />
             )}

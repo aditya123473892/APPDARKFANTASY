@@ -11,7 +11,7 @@ export function BrandHeader({ onCompose }: { onCompose?: () => void }): React.JS
     <View style={[styles.root, { borderBottomColor: theme.colors.divider }]}>
       <View style={styles.brand} accessibilityRole="header" accessibilityLabel="DARKFANTASY">
         <Text variant="heading" weight="bold" style={styles.wordmark}>
-          DARKFANTASY
+          Darkfantasy
         </Text>
         <View style={[styles.dot, { backgroundColor: theme.colors.primary }]} />
       </View>
@@ -35,7 +35,7 @@ const styles = StyleSheet.create({
     paddingRight: spacing.sm,
   },
   brand: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  wordmark: { letterSpacing: 1.5 },
+  wordmark: { letterSpacing: -0.4 },
   dot: { width: 6, height: 6, borderRadius: 999, marginLeft: 3, marginTop: -12 },
   actions: { flexDirection: 'row', alignItems: 'center' },
 });

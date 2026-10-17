@@ -10,10 +10,12 @@ export function ProfileHeader({
   user,
   presence,
   distance,
+  centered = false,
 }: {
   user: User;
   presence?: string | null;
   distance?: string | null;
+  centered?: boolean;
 }): React.JSX.Element {
   const { theme } = useTheme();
   const meta: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [];
@@ -21,8 +23,8 @@ export function ProfileHeader({
   if (distance ?? user.location)
     meta.push({ icon: 'location-outline', text: (distance ?? user.location)! });
   return (
-    <View style={styles.root}>
-      <Text variant="title" accessibilityRole="header">
+    <View style={[styles.root, centered && { alignItems: 'center' }]}>
+      <Text variant="title" center={centered} accessibilityRole="header">
         {user.name}
         {user.age > 0 ? `, ${user.age}` : ''}
       </Text>
@@ -46,8 +48,18 @@ export function ProfileHeader({
         <View style={styles.meta}>
           {meta.map((item) => (
             <View key={item.icon} style={styles.row}>
-              <Ionicons name={item.icon} size={15} color={theme.colors.textSecondary} />
-              <Text variant="label" weight="regular" color="secondary">
+              <Ionicons
+                name={item.icon}
+                size={18}
+                color={
+                  item.icon === 'location-outline' ? theme.colors.gold : theme.colors.textSecondary
+                }
+              />
+              <Text
+                variant="label"
+                weight="regular"
+                color={item.icon === 'location-outline' ? 'gold' : 'secondary'}
+              >
                 {item.text}
               </Text>
             </View>

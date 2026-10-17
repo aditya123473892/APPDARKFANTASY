@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
-import * as ScreenCapture from 'expo-screen-capture';
+import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
 import { useEffect, useRef, useState } from 'react';
 import {
   Modal,
@@ -54,6 +54,7 @@ export function ViewOnceAttachment({
   const video = Boolean(media.mimetype?.startsWith('video/'));
   const kind = video ? 'video' : 'photo';
   const opened = Boolean(viewedAt) || consumed || (media.status && media.status !== 'active');
+  useScreenshotProtection(CAPTURE_KEY, Boolean(url));
 
   useEffect(() => {
     mounted.current = true;
@@ -63,13 +64,6 @@ export function ViewOnceAttachment({
       unsubscribe();
     };
   }, []);
-  useEffect(() => {
-    if (!url) return;
-    void ScreenCapture.preventScreenCaptureAsync(CAPTURE_KEY).catch(() => undefined);
-    return () => {
-      void ScreenCapture.allowScreenCaptureAsync(CAPTURE_KEY).catch(() => undefined);
-    };
-  }, [url]);
 
   const open = async () => {
     if (mine || opened || loading) return;
@@ -137,7 +131,16 @@ export function ViewOnceAttachment({
         statusBarTranslucent
         onRequestClose={() => setUrl(null)}
       >
-        <View style={[styles.viewer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View
+          style={[
+            styles.viewer,
+            {
+              backgroundColor: theme.colors.mediaBackground,
+              paddingTop: insets.top,
+              paddingBottom: insets.bottom,
+            },
+          ]}
+        >
           {url ? (
             <RemoteMedia
               uri={url}
@@ -153,8 +156,8 @@ export function ViewOnceAttachment({
             onPress={() => setUrl(null)}
             style={styles.close}
           >
-            <Ionicons name="close" size={22} color="#fff" />
-            <Text style={styles.closeText}>Close · it can't be opened again</Text>
+            <Ionicons name="close" size={22} color={theme.colors.onImage} />
+            <Text style={{ color: theme.colors.onImage }}>Close · it can't be opened again</Text>
           </Pressable>
         </View>
       </Modal>
@@ -174,7 +177,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     alignSelf: 'flex-start',
   },
-  viewer: { flex: 1, backgroundColor: '#000', justifyContent: 'center' },
+  viewer: { flex: 1, justifyContent: 'center' },
   close: {
     height: 56,
     flexDirection: 'row',
@@ -182,5 +185,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
   },
-  closeText: { color: '#fff' },
 });

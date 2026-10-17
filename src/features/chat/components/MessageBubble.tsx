@@ -10,6 +10,7 @@ import { ChatAttachment } from './ChatAttachment';
 import { ExpiryCountdown } from './ExpiryCountdown';
 import { previewText } from '../services/chatPayload';
 import { ViewOnceAttachment } from './ViewOnceAttachment';
+import { ReplyPreview, type ReplyPreviewData } from './ReplyPreview';
 
 const statusLabel: Record<ChatMessage['status'], string> = {
   sending: 'Sending',
@@ -29,6 +30,7 @@ export const MessageBubble = memo(function MessageBubble({
   onResync,
   onActions,
   group,
+  replyPreview,
 }: {
   message: ChatMessage;
   mine: boolean;
@@ -39,6 +41,7 @@ export const MessageBubble = memo(function MessageBubble({
   onResync: (clientId: string) => void;
   onActions: (message: ChatMessage) => void;
   group: boolean;
+  replyPreview?: ReplyPreviewData;
 }): React.JSX.Element {
   const { theme } = useTheme();
   const failed = message.status === 'failed-definitive' || message.status === 'uncertain';
@@ -91,10 +94,12 @@ export const MessageBubble = memo(function MessageBubble({
           : 'checkmark-done';
   const statusColor =
     message.status === 'read'
-      ? theme.colors.secondary
+      ? theme.colors.onPrimary
       : failed
         ? theme.colors.danger
-        : theme.colors.textMuted;
+        : mine
+          ? theme.colors.onPrimary
+          : theme.colors.textMuted;
 
   return (
     <View
@@ -117,17 +122,18 @@ export const MessageBubble = memo(function MessageBubble({
             ? [
                 { backgroundColor: theme.colors.primary },
                 !first && styles.mineJoinTop,
-                !last && styles.mineJoinBottom,
+                styles.mineJoinBottom,
               ]
             : [
-                { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border },
+                { backgroundColor: theme.colors.bubbleIn, borderColor: theme.colors.border },
                 styles.theirBubble,
                 !first && styles.theirJoinTop,
-                !last && styles.theirJoinBottom,
+                styles.theirJoinBottom,
               ],
-          failed && { opacity: 0.7 },
+          failed && { borderWidth: 1, borderColor: theme.colors.danger },
         ]}
       >
+        {replyPreview ? <ReplyPreview {...replyPreview} mine={mine} /> : null}
         {!mine && first && message.senderName ? (
           <Text variant="caption" color="primary">
             {message.senderName}
@@ -158,40 +164,50 @@ export const MessageBubble = memo(function MessageBubble({
             color={mine ? theme.colors.onPrimary : theme.colors.textMuted}
           />
         ) : null}
+        {last || failed ? (
+          <View style={[styles.meta, mine && styles.metaMine]}>
+            {failed ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Review failed message"
+                hitSlop={10}
+                onPress={openFailedActions}
+                style={styles.retry}
+              >
+                <Ionicons
+                  name="refresh"
+                  size={18}
+                  color={mine ? theme.colors.onPrimary : theme.colors.danger}
+                />
+                <Text
+                  variant="caption"
+                  style={{ color: mine ? theme.colors.onPrimary : theme.colors.danger }}
+                >
+                  Check send status
+                </Text>
+              </Pressable>
+            ) : (
+              <>
+                <Text
+                  variant="caption"
+                  style={{ color: mine ? theme.colors.onPrimary : theme.colors.textMuted }}
+                >
+                  {message.status === 'sending' ? 'Sending…' : time}
+                </Text>
+                {mine && (!group || message.local) ? (
+                  <Ionicons name={statusIcon} size={14} color={statusColor} />
+                ) : null}
+              </>
+            )}
+          </View>
+        ) : null}
       </Pressable>
-      {last || failed ? (
-        <View style={[styles.meta, mine && styles.metaMine]}>
-          {failed ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Review failed message"
-              hitSlop={10}
-              onPress={openFailedActions}
-              style={styles.retry}
-            >
-              <Ionicons name="refresh" size={13} color={theme.colors.danger} />
-              <Text variant="caption" color="danger">
-                Check send status
-              </Text>
-            </Pressable>
-          ) : (
-            <>
-              <Text variant="caption" color="muted">
-                {message.status === 'sending' ? 'Sending…' : time}
-              </Text>
-              {mine && (!group || message.local) ? (
-                <Ionicons name={statusIcon} size={14} color={statusColor} />
-              ) : null}
-            </>
-          )}
-        </View>
-      ) : null}
     </View>
   );
 });
 
-const BUBBLE = radius.lg;
-const JOIN = radius.xs;
+const BUBBLE = radius.bubble;
+const JOIN = radius.tail;
 const styles = StyleSheet.create({
   row: { maxWidth: '100%' },
   mineRow: { alignItems: 'flex-end', paddingLeft: '18%' },

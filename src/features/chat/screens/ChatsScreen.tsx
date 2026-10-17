@@ -1,6 +1,7 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { AppState, RefreshControl, StyleSheet, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { Header, Screen } from '@/components/layout';
@@ -88,7 +89,7 @@ export function ChatsScreen(): React.JSX.Element {
   return (
     <Screen padded={false}>
       <View style={styles.top}>
-        <Header title="Messages" align="left" />
+        <Header title="Chats" subtitle="Keep the spark alive" align="left" />
         <Button
           label="New message"
           icon="chatbubble-ellipses-outline"
@@ -128,7 +129,7 @@ export function ChatsScreen(): React.JSX.Element {
           message={describeError(error, "We couldn't load your conversations.")}
         />
       ) : (
-        <FlatList
+        <FlashList
           data={conversations}
           keyExtractor={(item) => item.id}
           keyboardShouldPersistTaps="handled"

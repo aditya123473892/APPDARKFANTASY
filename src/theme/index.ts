@@ -30,4 +30,4 @@ export const darkTheme: AppTheme = {
   palette,
 };
 
-export { accentGradient, palette, radius, shadows, spacing, typography };
+export { accentGradient, darkColors, lightColors, palette, radius, shadows, spacing, typography };

@@ -7,13 +7,14 @@ import { useTheme } from '@/theme/useTheme';
 type TextVariant = 'display' | 'title' | 'heading' | 'subheading' | 'body' | 'label' | 'caption';
 type TextProps = RNTextProps & {
   variant?: TextVariant;
-  color?: 'default' | 'secondary' | 'muted' | 'primary' | 'danger' | 'success' | 'inverse';
+  color?: 'default' | 'secondary' | 'muted' | 'primary' | 'danger' | 'success' | 'inverse' | 'gold';
+  serif?: boolean;
   weight?: 'regular' | 'medium' | 'semibold' | 'bold';
   center?: boolean;
 };
 
 export const Text = forwardRef<RNText, TextProps>(function Text(
-  { variant = 'body', color = 'default', weight, center, style, ...props },
+  { variant = 'body', color = 'default', weight, center, serif, style, ...props },
   ref,
 ) {
   const { theme } = useTheme();
@@ -21,7 +22,8 @@ export const Text = forwardRef<RNText, TextProps>(function Text(
     default: theme.colors.text,
     secondary: theme.colors.textSecondary,
     muted: theme.colors.textMuted,
-    primary: theme.colors.primary,
+    primary: theme.colors.primaryText,
+    gold: theme.colors.gold,
     danger: theme.colors.danger,
     success: theme.colors.success,
     inverse: theme.colors.onPrimary,
@@ -35,7 +37,18 @@ export const Text = forwardRef<RNText, TextProps>(function Text(
         styles[variant],
         {
           color: colorValue,
-          fontWeight: weight ? theme.typography.weight[weight] : styles[variant].fontWeight,
+          fontFamily:
+            (serif ?? ['display', 'title', 'heading'].includes(variant))
+              ? typography.headingFamily
+              : typography.family[
+                  weight ??
+                    (variant === 'label' || variant === 'subheading'
+                      ? 'semibold'
+                      : variant === 'caption'
+                        ? 'medium'
+                        : 'regular')
+                ],
+          fontWeight: undefined,
         },
         center && styles.center,
         style,

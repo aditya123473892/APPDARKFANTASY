@@ -10,11 +10,16 @@ import type { Conversation } from '../types';
 export const ChatListItem = memo(function ChatListItem({
   conversation,
   myId,
+  showPresence,
+  pinned = false,
+  muted = false,
   onPress,
 }: {
   conversation: Conversation;
   myId: string;
   showPresence: boolean;
+  pinned?: boolean;
+  muted?: boolean;
   onPress: (conversation: Conversation) => void;
 }): React.JSX.Element {
   const { theme } = useTheme();
@@ -33,17 +38,39 @@ export const ChatListItem = memo(function ChatListItem({
       onPress={() => onPress(conversation)}
       style={({ pressed }) => [styles.root, pressed && { backgroundColor: theme.colors.surface }]}
     >
-      <Avatar uri={participant.avatarUri} label={participant.name} size={56} />
+      <Avatar
+        uri={participant.avatarUri}
+        label={participant.name}
+        size={56}
+        online={showPresence && Boolean(conversation.presence?.online)}
+      />
       <View style={styles.content}>
         <View style={styles.row}>
           <Text
             variant="subheading"
+            serif
             weight={unread ? 'bold' : 'semibold'}
             numberOfLines={1}
             style={styles.name}
           >
             {participant.name}
           </Text>
+          {pinned ? (
+            <Ionicons
+              accessibilityLabel="Pinned"
+              name="pin-outline"
+              size={18}
+              color={theme.colors.textMuted}
+            />
+          ) : null}
+          {muted ? (
+            <Ionicons
+              accessibilityLabel="Muted"
+              name="notifications-off-outline"
+              size={18}
+              color={theme.colors.textMuted}
+            />
+          ) : null}
           <Text variant="caption" color={unread ? 'primary' : 'muted'}>
             {formatRelativeTime(conversation.updatedAt)}
           </Text>
@@ -80,7 +107,7 @@ export const ChatListItem = memo(function ChatListItem({
 
 const styles = StyleSheet.create({
   root: {
-    minHeight: 80,
+    minHeight: 88,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,

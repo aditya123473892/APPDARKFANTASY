@@ -1,14 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { Text } from '@/components/ui/Text';
+import { AnimatedPressable } from './AnimatedPressable';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
@@ -55,7 +50,7 @@ export function Button({
     ghost: {
       bg: theme.palette.transparent,
       pressed: theme.colors.primarySoft,
-      fg: theme.colors.primary,
+      fg: theme.colors.primaryText,
       border: theme.palette.transparent,
     },
     danger: {
@@ -67,12 +62,12 @@ export function Button({
     pill: {
       bg: theme.colors.primarySoft,
       pressed: theme.colors.primarySoft,
-      fg: theme.colors.primary,
+      fg: theme.colors.primaryText,
       border: theme.palette.transparent,
     },
   }[variant];
   return (
-    <Pressable
+    <AnimatedPressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled: inactive, busy: Boolean(loading) }}
@@ -81,14 +76,13 @@ export function Button({
         void Haptics.selectionAsync();
         onPress();
       }}
-      style={({ pressed }) => [
+      style={[
         styles.base,
         styles[size],
         {
-          backgroundColor: pressed ? palette.pressed : palette.bg,
+          backgroundColor: palette.bg,
           borderColor: palette.border,
           opacity: disabled ? 0.45 : 1,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
         },
         fullWidth && styles.full,
         style,
@@ -104,13 +98,13 @@ export function Button({
           </Text>
         </>
       )}
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: radius.full,
+    borderRadius: radius.input,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
