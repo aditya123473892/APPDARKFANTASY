@@ -25,3 +25,4 @@ export * from './ListRow';
 export * from './ScreenHeader';
 export * from './AnimatedPressable';
 export * from './TabBar';
+export * from './SearchField';

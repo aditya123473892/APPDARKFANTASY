@@ -3,6 +3,7 @@ import { displayName } from '@/features/auth/userModel';
 import { userCache, senderId } from '@/features/auth/userCache';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { ServiceError } from '@/services/errors';
+import { isClientId } from '@/utils/clientId';
 import type { ChatMedia, Message } from '../types';
 
 export type BackendMessage = {
@@ -17,6 +18,8 @@ export type BackendMessage = {
   expiresAt?: string;
   viewOnce?: boolean;
   viewedAt?: string;
+  /** Idempotency key the sender supplied; echoed back on saved messages. */
+  clientId?: string;
 };
 export const isObjectId = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
@@ -92,6 +95,8 @@ export function parseMessage(value: unknown): BackendMessage | null {
     expiresAt: typeof raw.expiresAt === 'string' ? raw.expiresAt : undefined,
     viewOnce: raw.viewOnce === true || undefined,
     viewedAt: typeof raw.viewedAt === 'string' ? raw.viewedAt : undefined,
+    // A malformed key is dropped; it never invalidates the message itself.
+    clientId: isClientId(raw.clientId) ? raw.clientId : undefined,
   };
 }
 /** View-once content must never appear in an inbox preview. */
@@ -133,5 +138,9 @@ export function mapMessage(value: unknown, key: string): Message {
     ...(raw.expiresAt ? { expiresAt: raw.expiresAt } : {}),
     ...(raw.viewOnce ? { viewOnce: true } : {}),
     ...(raw.viewedAt ? { viewedAt: raw.viewedAt } : {}),
+    // Only the viewer's own key can correlate with their local outbox.
+    ...(raw.clientId && senderId(raw.sender) === sessionIdentity.userId
+      ? { clientId: raw.clientId }
+      : {}),
   };
 }

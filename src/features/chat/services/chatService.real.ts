@@ -9,6 +9,7 @@ import { apiClient } from '@/services/api/apiClient';
 import { getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
 import { ServiceError } from '@/services/errors';
 import { appendAsset } from '@/services/api/multipart';
+import { isClientId } from '@/utils/clientId';
 import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
 import { emitTyping, getHistory, refreshUnread, socketRequest, socketAck } from './socketSession';
@@ -190,6 +191,8 @@ export const realChatService: ChatService = {
       const payload = {
         ...to,
         message: input.text,
+        // Retries reuse the key so the server stores the message once.
+        ...(isClientId(input.clientId) ? { clientId: input.clientId } : {}),
         ...(input.ttlSeconds ? { ttlSeconds: input.ttlSeconds } : {}),
         ...(input.viewOnce ? { viewOnce: true } : {}),
       };
@@ -232,7 +235,20 @@ export const realChatService: ChatService = {
   },
   async markRead(key, allowed) {
     const scope = sessionIdentity.generation;
-    if (key.startsWith('group:')) return;
+    if (key.startsWith('group:')) {
+      const groupId = key.slice(6);
+      if (!isObjectId(groupId)) throw new ServiceError('NOT_FOUND');
+      // Moves the viewer's private read cursor; the server syncs their other devices.
+      const reply = await socketAck<{ groupId?: unknown }>(
+        'markGroupAsRead',
+        { groupId },
+        allowed,
+        true,
+      );
+      assertSessionCurrent(scope);
+      if (reply?.groupId !== groupId) throw new ServiceError('UNKNOWN');
+      return;
+    }
     const unread = await socketRequest(
       'markAsRead',
       'unreadMessageCount',
@@ -244,11 +260,8 @@ export const realChatService: ChatService = {
     markPeerRead(key);
   },
   setTyping(key, isTyping) {
-    if (!isTyping || !key.startsWith('user:')) return;
-    try {
-      emitTyping({ receiver: key.slice(5) });
-    } catch {
-      // Typing is best effort; an invalid key has nothing to notify.
-    }
+    const [kind, id] = key.split(':');
+    if (kind === 'user') emitTyping({ receiver: id ?? '', isTyping });
+    else if (kind === 'group') emitTyping({ groupId: id ?? '', isTyping });
   },
 };

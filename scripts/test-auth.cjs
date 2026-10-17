@@ -195,7 +195,7 @@ test('real group and message writes send confirmed DTOs with idempotency keys an
   });
   assert.deepEqual(requests[1], {
     url: '/chats/messages',
-    body: { receiver: other, message: 'Hello' },
+    body: { receiver: other, message: 'Hello', clientId: 'local-only' },
   });
   assert.equal(sent.id, '444444444444444444444444');
   assert.equal(sent.clientId, 'local-only');
@@ -930,7 +930,10 @@ test('read hook gates focus, foreground and synchronization; first unread is cap
   assert.equal(reads.length, 1); // direct receipts follow the reciprocal preference
   useMarkConversationRead('group:333333333333333333333333', 'aaaaaaaaaaaaaaaaaaaaaaaa');
   effects.splice(0).forEach((fn) => fn());
-  assert.equal(reads.length, 1); // no group read event exists
+  // A group read moves only the viewer's private cursor, so it ignores the receipt preference.
+  assert.equal(reads.length, 2);
+  assert.equal(reads[1].key, 'group:333333333333333333333333');
+  assert.equal(reads[1].allowed(), true);
   h.runtime.teardownSession();
   assert.equal(reads[0].allowed(), false);
 });
@@ -1301,12 +1304,14 @@ test('logout during GET backoff cancels retry instead of sending an old token', 
   assert.equal(calls, 1);
 });
 
-test('server payloads cannot establish client-side correlation or idempotency', () => {
+test('echoed idempotency keys are validated and only the viewer’s own key correlates', () => {
   const h = chatHarness();
   const { parseMessage, mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
   const raw = backendMessage(h.me, h.other, { clientId: 'abc123-xyz' });
-  assert.equal(parseMessage(raw).clientId, undefined);
-  assert.equal(mapMessage(raw, `user:${h.other}`).clientId, undefined);
+  assert.equal(parseMessage(raw).clientId, 'abc123-xyz');
+  assert.equal(mapMessage(raw, `user:${h.other}`).clientId, undefined, "a peer's key is ignored");
+  const own = { ...raw, sender: h.me, receiver: h.other };
+  assert.equal(mapMessage(own, `user:${h.other}`).clientId, 'abc123-xyz');
   assert.equal(parseMessage({ ...raw, clientId: 'x' }).clientId, undefined);
   assert.equal(parseMessage({ ...raw, clientId: '<script>alert(1)</script>' }).clientId, undefined);
   h.runtime.teardownSession();
@@ -1361,25 +1366,218 @@ test('group messages merge without inventing unsupported unread receipts', async
   h.runtime.teardownSession();
 });
 
-test('typing indicators come from other participants and clear on delivery', async () => {
+test('typing indicators come from other participants, honour isTyping, and clear on delivery', async () => {
   const h = chatHarness();
   await h.transport.ensureChatReady();
   const typing = h.load('src/features/chat/store/typingStore.ts');
   const socket = h.sockets[0];
   const direct = `user:${h.other}`;
+  const who = (key) => Object.keys(typing.useTypingStore.getState().typing[key] ?? {});
   socket.server('typing', { sender: h.other, isTyping: true });
   socket.server('typing', { sender: h.me, isTyping: true });
   socket.server('typing', { sender: 'not-an-id', isTyping: true });
-  assert.deepEqual(Object.keys(typing.useTypingStore.getState().typing[direct]), [h.other]);
+  assert.deepEqual(who(direct), [h.other]);
   socket.server('receiveMessage', backendMessage(h.me, h.other));
-  assert.deepEqual(Object.keys(typing.useTypingStore.getState().typing[direct]), []);
+  assert.deepEqual(who(direct), []);
+  socket.server('typing', { sender: h.other, isTyping: true });
+  socket.server('typing', { sender: h.other, isTyping: false }); // explicit stop
+  assert.deepEqual(who(direct), []);
+  // Group typing: `{ sender, groupId, isTyping }`, keyed by the group.
+  const group = 'group:333333333333333333333333';
+  socket.server('typing', { sender: h.other, groupId: '333333333333333333333333', isTyping: true });
+  assert.deepEqual(who(group), [h.other]);
+  assert.deepEqual(who(direct), [], 'group typing never shows in the direct chat');
+  socket.server('typing', { sender: h.other, groupId: 'bad', isTyping: true });
+  socket.server('receiveGroupMessage', {
+    ...backendMessage(h.me, h.other, { receiver: undefined, groupId: '333333333333333333333333' }),
+  });
+  assert.deepEqual(who(group), []);
   socket.server('typing', { sender: h.other, groupId: '333333333333333333333333' });
+  assert.deepEqual(who(group), [h.other], 'a missing isTyping means typing');
+  socket.server('typing', {
+    sender: h.other,
+    groupId: '333333333333333333333333',
+    isTyping: false,
+  });
+  assert.deepEqual(who(group), []);
+  h.runtime.teardownSession();
+  assert.equal(Object.keys(typing.useTypingStore.getState().typing).length, 0);
+});
+
+/** Makes the fake server reject `event` for `id` the way ChatGateway.emitError does. */
+function rejectOn(socket, event, id, statusCode = 403) {
+  const original = socket.emit.bind(socket);
+  socket.emit = (name, payload, ack) => {
+    const target = typeof payload === 'string' ? payload : (payload?.groupId ?? payload?.user2);
+    if (name !== event || target !== id) return original(name, payload, ack);
+    socket.packets.push({ name, payload });
+    setTimeout(() => socket.server('error', { statusCode, message: 'Group membership required' }));
+    return true;
+  };
+}
+
+test('groupUpdated refreshes the inbox; groupRemoved drops the group and its resync', async () => {
+  const invalidated = [];
+  const queryData = new Map();
+  const h = chatHarness({
+    '@/services/queryClient': {
+      queryClient: {
+        setQueryData: (key, value) => {
+          const id = JSON.stringify(key);
+          const next = typeof value === 'function' ? value(queryData.get(id)) : value;
+          if (next !== undefined) queryData.set(id, next);
+          return next;
+        },
+        getQueryData: (key) => queryData.get(JSON.stringify(key)),
+        invalidateQueries: async ({ queryKey }) => invalidated.push(JSON.stringify(queryKey)),
+        removeQueries: ({ queryKey }) => queryData.delete(JSON.stringify(queryKey)),
+        cancelQueries: async () => {},
+        clear: () => queryData.clear(),
+      },
+    },
+  });
+  const group = '333333333333333333333333';
+  const key = `group:${group}`;
+  await h.transport.getHistory(key);
+  const socket = h.sockets[0];
+  const conversations = JSON.stringify(['chat', 'conversations']);
+  queryData.set(conversations, [{ id: key }, { id: `user:${h.other}` }]);
+
+  socket.server('groupUpdated', { _id: 'not-an-id', name: 'x' });
+  assert.equal(invalidated.length, 0, 'malformed summaries are ignored');
+  socket.server('groupUpdated', { _id: group, name: 'Renamed', memberCount: 3 });
+  assert.ok(invalidated.includes(conversations));
+  assert.ok(invalidated.includes(JSON.stringify(['chat', 'conversation', key])));
+
+  socket.server('groupRemoved', { groupId: group, deleted: true });
+  assert.deepEqual(
+    queryData.get(conversations).map((row) => row.id),
+    [`user:${h.other}`],
+  );
+  assert.equal(queryData.has(JSON.stringify(['chat', 'messages', key])), false);
+  assert.ok(!h.state.knownHistories().includes(key));
+
+  // The next reconnect neither rejoins nor refetches the removed group.
+  const before = socket.packets.length;
+  socket.disconnect();
+  socket.connect();
+  await until(() => h.state.useChatConnection.getState().ready);
+  const names = socket.packets.slice(before).map((packet) => packet.name);
+  assert.ok(!names.includes('joinGroup'));
+  assert.ok(!names.includes('getGroupChatHistory'));
+  h.runtime.teardownSession();
+});
+
+test('reconnect drops a group the viewer lost while offline instead of stalling, without a permission error', async () => {
+  const h = chatHarness();
+  const group = '333333333333333333333333';
+  await h.transport.getHistory(`group:${group}`);
+  await h.transport.getHistory(`user:${h.other}`);
+  const socket = h.sockets[0];
+  rejectOn(socket, 'joinGroup', group);
+  rejectOn(socket, 'getGroupChatHistory', group);
+  socket.disconnect();
+  socket.connect();
+  await until(() => h.state.useChatConnection.getState().ready);
+  assert.ok(!h.state.knownHistories().includes(`group:${group}`));
+  assert.ok(h.state.knownHistories().includes(`user:${h.other}`));
+  assert.ok(
+    !h.useAuthStore.getState().permissionError,
+    'membership loss is not a permission error',
+  );
+  // A server failure still fails the resync instead of silently dropping data.
+  rejectOn(socket, 'getChatHistory', h.other, 500);
+  socket.disconnect();
+  socket.connect();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(h.state.useChatConnection.getState().ready, false);
+  assert.ok(h.state.knownHistories().includes(`user:${h.other}`));
+  h.runtime.teardownSession();
+});
+
+test('a socket echo carrying the idempotency key settles the outbox before the HTTP reply', async () => {
+  const h = sendHarness();
+  const key = `user:${h.other}`;
+  await h.transport.ensureChatReady();
+  h.sends.startSend(key, 'Hello', {
+    sendMessage: () => new Promise(() => {}), // HTTP reply never arrives
+    listMessages: async () => [],
+  });
+  const item = Object.values(h.outbox.getState().items)[0];
+  assert.match(item.clientId, /^[A-Za-z0-9_-]{8,64}$/);
+  const echo = backendMessage(h.me, h.other, {
+    _id: 'dddddddddddddddddddddddd',
+    sender: h.me,
+    receiver: h.other,
+    clientId: item.clientId,
+  });
+  h.sockets[0].server('receiveMessage', echo);
+  h.sockets[0].server('receiveMessage', echo); // duplicate delivery
+  assert.equal(Object.keys(h.outbox.getState().items).length, 0);
+  const rows = h.queryData.get(JSON.stringify(['chat', 'messages', key]));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].clientId, item.clientId);
+  // A peer's key is never adopted, and a malformed key never rejects the message.
+  const { mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
   assert.equal(
-    typing.useTypingStore.getState().typing['group:333333333333333333333333'],
+    mapMessage(backendMessage(h.me, h.other, { clientId: item.clientId }), key).clientId,
+    undefined,
+  );
+  assert.equal(
+    mapMessage(
+      backendMessage(h.me, h.other, { sender: h.me, receiver: h.other, clientId: 'bad key!' }),
+      key,
+    ).clientId,
     undefined,
   );
   h.runtime.teardownSession();
-  assert.equal(Object.keys(typing.useTypingStore.getState().typing).length, 0);
+});
+
+test('group read uses the markGroupAsRead acknowledgement; typing emits the gateway payloads', async () => {
+  const h = chatHarness();
+  const { realChatService } = h.load('src/features/chat/services/chatService.real.ts');
+  const group = '333333333333333333333333';
+  await h.transport.ensureChatReady();
+  const socket = h.sockets[0];
+  const original = socket.emit.bind(socket);
+  socket.emit = (name, payload, ack) => {
+    if (name === 'markGroupAsRead') {
+      socket.packets.push({ name, payload });
+      setTimeout(() =>
+        ack({ groupId: payload.groupId, lastReadAt: new Date().toISOString(), unreadCount: 0 }),
+      );
+      return true;
+    }
+    return original(name, payload, ack);
+  };
+  await realChatService.markRead(`group:${group}`, () => true);
+  assert.equal(
+    JSON.stringify(socket.packets.at(-1)),
+    JSON.stringify({ name: 'markGroupAsRead', payload: { groupId: group } }),
+  );
+  let allowed = false;
+  await assert.rejects(realChatService.markRead(`group:${group}`, () => allowed));
+  assert.equal(socket.packets.at(-1).name, 'markGroupAsRead', 'a disallowed read is never emitted');
+  assert.equal(socket.packets.filter((packet) => packet.name === 'markGroupAsRead').length, 1);
+
+  const last = () => JSON.stringify(socket.packets.at(-1));
+  realChatService.setTyping(`group:${group}`, true);
+  assert.equal(
+    last(),
+    JSON.stringify({ name: 'typing', payload: { groupId: group, isTyping: true } }),
+  );
+  realChatService.setTyping(`user:${h.other}`, false);
+  assert.equal(
+    last(),
+    JSON.stringify({ name: 'typing', payload: { receiver: h.other, isTyping: false } }),
+  );
+  const count = socket.packets.length;
+  realChatService.setTyping(`user:${h.me}`, true); // never to yourself
+  realChatService.setTyping('user:not-an-id', true);
+  socket.connected = false;
+  realChatService.setTyping(`user:${h.other}`, true); // offline: dropped, never queued
+  assert.equal(socket.packets.length, count);
+  h.runtime.teardownSession();
 });
 
 test('posts use the server like state and cached posts update in every list', () => {
@@ -1491,7 +1689,7 @@ test('C local windows, first unread snapshot and drafts clear on logout and acco
   h.runtime.teardownSession();
 });
 
-test('C typing is throttled, direct-only, sends no stop event, and expires locally', () => {
+test('C typing is throttled, covers direct and group chats, sends a stop event, and expires locally', () => {
   let now = 10000;
   const pulses = [],
     timers = new Map();
@@ -1521,20 +1719,34 @@ test('C typing is throttled, direct-only, sends no stop event, and expires local
   });
   const { useTypingEmitter } = h.load('src/features/chat/hooks/useChat.ts');
   h.runtime.setSessionIdentity('111111111111111111111111', h.token('111111111111111111111111'));
-  const typing = useTypingEmitter('user:222222222222222222222222');
+  const direct = 'user:222222222222222222222222';
+  const typing = useTypingEmitter(direct);
   typing.onChangeText('a');
   now += 200;
   typing.onChangeText('ab');
-  assert.equal(pulses.length, 1);
+  assert.deepEqual(pulses, [[direct, true]]);
   now += 3001;
   typing.onChangeText('abc');
   assert.equal(pulses.length, 2);
   typing.stopTyping();
-  assert.equal(pulses.length, 2);
+  assert.deepEqual(pulses.at(-1), [direct, false], 'send or clear emits isTyping: false');
+  typing.stopTyping();
+  assert.equal(pulses.length, 3, 'stop is sent once, not when nothing was announced');
   typing.onChangeText('Retype immediately');
-  assert.equal(pulses.length, 2, 'clearing or sending does not bypass the throttle');
-  useTypingEmitter('group:333333333333333333333333').onChangeText('x');
-  assert.equal(pulses.length, 2);
+  assert.deepEqual(pulses.at(-1), [direct, true], 'typing after a stop announces again');
+  typing.onChangeText('');
+  assert.deepEqual(pulses.at(-1), [direct, false], 'clearing the composer stops');
+  // Idle: the stop timer ends the indicator without another keystroke.
+  typing.onChangeText('idle');
+  const idle = [...timers.values()].at(-1);
+  idle.fn();
+  assert.deepEqual(pulses.at(-1), [direct, false]);
+  const group = 'group:333333333333333333333333';
+  useTypingEmitter(group).onChangeText('x');
+  assert.deepEqual(pulses.at(-1), [group, true], 'groups relay typing too');
+  const before = pulses.length;
+  useTypingEmitter('invalid').onChangeText('x');
+  assert.equal(pulses.length, before);
   const state = h.load('src/features/chat/store/typingStore.ts');
   state.setTyping('user:peer', 'peer', true);
   const expiry = [...timers.values()].find((timer) => timer.ms === state.TYPING_TTL_MS);
@@ -1971,6 +2183,7 @@ test('sends carry the disappearing timer and view-once flag only when chosen', a
   assert.deepEqual(JSON.parse(bodies[0]), {
     receiver: other,
     message: 'Hi',
+    clientId: 'timer-key-1',
     ttlSeconds: 300,
   });
   assert.equal(sent.expiresAt, '2026-10-14T01:05:00Z');
@@ -1986,10 +2199,11 @@ test('sends carry the disappearing timer and view-once flag only when chosen', a
   assert.equal(form.get('viewOnce'), 'true');
   assert.equal(form.get('ttlSeconds'), '30');
   assert.equal(form.get('receiver'), other);
+  assert.equal(form.get('clientId'), 'view-once-1', 'multipart sends carry the key too');
   await realChatService.sendMessage({
     conversationId: `user:${other}`,
     text: 'Plain',
     clientId: 'plain-key-1',
   });
-  assert.deepEqual(Object.keys(JSON.parse(bodies[2])).sort(), ['message', 'receiver']);
+  assert.deepEqual(Object.keys(JSON.parse(bodies[2])).sort(), ['clientId', 'message', 'receiver']);
 });

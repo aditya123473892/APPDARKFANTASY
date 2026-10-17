@@ -28,6 +28,11 @@ export function unreadFor(key: string): number {
 export function watchHistory(key: string): void {
   histories.add(key);
 }
+/** Stop resyncing a conversation the viewer can no longer read. */
+export function forgetHistory(key: string): void {
+  histories.delete(key);
+  overlays.delete(key);
+}
 const compareMessages = (a: Message, b: Message) =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id);
 function sorted(rows: Message[]): Message[] {
@@ -70,6 +75,10 @@ export function mergeMessage(message: Message, deleted = false): void {
   const next = preserveRead(message);
   if (!deleted && message.senderId === sessionIdentity.userId) {
     const state = useOutbox.getState();
+    // The server echoes the idempotency key, so the socket echo of a send can
+    // settle its outbox entry even if the HTTP response never arrives.
+    const sent = message.clientId ? state.items[message.clientId] : undefined;
+    if (sent?.conversationId === key) state.remove(sent.clientId);
     for (const item of Object.values(state.items))
       if (item.conversationId === key && item.status === 'uncertain' && item.text === message.text)
         state.setResync(item.clientId, undefined);
@@ -218,8 +227,7 @@ export function acceptGroupRemoved(value: unknown): void {
       : null;
   if (!isObjectId(groupId)) return;
   const key = `group:${groupId}`;
-  histories.delete(key);
-  overlays.delete(key);
+  forgetHistory(key);
   queryClient.setQueryData<Conversation[]>(queryKeys.conversations, (items) =>
     items?.filter((item) => item.id !== key),
   );

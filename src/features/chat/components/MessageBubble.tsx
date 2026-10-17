@@ -101,6 +101,10 @@ export const MessageBubble = memo(function MessageBubble({
           ? theme.colors.onPrimary
           : theme.colors.textMuted;
 
+  const textColor = mine ? theme.colors.onPrimary : theme.colors.text;
+  const metaColor = mine ? theme.colors.onPrimary : theme.colors.textMuted;
+  const hasMedia = Boolean(message.media?.length);
+
   return (
     <View
       style={[
@@ -116,32 +120,31 @@ export const MessageBubble = memo(function MessageBubble({
         accessibilityHint={failed ? 'Opens send-status options' : 'Long press for message actions'}
         onPress={failed ? openFailedActions : undefined}
         onLongPress={() => onActions(message)}
+        delayLongPress={320}
         style={[
           styles.bubble,
           mine
             ? [
                 { backgroundColor: theme.colors.primary },
                 !first && styles.mineJoinTop,
-                styles.mineJoinBottom,
+                !last && styles.mineJoinBottom,
+                last && styles.mineTail,
               ]
             : [
-                { backgroundColor: theme.colors.bubbleIn, borderColor: theme.colors.border },
-                styles.theirBubble,
+                { backgroundColor: theme.colors.bubbleIn },
                 !first && styles.theirJoinTop,
-                styles.theirJoinBottom,
+                !last && styles.theirJoinBottom,
+                last && styles.theirTail,
               ],
           failed && { borderWidth: 1, borderColor: theme.colors.danger },
         ]}
       >
         {replyPreview ? <ReplyPreview {...replyPreview} mine={mine} /> : null}
         {!mine && first && message.senderName ? (
-          <Text variant="caption" color="primary">
+          <Text variant="label" color="primary" numberOfLines={1} style={styles.sender}>
             {message.senderName}
           </Text>
         ) : null}
-        <Text selectable style={{ color: mine ? theme.colors.onPrimary : theme.colors.text }}>
-          {message.text}
-        </Text>
         {message.viewOnce && message.media?.[0] ? (
           <ViewOnceAttachment
             media={message.media[0]}
@@ -159,13 +162,16 @@ export const MessageBubble = memo(function MessageBubble({
           ))
         )}
         {message.expiresAt && !message.viewOnce ? (
-          <ExpiryCountdown
-            expiresAt={message.expiresAt}
-            color={mine ? theme.colors.onPrimary : theme.colors.textMuted}
-          />
+          <ExpiryCountdown expiresAt={message.expiresAt} color={metaColor} />
         ) : null}
-        {last || failed ? (
-          <View style={[styles.meta, mine && styles.metaMine]}>
+        {/* Text and time share a wrapping row: short messages keep the time inline, long ones drop it below. */}
+        <View style={[styles.content, hasMedia && !message.text && styles.contentMediaOnly]}>
+          {message.text ? (
+            <Text selectable style={[styles.text, { color: textColor }]}>
+              {message.text}
+            </Text>
+          ) : null}
+          <View style={styles.meta}>
             {failed ? (
               <Pressable
                 accessibilityRole="button"
@@ -176,7 +182,7 @@ export const MessageBubble = memo(function MessageBubble({
               >
                 <Ionicons
                   name="refresh"
-                  size={18}
+                  size={16}
                   color={mine ? theme.colors.onPrimary : theme.colors.danger}
                 />
                 <Text
@@ -188,50 +194,59 @@ export const MessageBubble = memo(function MessageBubble({
               </Pressable>
             ) : (
               <>
-                <Text
-                  variant="caption"
-                  style={{ color: mine ? theme.colors.onPrimary : theme.colors.textMuted }}
-                >
+                <Text variant="caption" style={[styles.time, { color: metaColor }]}>
                   {message.status === 'sending' ? 'Sending…' : time}
                 </Text>
                 {mine && (!group || message.local) ? (
-                  <Ionicons name={statusIcon} size={14} color={statusColor} />
+                  <Ionicons name={statusIcon} size={15} color={statusColor} />
                 ) : null}
               </>
             )}
           </View>
-        ) : null}
+        </View>
       </Pressable>
     </View>
   );
 });
 
-const BUBBLE = radius.bubble;
-const JOIN = radius.tail;
+const BUBBLE = radius.bubble + 2;
+const JOIN = radius.tail + 2;
 const styles = StyleSheet.create({
   row: { maxWidth: '100%' },
-  mineRow: { alignItems: 'flex-end', paddingLeft: '18%' },
-  theirRow: { alignItems: 'flex-start', paddingRight: '18%' },
+  mineRow: { alignItems: 'flex-end', paddingLeft: '16%' },
+  theirRow: { alignItems: 'flex-start', paddingRight: '16%' },
   grouped: { marginBottom: 2 },
-  groupEnd: { marginBottom: spacing.md },
+  groupEnd: { marginBottom: spacing.sm + 2 },
   bubble: {
     maxWidth: 560,
     borderRadius: BUBBLE,
-    paddingHorizontal: spacing.md + 2,
-    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs + 3,
+    paddingBottom: spacing.xs + 1,
   },
-  theirBubble: { borderWidth: StyleSheet.hairlineWidth },
   mineJoinTop: { borderTopRightRadius: JOIN },
   mineJoinBottom: { borderBottomRightRadius: JOIN },
+  mineTail: { borderBottomRightRadius: radius.tail },
   theirJoinTop: { borderTopLeftRadius: JOIN },
   theirJoinBottom: { borderBottomLeftRadius: JOIN },
+  theirTail: { borderBottomLeftRadius: radius.tail },
+  sender: { marginBottom: 2 },
+  content: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    columnGap: spacing.sm,
+  },
+  contentMediaOnly: { justifyContent: 'flex-end', marginTop: spacing.xs },
+  text: { flexShrink: 1 },
   meta: {
+    marginLeft: 'auto',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-    paddingHorizontal: spacing.xs,
+    gap: 3,
+    paddingTop: 2,
+    paddingBottom: 1,
   },
-  metaMine: { justifyContent: 'flex-end' },
+  time: { fontSize: 11, lineHeight: 14, opacity: 0.85 },
   retry: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 24 },
 });

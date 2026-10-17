@@ -1,11 +1,41 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useMutationState, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { toast } from '@/components/ui/Toast';
 import { describeError } from '@/services/errors';
 import { queryKeys } from '@/services/queryKeys';
 import { requestsService } from '../services';
+import { followUser } from '../services/requestsService.real';
 import type { ConnectionRequest, RequestsResult } from '../types';
+
+/**
+ * Follow request ("interest") from a profile or discovery row. The backend exposes no
+ * outgoing-request state, so this session's successful request is the only "Requested"
+ * signal. State is read from the mutation cache by user id, so it is shared between screens
+ * and never leaks between recycled list rows.
+ */
+export function useFollowUser(userId: string) {
+  const mutationKey = ['requests', 'follow', userId];
+  const mutation = useMutation({
+    mutationKey,
+    mutationFn: () => followUser(userId),
+    onSuccess: () => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      toast.success('Follow request sent');
+    },
+    onError: (error) =>
+      toast.error(describeError(error, 'Unable to follow this user. A request may already exist.')),
+  });
+  const statuses = useMutationState({
+    filters: { mutationKey, exact: true },
+    select: (item) => item.state.status,
+  });
+  return {
+    follow: () => mutation.mutate(),
+    requested: statuses.includes('success'),
+    pending: statuses.includes('pending'),
+  };
+}
 
 export function useRequests() {
   return useQuery({ queryKey: queryKeys.requests, queryFn: () => requestsService.list() });

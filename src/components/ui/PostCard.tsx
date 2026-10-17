@@ -7,6 +7,7 @@ import {
   ScrollView,
   Share,
   StyleSheet,
+  TextInput,
   View,
   type LayoutChangeEvent,
 } from 'react-native';
@@ -18,7 +19,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import type { Post, PostMedia } from '@/features/feed/types';
-import { radius, spacing } from '@/theme';
+import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { formatRelativeTime } from '@/utils/formatters';
 import { Avatar } from './Avatar';
@@ -27,11 +28,12 @@ import { RemoteMedia } from './RemoteMedia';
 import { useAddComment, useComments, useDeleteComment } from '@/features/feed/hooks/useFeed';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { createClientId } from '@/utils/clientId';
-import { Input } from './Input';
 import { Button } from './Button';
 import { Loader } from './Loader';
 import { Badge } from './Badge';
 import { ThreadLine } from './ThreadLine';
+
+const AVATAR = 38;
 
 function RichText({ body }: { body: string }): React.JSX.Element {
   const chunks = body.split(/([#@][\w]+)/g);
@@ -71,7 +73,7 @@ function MediaGallery({ media }: { media: PostMedia[] }): React.JSX.Element {
           onMomentumScrollEnd={(event) =>
             setActive(Math.round(event.nativeEvent.contentOffset.x / width))
           }
-          style={[styles.mediaScroller, { borderColor: theme.colors.border }]}
+          style={[styles.mediaScroller, { backgroundColor: theme.colors.surfaceMuted }]}
         >
           {media.map((item, index) => (
             <RemoteMedia
@@ -116,6 +118,7 @@ function Comments({ post }: { post: Post }): React.JSX.Element {
   const add = useAddComment(post.id);
   const remove = useDeleteComment(post.id);
   const rows = comments.data?.pages.flatMap((page) => page.comments) ?? [];
+  const canSubmit = Boolean(draft.trim()) && !add.isPending;
 
   const submit = () => {
     const text = draft.trim();
@@ -142,6 +145,39 @@ function Comments({ post }: { post: Post }): React.JSX.Element {
 
   return (
     <View style={styles.comments}>
+      <View style={[styles.commentField, { backgroundColor: theme.colors.surfaceMuted }]}>
+        <TextInput
+          accessibilityLabel="Write a comment"
+          placeholder="Add a reply…"
+          placeholderTextColor={theme.colors.textMuted}
+          selectionColor={theme.colors.primary}
+          cursorColor={theme.colors.primary}
+          maxFontSizeMultiplier={typography.maxFontScale}
+          value={draft}
+          onChangeText={setDraft}
+          multiline
+          maxLength={COMMENT_MAX}
+          style={[styles.commentInput, { color: theme.colors.text }]}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Comment"
+          accessibilityState={{ disabled: !canSubmit, busy: add.isPending }}
+          disabled={!canSubmit}
+          onPress={submit}
+          hitSlop={6}
+          style={[
+            styles.commentSend,
+            { backgroundColor: canSubmit ? theme.colors.primary : theme.palette.transparent },
+          ]}
+        >
+          <Ionicons
+            name="arrow-up"
+            size={18}
+            color={canSubmit ? theme.colors.onPrimary : theme.colors.textMuted}
+          />
+        </Pressable>
+      </View>
       {comments.isPending ? (
         <Loader />
       ) : comments.isError ? (
@@ -155,8 +191,9 @@ function Comments({ post }: { post: Post }): React.JSX.Element {
           const canDelete = !item.pending && (item.author.id === me || post.user.id === me);
           return (
             <View key={item.id} style={[styles.comment, item.pending && styles.pending]}>
+              <Avatar uri={item.author.avatarUri} label={item.author.name} size={26} />
               <View style={styles.commentCopy}>
-                <Text variant="caption" weight="bold">
+                <Text variant="label" numberOfLines={1}>
                   {item.author.name}
                   {item.createdAt ? (
                     <Text variant="caption" color="muted">
@@ -171,7 +208,7 @@ function Comments({ post }: { post: Post }): React.JSX.Element {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Delete comment"
-                  hitSlop={8}
+                  hitSlop={10}
                   disabled={remove.isPending}
                   onPress={() => confirmDelete(item.id)}
                 >
@@ -183,7 +220,7 @@ function Comments({ post }: { post: Post }): React.JSX.Element {
         })
       ) : (
         <Text color="muted" variant="caption">
-          No comments yet. Start the conversation.
+          No replies yet. Start the conversation.
         </Text>
       )}
       {comments.hasNextPage ? (
@@ -195,22 +232,49 @@ function Comments({ post }: { post: Post }): React.JSX.Element {
           onPress={() => void comments.fetchNextPage()}
         />
       ) : null}
-      <Input
-        accessibilityLabel="Write a comment"
-        placeholder="Write a comment"
-        value={draft}
-        onChangeText={setDraft}
-        multiline
-        maxLength={COMMENT_MAX}
-      />
-      <Button
-        label="Comment"
-        size="sm"
-        loading={add.isPending}
-        disabled={!draft.trim() || add.isPending}
-        onPress={submit}
-      />
     </View>
+  );
+}
+
+/** Icon + optional count. Zero counts are hidden to keep the row quiet. */
+function Action({
+  icon,
+  count,
+  color,
+  label,
+  selected,
+  disabled,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  count?: number;
+  color: string;
+  label: string;
+  selected?: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}): React.JSX.Element {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={selected === undefined ? { disabled } : { selected, disabled }}
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={4}
+      style={({ pressed }) => [
+        styles.action,
+        pressed && { backgroundColor: theme.colors.surfacePressed },
+      ]}
+    >
+      <Ionicons name={icon} size={21} color={color} />
+      {count ? (
+        <Text variant="label" weight="medium" style={{ color }}>
+          {count}
+        </Text>
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -231,15 +295,21 @@ export const PostCard = memo(function PostCard({
   const [showComments, setShowComments] = useState(false);
   const scale = useSharedValue(1);
   const likeStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-  const long = post.body.length > 220;
+  const long = post.body.length > 280;
+  const meta = [
+    post.user.handle ? `@${post.user.handle}` : null,
+    post.audience === 'connections' ? 'Connections' : null,
+    post.audience === 'private' ? 'Private' : null,
+    post.status && post.status !== 'approved' ? post.status : null,
+  ].filter(Boolean);
 
   const like = (): void => {
     if (!onToggleLike || post.likeStateKnown === false) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     scale.set(
       withSequence(
-        withTiming(0.75, { duration: 80 }),
-        withSpring(1, { damping: 8, stiffness: 240 }),
+        withTiming(0.7, { duration: 80 }),
+        withSpring(1, { damping: 7, stiffness: 260 }),
       ),
     );
     onToggleLike(post);
@@ -247,184 +317,180 @@ export const PostCard = memo(function PostCard({
   const share = (): void => {
     void Share.share({ message: `${post.user.name} on DARKFANTASY: “${post.body}”` });
   };
+  const openAuthor = onOpenAuthor ? () => onOpenAuthor(post) : undefined;
 
   return (
-    <View
-      style={[
-        styles.card,
-        { backgroundColor: theme.colors.background, borderColor: theme.colors.border },
-      ]}
-    >
+    <View style={[styles.card, { borderBottomColor: theme.colors.divider }]}>
       <View style={styles.avatarColumn}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`View ${post.user.name}'s profile`}
-          disabled={!onOpenAuthor}
-          onPress={() => onOpenAuthor?.(post)}
+          disabled={!openAuthor}
+          onPress={openAuthor}
         >
-          <Avatar uri={post.user.avatarUri} label={post.user.name} size={40} />
+          <Avatar uri={post.user.avatarUri} label={post.user.name} size={AVATAR} />
         </Pressable>
-        <ThreadLine />
+        {showComments ? <ThreadLine /> : null}
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`View ${post.user.name}'s profile`}
-        disabled={!onOpenAuthor}
-        onPress={() => onOpenAuthor?.(post)}
-        style={styles.header}
-      >
-        <View style={styles.headerCopy}>
-          <View style={styles.nameRow}>
-            <Text variant="label" serif numberOfLines={1} style={styles.name}>
+
+      <View style={styles.body}>
+        <View style={styles.header}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${post.user.name}'s profile`}
+            disabled={!openAuthor}
+            onPress={openAuthor}
+            hitSlop={{ top: 8, bottom: 4 }}
+            style={styles.author}
+          >
+            <Text variant="label" numberOfLines={1} style={styles.name}>
               {post.user.name}
             </Text>
             {post.user.verified ? <Badge variant="verified" /> : null}
-            <Text variant="caption" color="muted">
-              · {formatRelativeTime(post.createdAt)}
-            </Text>
-          </View>
-          <Text variant="caption" color="muted" numberOfLines={1}>
-            {post.user.handle ? `@${post.user.handle} · ` : ''}
-            {post.audience === 'connections' ? ' · Connections' : ''}
-            {post.audience === 'private' ? ' · Private' : ''}
-            {post.status && post.status !== 'approved' ? ` · ${post.status}` : ''}
+          </Pressable>
+          <Text variant="caption" color="muted" style={styles.time}>
+            {formatRelativeTime(post.createdAt)}
           </Text>
+          {onDelete ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Delete post"
+              hitSlop={10}
+              onPress={() =>
+                Alert.alert('Delete this post?', 'Its likes and comments are removed too.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => onDelete(post) },
+                ])
+              }
+              style={styles.more}
+            >
+              <Ionicons name="trash-outline" size={17} color={theme.colors.textMuted} />
+            </Pressable>
+          ) : null}
         </View>
-      </Pressable>
-      {onDelete ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Delete post"
-          hitSlop={8}
-          onPress={() =>
-            Alert.alert('Delete this post?', 'Its likes and comments are removed too.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Delete', style: 'destructive', onPress: () => onDelete(post) },
-            ])
-          }
-          style={styles.delete}
-        >
-          <Ionicons name="trash-outline" size={18} color={theme.colors.textMuted} />
-        </Pressable>
-      ) : null}
-
-      <Pressable
-        disabled={!long || expanded}
-        onPress={() => setExpanded(true)}
-        accessibilityHint={long && !expanded ? 'Shows the full post' : undefined}
-      >
-        <Text numberOfLines={expanded ? undefined : 6}>
-          <RichText body={post.body} />
-        </Text>
-        {long && !expanded ? (
-          <Text variant="label" color="primary" style={styles.more}>
-            Read more
+        {meta.length ? (
+          <Text variant="caption" color="muted" numberOfLines={1} style={styles.meta}>
+            {meta.join(' · ')}
           </Text>
         ) : null}
-      </Pressable>
 
-      {post.media?.length ? <MediaGallery media={post.media} /> : null}
-
-      <View style={[styles.actions, { borderTopColor: theme.colors.divider }]}>
-        <Animated.View style={likeStyle}>
+        {post.body ? (
           <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={post.liked ? 'Unlike post' : 'Like post'}
-            accessibilityState={{ selected: post.liked }}
-            onPress={like}
-            disabled={!onToggleLike || post.likeStateKnown === false}
-            hitSlop={4}
-            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+            disabled={!long || expanded}
+            onPress={() => setExpanded(true)}
+            accessibilityHint={long && !expanded ? 'Shows the full post' : undefined}
+            style={styles.text}
           >
-            <Ionicons
-              name={post.liked ? 'heart' : 'heart-outline'}
-              size={21}
-              color={post.liked ? theme.colors.primary : theme.colors.textSecondary}
-            />
-            <Text variant="label" weight="medium" color={post.liked ? 'primary' : 'secondary'}>
-              {post.likes}
+            <Text numberOfLines={expanded ? undefined : 8}>
+              <RichText body={post.body} />
             </Text>
+            {long && !expanded ? (
+              <Text variant="label" color="muted" style={styles.readMore}>
+                Read more
+              </Text>
+            ) : null}
           </Pressable>
-        </Animated.View>
-        <Pressable
-          style={styles.action}
-          accessibilityRole="button"
-          accessibilityLabel={`${post.replies} comments`}
-          onPress={() => setShowComments((shown) => !shown)}
-        >
-          <Ionicons name="chatbubble-outline" size={19} color={theme.colors.textMuted} />
-          <Text variant="label" weight="medium" color="muted">
-            {post.replies}
-          </Text>
-        </Pressable>
-        <View style={styles.grow} />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Share post"
-          onPress={share}
-          hitSlop={4}
-          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-        >
-          <Ionicons name="share-outline" size={20} color={theme.colors.textSecondary} />
-        </Pressable>
+        ) : null}
+
+        {post.media?.length ? <MediaGallery media={post.media} /> : null}
+
+        <View style={styles.actions}>
+          <Animated.View style={likeStyle}>
+            <Action
+              icon={post.liked ? 'heart' : 'heart-outline'}
+              count={post.likes}
+              color={post.liked ? theme.colors.primary : theme.colors.textSecondary}
+              label={`${post.liked ? 'Unlike post' : 'Like post'}. ${post.likes} likes`}
+              selected={post.liked}
+              disabled={!onToggleLike || post.likeStateKnown === false}
+              onPress={like}
+            />
+          </Animated.View>
+          <Action
+            icon={showComments ? 'chatbubble' : 'chatbubble-outline'}
+            count={post.replies}
+            color={showComments ? theme.colors.primaryText : theme.colors.textSecondary}
+            label={`${post.replies} comments. ${showComments ? 'Hide' : 'Show'} comments`}
+            onPress={() => setShowComments((shown) => !shown)}
+          />
+          <Action
+            icon="paper-plane-outline"
+            color={theme.colors.textSecondary}
+            label="Share post"
+            onPress={share}
+          />
+        </View>
+        {showComments ? <Comments post={post} /> : null}
       </View>
-      {showComments ? <Comments post={post} /> : null}
     </View>
   );
 });
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 0,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: spacing.lg,
-    paddingLeft: 56,
-    paddingBottom: spacing.xs,
+    flexDirection: 'row',
     gap: spacing.md,
+    paddingTop: spacing.md + 2,
+    paddingBottom: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  avatarColumn: {
-    position: 'absolute',
-    top: spacing.lg,
-    bottom: spacing.md,
-    left: 0,
-    width: 40,
-    alignItems: 'center',
-  },
-  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  headerCopy: { flex: 1, gap: 2 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  avatarColumn: { width: AVATAR, alignItems: 'center', paddingBottom: spacing.md },
+  body: { flex: 1, minWidth: 0 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2, minHeight: 22 },
+  author: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 1 },
   name: { flexShrink: 1 },
-  more: { marginTop: spacing.xs },
-  mediaWrap: { gap: spacing.sm },
-  mediaScroller: {
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
+  time: { flex: 1 },
+  more: { marginLeft: 'auto', padding: spacing.xxs },
+  meta: { marginTop: 1 },
+  text: { marginTop: spacing.xs },
+  readMore: { marginTop: spacing.xxs },
+  mediaWrap: { gap: spacing.sm, marginTop: spacing.sm + 2 },
+  mediaScroller: { borderRadius: radius.md, overflow: 'hidden' },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: spacing.xs },
   dot: { width: 6, height: 6, borderRadius: radius.full },
   dotActive: { width: 16 },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginHorizontal: -spacing.xs,
-    paddingTop: spacing.xs,
+    marginLeft: -spacing.sm,
+    marginTop: spacing.xs,
   },
   action: {
-    minHeight: spacing.touch - 4,
-    minWidth: spacing.touch - 4,
+    minHeight: 40,
+    minWidth: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs + 2,
+    gap: spacing.xs + 1,
     paddingHorizontal: spacing.sm,
+    borderRadius: radius.full,
   },
-  grow: { flex: 1 },
-  delete: { position: 'absolute', top: spacing.lg, right: spacing.lg },
-  comments: { gap: spacing.md, paddingBottom: spacing.md },
-  comment: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
+  comments: { gap: spacing.md, paddingTop: spacing.xs, paddingBottom: spacing.md },
+  commentField: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderRadius: radius.input,
+    paddingLeft: spacing.md + 2,
+    paddingRight: spacing.xs,
+    paddingVertical: spacing.xs,
+    gap: spacing.xs,
+  },
+  commentInput: {
+    flex: 1,
+    minHeight: 32,
+    maxHeight: 120,
+    paddingVertical: spacing.xs + 2,
+    fontSize: typography.size.md,
+    fontFamily: typography.fontFamily,
+  },
+  commentSend: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  comment: { flexDirection: 'row', gap: spacing.sm + 2, alignItems: 'flex-start' },
   commentCopy: { flex: 1, gap: spacing.xxs },
   pending: { opacity: 0.6 },
-  pressed: { opacity: 0.6 },
 });

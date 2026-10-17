@@ -63,27 +63,12 @@ export function ChatInput({
       style={[
         styles.root,
         {
-          borderTopColor: theme.colors.border,
-          backgroundColor: theme.colors.background,
+          borderTopColor: theme.colors.divider,
+          backgroundColor: theme.colors.tabBar,
           paddingBottom: spacing.sm + bottomInset,
         },
       ]}
     >
-      {onAttach && canShareMedia ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Attach photos or videos"
-          disabled={disabled}
-          onPress={onAttach}
-          style={{ width: 40, height: 44, justifyContent: 'center', alignItems: 'center' }}
-        >
-          <Ionicons
-            name="attach-outline"
-            size={24}
-            color={disabled ? theme.colors.textMuted : theme.colors.primary}
-          />
-        </Pressable>
-      ) : null}
       {onTimerPress && canSendMessages ? (
         <Pressable
           accessibilityRole="button"
@@ -112,24 +97,20 @@ export function ChatInput({
           ) : null}
         </Pressable>
       ) : null}
-      <View
-        style={[
-          styles.field,
-          { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border },
-        ]}
-      >
+      <View style={[styles.field, { backgroundColor: theme.colors.surfaceMuted }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Insert smile emoji"
           disabled={disabled || !canSendMessages}
+          hitSlop={4}
           onPress={() => {
             const next = `${value}😊`.slice(0, MAX_LENGTH);
             setValue(next);
             onChangeText?.(next);
           }}
-          style={styles.emoji}
+          style={styles.fieldIcon}
         >
-          <Ionicons name="happy-outline" size={22} color={theme.colors.textMuted} />
+          <Ionicons name="happy-outline" size={23} color={theme.colors.textMuted} />
         </Pressable>
         <TextInput
           accessibilityLabel="Message"
@@ -158,10 +139,27 @@ export function ChatInput({
             {MAX_LENGTH - value.length}
           </Text>
         ) : null}
+        {onAttach && canShareMedia ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Attach photos or videos"
+            disabled={disabled}
+            hitSlop={4}
+            onPress={onAttach}
+            style={styles.fieldIcon}
+          >
+            <Ionicons
+              name="attach"
+              size={24}
+              color={disabled ? theme.colors.textMuted : theme.colors.textSecondary}
+              style={styles.attachIcon}
+            />
+          </Pressable>
+        ) : null}
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={value.trim() ? 'Send message' : 'Voice messages unavailable'}
+        accessibilityLabel="Send message"
         accessibilityState={{ disabled: !canSend }}
         disabled={!canSend}
         onPress={send}
@@ -172,58 +170,61 @@ export function ChatInput({
               ? pressed
                 ? theme.colors.primaryPressed
                 : theme.colors.primary
-              : theme.colors.surfaceElevated,
+              : theme.colors.surfaceMuted,
           },
         ]}
       >
         <Ionicons
-          name={value.trim() ? 'send-outline' : 'mic-outline'}
-          size={22}
+          name="send"
+          size={19}
           color={canSend ? theme.colors.onPrimary : theme.colors.textMuted}
+          style={styles.sendIcon}
         />
       </Pressable>
     </View>
   );
 }
 
+const FIELD = 44;
 const styles = StyleSheet.create({
   root: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm - 2,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: spacing.sm,
+    gap: spacing.sm - 2,
   },
   field: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: radius.input,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: spacing.lg,
-    justifyContent: 'center',
+    minHeight: FIELD,
+    borderRadius: FIELD / 2,
+    paddingHorizontal: spacing.xs,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
   },
   input: {
     flex: 1,
     fontFamily: typography.fontFamily,
-    maxHeight: 132,
-    minHeight: 44,
-    paddingTop: spacing.md - 1,
-    paddingBottom: spacing.md - 1,
+    maxHeight: 140,
+    minHeight: FIELD,
+    paddingHorizontal: spacing.xs,
+    paddingTop: 11,
+    paddingBottom: 11,
     fontSize: typography.size.md,
     lineHeight: typography.lineHeight.md - 2,
   },
-  counter: { position: 'absolute', right: spacing.md, top: spacing.xs },
-  emoji: { minHeight: 44, width: 32, alignItems: 'flex-start', justifyContent: 'center' },
-  timer: { width: 36, height: 44, justifyContent: 'center', alignItems: 'center' },
+  counter: { position: 'absolute', right: spacing.md, top: 2 },
+  fieldIcon: { width: 38, height: FIELD, alignItems: 'center', justifyContent: 'center' },
+  attachIcon: { transform: [{ rotate: '45deg' }] },
+  timer: { width: 36, height: FIELD, justifyContent: 'center', alignItems: 'center' },
   timerLabel: { fontSize: 10, lineHeight: 12, marginTop: -2 },
   send: {
-    width: 46,
-    height: 46,
+    width: FIELD,
+    height: FIELD,
     borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sendIcon: { marginLeft: 2 },
 });

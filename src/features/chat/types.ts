@@ -5,7 +5,7 @@ export type LocalMessageStatus = MessageStatus | 'sending' | 'failed-definitive'
 
 export type Message = {
   id: string;
-  /** Local REST-response correlation only; never sent as an idempotency key. */
+  /** Idempotency key: sent with each send attempt, echoed back on the viewer's own messages. */
   clientId?: string;
   conversationId: string;
   senderId: string;

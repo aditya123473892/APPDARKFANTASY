@@ -7,11 +7,11 @@ export interface ChatService {
   getConversation(conversationId: string): Promise<Conversation>;
   /** Entire history; local windowing does not issue additional requests. */
   listMessages(conversationId: string): Promise<Message[]>;
-  /** clientId is local correlation only. */
+  /** clientId is the server idempotency key, reused when the same send is retried. */
   sendMessage(input: SendMessageInput): Promise<Message>;
   editMessage(conversationId: string, messageId: string, newMessage: string): Promise<void>;
   deleteMessage(conversationId: string, messageId: string): Promise<void>;
   markRead(conversationId: string, allowed?: () => boolean): Promise<void>;
-  /** Ephemeral typing indicator for the other participants. */
+  /** Ephemeral typing indicator for the other participants; `false` clears it. */
   setTyping(conversationId: string, isTyping: boolean): void;
 }

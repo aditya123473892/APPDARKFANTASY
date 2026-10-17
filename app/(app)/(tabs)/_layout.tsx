@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Tabs } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUnreadMessageCount } from '@/features/chat/hooks/useChat';
 import { useIncomingRequestCount } from '@/features/requests/hooks/useRequests';
-import { spacing, typography } from '@/theme';
+import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { useRoles } from '@/features/auth/hooks/useCurrentUser';
 import { hasCapability, type Capability } from '@/features/auth/permissions';
@@ -93,7 +93,13 @@ export default function TabsLayout(): React.JSX.Element {
           },
           tabBarItemStyle: styles.item,
           tabBarIcon: ({ focused, color }) => (
-            <Ionicons name={focused ? pair[0] : pair[1]} size={24} color={color} />
+            <View style={[styles.icon, focused && { backgroundColor: theme.colors.primarySoft }]}>
+              <Ionicons
+                name={focused ? pair[0] : pair[1]}
+                size={22}
+                color={focused ? theme.colors.primaryText : color}
+              />
+            </View>
           ),
         };
       }}
@@ -124,5 +130,12 @@ export default function TabsLayout(): React.JSX.Element {
 }
 const styles = StyleSheet.create({
   item: { minHeight: spacing.touch },
+  icon: {
+    width: 52,
+    height: 30,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   label: { fontSize: typography.size.xs - 1, fontFamily: typography.family.semibold, marginTop: 2 },
 });

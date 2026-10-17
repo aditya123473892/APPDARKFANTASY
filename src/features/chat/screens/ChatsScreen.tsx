@@ -5,13 +5,14 @@ import { FlashList } from '@shopify/flash-list';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { Header, Screen } from '@/components/layout';
-import { EmptyState, Input, Skeleton, Button, Text } from '@/components/ui';
+import { EmptyState, IconButton, SearchField, Skeleton } from '@/components/ui';
 import { Can } from '@/features/auth/components/Access';
 import { useDebounce } from '@/hooks/useDebounce';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
-import { ChatListItem } from '../components/ChatListItem';
+import { CHAT_AVATAR, ChatListItem } from '../components/ChatListItem';
 import { useConversations, useMyId, useChatVisibility } from '../hooks/useChat';
+import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { INBOX_POLL_MS, LOCAL_SEARCH_LABEL, localSearch, prefetchInbox } from '../services/inbox';
 import { chatService } from '../services';
 import type { Conversation } from '../types';
@@ -37,6 +38,7 @@ export function ChatsScreen(): React.JSX.Element {
   const router = useRouter();
   const { theme } = useTheme();
   const myId = useMyId();
+  const showPresence = usePreferences((state) => state.showActiveStatus);
   const visible = useChatVisibility();
   const [previewRefresh, setPreviewRefresh] = useState(0);
   const prefetchTasks = useRef(0);
@@ -89,34 +91,33 @@ export function ChatsScreen(): React.JSX.Element {
   return (
     <Screen padded={false}>
       <View style={styles.top}>
-        <Header title="Chats" subtitle="Keep the spark alive" align="left" />
-        <Button
-          label="New message"
-          icon="chatbubble-ellipses-outline"
-          size="sm"
-          onPress={() => router.push('/chat/new')}
+        <Header
+          title="Chats"
+          align="left"
+          action={
+            <View style={styles.actions}>
+              <Can capability="canCreateGroups">
+                <IconButton
+                  icon="people-outline"
+                  label="New group"
+                  onPress={() => router.push('/groups/new')}
+                />
+              </Can>
+              <IconButton
+                icon="create-outline"
+                label="New message"
+                onPress={() => router.push('/chat/new')}
+              />
+            </View>
+          }
         />
-        <Can capability="canCreateGroups">
-          <Button
-            label="New group"
-            icon="people-outline"
-            variant="secondary"
-            size="sm"
-            onPress={() => router.push('/groups/new')}
-          />
-        </Can>
-        <Input
+        <SearchField
           accessibilityLabel={LOCAL_SEARCH_LABEL}
-          icon="search-outline"
-          placeholder="Local search: loaded names and messages"
+          accessibilityHint="Searches loaded names and messages only"
+          placeholder="Search loaded chats and messages"
           value={search}
           onChangeText={setSearch}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
         />
-        <Text variant="caption" color="muted">
-          {LOCAL_SEARCH_LABEL} · Loaded names and messages only
-        </Text>
       </View>
       {isRefetchError && data ? (
         <OfflineBanner message="Can't refresh right now. Showing saved conversations." />
@@ -170,7 +171,12 @@ export function ChatsScreen(): React.JSX.Element {
             )
           }
           renderItem={({ item }) => (
-            <ChatListItem conversation={item} myId={myId} showPresence={false} onPress={open} />
+            <ChatListItem
+              conversation={item}
+              myId={myId}
+              showPresence={showPresence}
+              onPress={open}
+            />
           )}
         />
       )}
@@ -179,13 +185,17 @@ export function ChatsScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  top: { paddingHorizontal: spacing.screen, paddingBottom: spacing.md, gap: spacing.xs },
+  top: { paddingHorizontal: spacing.screen, paddingBottom: spacing.sm + 2, gap: spacing.xs },
+  actions: { flexDirection: 'row', alignItems: 'center', marginRight: -spacing.sm },
   list: { paddingBottom: spacing.xxl },
   emptyList: { flexGrow: 1 },
-  separator: { height: StyleSheet.hairlineWidth, marginLeft: spacing.screen + 56 + spacing.md },
-  skeleton: { padding: spacing.screen, gap: spacing.xl },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: spacing.screen + CHAT_AVATAR + spacing.md,
+  },
+  skeleton: { paddingHorizontal: spacing.screen, paddingTop: spacing.md, gap: spacing.xl },
   skeletonRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  skeletonAvatar: { width: 56, height: 56, borderRadius: 999 },
+  skeletonAvatar: { width: CHAT_AVATAR, height: CHAT_AVATAR, borderRadius: 999 },
   skeletonCopy: { flex: 1, gap: spacing.sm },
   skeletonName: { width: '35%' },
   skeletonLine: { width: '75%' },

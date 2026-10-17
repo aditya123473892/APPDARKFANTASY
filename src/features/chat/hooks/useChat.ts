@@ -210,18 +210,24 @@ export function useTypingNames(conversationId: string): string[] {
 
 const TYPING_REFRESH_MS = 3000;
 
-/** Tells the other participants while the viewer is typing; throttled, and stops on send or clear. */
+/**
+ * Tells the other participants while the viewer is typing: throttled start
+ * pulses, then `isTyping: false` on send, clear, idle, or leaving the room.
+ */
 export function useTypingEmitter(conversationId: string) {
   const scope = sessionIdentity.generation;
   const lastSent = useRef(0);
   const stop = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stopTyping = useCallback(() => {
     clearTimeout(stop.current);
-  }, []);
+    if (!lastSent.current) return;
+    lastSent.current = 0;
+    if (isSessionCurrent(scope)) chatService.setTyping(conversationId, false);
+  }, [conversationId, scope]);
   const onChangeText = useCallback(
     (text: string) => {
       if (!isSessionCurrent(scope)) return;
-      if (!conversationId.startsWith('user:') || !text.trim()) return stopTyping();
+      if (!/^(user|group):/.test(conversationId) || !text.trim()) return stopTyping();
       const now = Date.now();
       if (now - lastSent.current > TYPING_REFRESH_MS) {
         lastSent.current = now;
@@ -271,26 +277,27 @@ export function useMarkConversationRead(
   );
   useEffect(() => {
     // Direct read receipts are visible to the sender, so they follow the
-    // reciprocal preference. This contract has no group read command.
+    // reciprocal preference. A group read only moves the viewer's private
+    // cursor (shared with their own devices), so it needs neither.
     const history = queryClient.getQueryData<Message[]>(queryKeys.messages(conversationId));
     if (historyReady && focused && appState === 'active' && history)
       captureFirstUnread(conversationId, history, sessionIdentity.userId ?? '');
+    const group = conversationId.startsWith('group:');
     const allowed = () =>
       focus.current &&
       AppState.currentState === 'active' &&
       useChatConnection.getState().ready &&
       isSessionCurrent(scope) &&
-      usePreferences.getState().readReceipts &&
+      (group || usePreferences.getState().readReceipts) &&
       useAuthStore.getState().status === 'authenticated';
     if (
-      conversationId.startsWith('user:') &&
+      (group || conversationId.startsWith('user:')) &&
       historyReady &&
       latestIncomingId &&
       focused &&
       appState === 'active' &&
       ready &&
-      canSend &&
-      receipts
+      (group || (canSend && receipts))
     ) {
       void chatService.markRead(conversationId, allowed).catch(() => undefined);
     }

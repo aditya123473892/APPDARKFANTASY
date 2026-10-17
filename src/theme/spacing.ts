@@ -12,7 +12,7 @@ export const spacing = {
   giant: 56,
   screen: 16,
   touch: 48,
-  tabBar: 58,
+  tabBar: 62,
   hairline: 1,
   /** Max width for readable content on tablets, foldables, and landscape. */
   contentMax: 680,

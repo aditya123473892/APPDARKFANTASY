@@ -6,13 +6,8 @@ export function DateDivider({ label }: { label: string }): React.JSX.Element {
   const { theme } = useTheme();
   return (
     <View style={styles.row} accessibilityRole="header">
-      <View
-        style={[
-          styles.pill,
-          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-        ]}
-      >
-        <Text variant="caption" color="secondary">
+      <View style={[styles.pill, { backgroundColor: theme.colors.surfaceMuted }]}>
+        <Text variant="caption" weight="semibold" color="secondary">
           {label}
         </Text>
       </View>
@@ -20,10 +15,9 @@ export function DateDivider({ label }: { label: string }): React.JSX.Element {
   );
 }
 const styles = StyleSheet.create({
-  row: { alignItems: 'center', marginVertical: spacing.md },
+  row: { alignItems: 'center', marginTop: spacing.sm, marginBottom: spacing.md },
   pill: {
     borderRadius: radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },

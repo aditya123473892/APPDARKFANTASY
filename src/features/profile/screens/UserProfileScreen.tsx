@@ -1,18 +1,16 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { RefreshControl, ScrollView, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Avatar, Button, EmptyState, Loader, PostCard, Text } from '@/components/ui';
 import { InterestChips } from '../components/InterestChips';
-import { toast } from '@/components/ui/Toast';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useProfile } from '../hooks/useProfiles';
 import { ProfileHeader } from '../components/ProfileHeader';
 import { listUserPosts } from '@/features/feed/services/feedService.real';
 import { useToggleLike } from '@/features/feed/hooks/useFeed';
-import { followUser } from '@/features/requests/services/requestsService.real';
-import { describeError } from '@/services/errors';
+import { useFollowUser } from '@/features/requests/hooks/useRequests';
 import { useTheme } from '@/theme/useTheme';
 import { spacing } from '@/theme';
 export function UserProfileScreen() {
@@ -27,12 +25,7 @@ export function UserProfileScreen() {
     enabled: Boolean(id) && id !== myId,
   });
   const toggleLike = useToggleLike();
-  const follow = useMutation({
-    mutationFn: () => followUser(id),
-    onSuccess: () => toast.success('Follow request sent'),
-    onError: (error) =>
-      toast.error(describeError(error, 'Unable to follow this user. A request may already exist.')),
-  });
+  const follow = useFollowUser(id);
   if (id === myId) return <Redirect href="/profile" />;
   return (
     <Screen padded={false}>
@@ -71,12 +64,12 @@ export function UserProfileScreen() {
                 onPress={() => router.push(`/chat/user:${id}`)}
               />
               <Button
-                label={follow.isSuccess ? 'Requested' : 'Follow'}
+                label={follow.requested ? 'Requested' : 'Follow'}
                 variant="secondary"
                 style={{ flex: 1 }}
-                loading={follow.isPending}
-                disabled={follow.isSuccess}
-                onPress={() => follow.mutate()}
+                loading={follow.pending}
+                disabled={follow.requested}
+                onPress={follow.follow}
               />
             </View>
             <Text variant="subheading">Posts</Text>

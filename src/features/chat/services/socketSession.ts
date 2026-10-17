@@ -13,9 +13,12 @@ import { initializePinning } from '@/services/api/pinning';
 import type { Message } from '../types';
 import { conversationKey, isObjectId, mapMessage, parseMessage } from './chatPayload';
 import {
+  acceptGroupRemoved,
+  acceptGroupUpdated,
   acceptMessage,
   acceptUnread,
   acceptRead,
+  forgetHistory,
   historyVersion,
   knownHistories,
   reconcileHistory,
@@ -59,6 +62,8 @@ function requestOn<T>(
   payload?: unknown,
   allowed?: () => boolean,
   matches?: (value: T) => boolean,
+  /** A 403 here is an expected membership change, not a permission problem. */
+  quiet = false,
 ): Promise<T> {
   const epoch = connectionEpoch;
   const operation = async () => {
@@ -98,7 +103,7 @@ function requestOn<T>(
           error && typeof error === 'object' && 'statusCode' in error
             ? error.statusCode
             : undefined;
-        if (code === 403 && isSessionCurrent(scope))
+        if (code === 403 && !quiet && isSessionCurrent(scope))
           void notifyForbidden(`Bearer ${sessionIdentity.getToken()}`);
         reject(
           new ServiceError(
@@ -133,7 +138,12 @@ function requestOn<T>(
   return result;
 }
 /** Full history; no cursor, limit or request-correlation fields exist. */
-async function historyOn(current: Socket, scope: number, key: string): Promise<Message[]> {
+async function historyOn(
+  current: Socket,
+  scope: number,
+  key: string,
+  quiet = false,
+): Promise<Message[]> {
   const [kind, id] = key.split(':');
   if (!isObjectId(id) || !kind || !['user', 'group'].includes(kind))
     throw new ServiceError('NOT_FOUND');
@@ -145,6 +155,9 @@ async function historyOn(current: Socket, scope: number, key: string): Promise<M
     kind === 'group' ? 'getGroupChatHistory' : 'getChatHistory',
     kind === 'group' ? 'groupChatHistory' : 'chatHistory',
     kind === 'group' ? { groupId: id } : { user2: id },
+    undefined,
+    undefined,
+    quiet,
   );
   assertSessionCurrent(scope);
   if (!Array.isArray(rows)) throw new ServiceError('UNKNOWN');
@@ -153,9 +166,33 @@ async function historyOn(current: Socket, scope: number, key: string): Promise<M
   const messages = parsed.map((row) => mapMessage(row, key));
   return reconcileHistory(key, messages, started);
 }
+/** Access to a conversation ended (e.g. removed from a group while offline). */
+const accessLost = (error: unknown) =>
+  error instanceof ServiceError && (error.code === 'FORBIDDEN' || error.code === 'NOT_FOUND');
+function forgetGroup(groupId: string): void {
+  groups.delete(groupId);
+  acceptGroupRemoved({ groupId });
+}
 async function resync(current: Socket, scope: number, epoch: number): Promise<void> {
-  for (const groupId of groups) await requestOn(current, scope, 'joinGroup', undefined, groupId);
-  for (const key of knownHistories()) await historyOn(current, scope, key);
+  // The server already joins every member room on connect; rejoining orders
+  // the room subscription before history so no live message is missed.
+  for (const groupId of [...groups]) {
+    try {
+      await requestOn(current, scope, 'joinGroup', undefined, groupId, undefined, undefined, true);
+    } catch (error) {
+      if (!accessLost(error) || !isSessionCurrent(scope)) throw error;
+      forgetGroup(groupId);
+    }
+  }
+  for (const key of knownHistories()) {
+    try {
+      await historyOn(current, scope, key, true);
+    } catch (error) {
+      if (!accessLost(error) || !isSessionCurrent(scope)) throw error;
+      if (key.startsWith('group:')) forgetGroup(key.slice(6));
+      else forgetHistory(key);
+    }
+  }
   const unread = await requestOn(current, scope, 'getUnreadCount', 'unreadMessageCount');
   assertSessionCurrent(scope);
   if (!acceptUnread(unread)) throw new ServiceError('UNKNOWN');
@@ -219,16 +256,23 @@ export async function connectSocket(): Promise<Socket> {
       if (valid() && raw && typeof raw === 'object' && 'userId' in raw && isObjectId(raw.userId))
         acceptRead(raw.userId);
     });
+    // Direct `{ sender, isTyping }`; group `{ sender, groupId, isTyping }`.
+    // `isTyping: false` clears the indicator; the local TTL covers a lost stop.
     current.on('typing', (raw: unknown) => {
       if (!valid() || !raw || typeof raw !== 'object' || !('sender' in raw)) return;
-      const event = raw as { sender: unknown; groupId?: unknown };
-      if (
-        !isObjectId(event.sender) ||
-        event.sender === sessionIdentity.userId ||
-        event.groupId !== undefined
-      )
-        return;
-      setTyping('user:' + event.sender, event.sender, true);
+      const event = raw as { sender: unknown; groupId?: unknown; isTyping?: unknown };
+      if (!isObjectId(event.sender) || event.sender === sessionIdentity.userId) return;
+      if (event.groupId !== undefined && !isObjectId(event.groupId)) return;
+      const key = event.groupId ? `group:${event.groupId}` : `user:${event.sender}`;
+      setTyping(key, event.sender, event.isTyping !== false);
+    });
+    current.on('groupUpdated', (raw: unknown) => {
+      if (valid()) acceptGroupUpdated(raw);
+    });
+    // Removed, left, or deleted: the server has already detached this socket.
+    current.on('groupRemoved', (raw: unknown) => {
+      if (!valid() || !raw || typeof raw !== 'object' || !('groupId' in raw)) return;
+      if (isObjectId(raw.groupId)) forgetGroup(raw.groupId);
     });
     current.on('disconnect', () => {
       if (!valid()) return;
@@ -328,16 +372,24 @@ export async function socketAck<T>(
   event: string,
   payload?: unknown,
   allowed?: () => boolean,
+  quiet = false,
 ): Promise<T> {
   const scope = sessionIdentity.generation;
   const current = await ensureChatReady();
   assertSessionCurrent(scope);
-  return requestOn<T>(current, scope, event, undefined, payload, allowed);
+  return requestOn<T>(current, scope, event, undefined, payload, allowed, undefined, quiet);
 }
-/** Fire-and-forget typing state; never queued behind history requests. */
-export function emitTyping(payload: { receiver: string }): void {
-  if (isObjectId(payload.receiver) && socket?.connected && isSessionCurrent(socketScope))
-    socket.emit('typing', payload);
+/**
+ * Fire-and-forget typing state; never queued behind history requests and never
+ * opens a connection. Group typing is relayed only to rooms this socket is in.
+ */
+export function emitTyping(
+  payload: { receiver: string; isTyping: boolean } | { groupId: string; isTyping: boolean },
+): void {
+  const id = 'groupId' in payload ? payload.groupId : payload.receiver;
+  if (!isObjectId(id) || !socket?.connected || !isSessionCurrent(socketScope)) return;
+  if (id === sessionIdentity.userId) return;
+  socket.emit('typing', payload);
 }
 export async function getHistory(key: string): Promise<Message[]> {
   const scope = sessionIdentity.generation;

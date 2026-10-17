@@ -9,23 +9,23 @@ import { Avatar, EmptyState, Loader, PostCard, Skeleton, Text } from '@/componen
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
+import { PeopleStrip } from '../components/PeopleStrip';
 import { useFeed, useToggleLike } from '../hooks/useFeed';
 import type { Post } from '../types';
 
 function FeedSkeleton(): React.JSX.Element {
+  const { theme } = useTheme();
   return (
     <View style={styles.skeleton}>
       {[0, 1, 2].map((item) => (
-        <View key={item} style={styles.skeletonCard}>
-          <View style={styles.skeletonRow}>
-            <Skeleton style={styles.skeletonAvatar} />
-            <View style={styles.skeletonCopy}>
-              <Skeleton style={styles.skeletonName} />
-              <Skeleton style={styles.skeletonMeta} />
-            </View>
+        <View key={item} style={[styles.skeletonPost, { borderBottomColor: theme.colors.divider }]}>
+          <Skeleton style={styles.skeletonAvatar} />
+          <View style={styles.skeletonCopy}>
+            <Skeleton style={styles.skeletonName} />
+            <Skeleton />
+            <Skeleton style={styles.skeletonShort} />
+            {item === 0 ? <Skeleton style={styles.skeletonMedia} /> : null}
           </View>
-          <Skeleton />
-          <Skeleton style={styles.skeletonShort} />
         </View>
       ))}
     </View>
@@ -59,25 +59,36 @@ export function FeedScreen(): React.JSX.Element {
     [me?.id, router],
   );
 
-  const composer = me ? (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Create a post"
-      onPress={() => router.push('/create')}
-      style={({ pressed }) => [
-        styles.composer,
-        {
-          backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.background,
-          borderColor: theme.colors.border,
-        },
-      ]}
-    >
-      <Avatar uri={me.avatarUri} label="You" size={36} />
-      <Text color="muted" style={styles.composerText}>
-        Start a post…
-      </Text>
-    </Pressable>
-  ) : null;
+  const header = (
+    <>
+      {me ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Create a post"
+          onPress={() => router.push('/create')}
+          style={({ pressed }) => [
+            styles.composer,
+            { borderBottomColor: theme.colors.divider },
+            pressed && { opacity: 0.7 },
+          ]}
+        >
+          <Avatar uri={me.avatarUri} label="You" size={38} />
+          <View style={styles.composerCopy}>
+            <Text variant="label" numberOfLines={1}>
+              {me.name}
+            </Text>
+            <Text color="muted" numberOfLines={1}>
+              What's on your mind?
+            </Text>
+          </View>
+          <View style={[styles.postPill, { borderColor: theme.colors.border }]}>
+            <Text variant="label">Post</Text>
+          </View>
+        </Pressable>
+      ) : null}
+      <PeopleStrip />
+    </>
+  );
 
   return (
     <Screen padded={false}>
@@ -96,9 +107,7 @@ export function FeedScreen(): React.JSX.Element {
           renderItem={({ item }) => (
             <PostCard post={item} onToggleLike={onToggleLike} onOpenAuthor={onOpenAuthor} />
           )}
-          ItemSeparatorComponent={() => <View style={styles.gap} />}
-          ListHeaderComponent={composer}
-          ListHeaderComponentStyle={styles.header}
+          ListHeaderComponent={header}
           onEndReached={() => {
             if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
           }}
@@ -127,7 +136,7 @@ export function FeedScreen(): React.JSX.Element {
               progressBackgroundColor={theme.colors.surfaceElevated}
             />
           }
-          contentContainerStyle={data.length ? styles.list : [styles.list, styles.empty]}
+          contentContainerStyle={styles.list}
           ListEmptyComponent={
             <EmptyState
               icon="newspaper-outline"
@@ -144,27 +153,34 @@ export function FeedScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  list: { padding: spacing.screen, paddingBottom: spacing.xxxl },
-  empty: { flexGrow: 1 },
-  header: { marginBottom: spacing.md },
-  gap: { height: 0 },
+  list: { paddingHorizontal: spacing.screen, paddingBottom: spacing.xxxl },
   more: { alignItems: 'center', paddingVertical: spacing.lg },
   composer: {
-    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: 0,
+    paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  composerText: { flex: 1 },
-  skeleton: { padding: spacing.screen, gap: spacing.md },
-  skeletonCard: { gap: spacing.md, padding: spacing.lg, borderRadius: radius.lg },
-  skeletonRow: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
-  skeletonAvatar: { width: 42, height: 42, borderRadius: 999 },
+  composerCopy: { flex: 1, gap: 1 },
+  postPill: {
+    minHeight: 34,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skeleton: { paddingHorizontal: spacing.screen },
+  skeletonPost: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  skeletonAvatar: { width: 38, height: 38, borderRadius: radius.full },
   skeletonCopy: { flex: 1, gap: spacing.sm },
-  skeletonName: { width: '40%' },
-  skeletonMeta: { width: '25%', height: 12 },
+  skeletonName: { width: '35%', height: 14 },
   skeletonShort: { width: '72%' },
+  skeletonMedia: { height: 200, borderRadius: radius.md, marginTop: spacing.xs },
 });

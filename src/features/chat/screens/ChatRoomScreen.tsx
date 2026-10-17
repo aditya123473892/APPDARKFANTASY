@@ -17,7 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
-import { Avatar, EmptyState, Loader, Skeleton, Text } from '@/components/ui';
+import { Avatar, Button, EmptyState, IconButton, Loader, Skeleton, Text } from '@/components/ui';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { isServiceError, describeError } from '@/services/errors';
 import { radius, spacing, typography } from '@/theme';
@@ -56,6 +56,8 @@ import { buildRows, type ChatRow as Row } from '../utils/buildRows';
 import { TimerSheet } from '../components/TimerSheet';
 import { timerShortLabel } from '../disappearing';
 import { featureFlags } from '@/config/featureFlags';
+import { usePreferences } from '@/features/settings/store/preferencesStore';
+import { formatPresence } from '@/utils/formatters';
 
 function chooseViewOnce(type?: string | null): Promise<boolean | null> {
   const kind = type?.startsWith('video/') ? 'video' : 'photo';
@@ -157,18 +159,21 @@ export function ChatRoomScreen(): React.JSX.Element {
   const typing = useTypingEmitter(conversationId);
   const typingNames = useTypingNames(conversationId);
   const isGroup = conversation?.kind === 'group' || conversationId.startsWith('group:');
-  const typingLabel =
-    !isGroup && typingNames.length
-      ? isGroup
-        ? typingNames.length === 1
-          ? `${typingNames[0]} is typing…`
-          : `${typingNames.length} people are typing…`
-        : 'typing…'
-      : null;
+  const typingLabel = typingNames.length
+    ? isGroup
+      ? typingNames.length === 1
+        ? `${typingNames[0]} is typing…`
+        : `${typingNames.length} people are typing…`
+      : 'typing…'
+    : null;
 
+  const showPresence = usePreferences((state) => state.showActiveStatus);
+  // Presence is only shown when the backend supplies it and the viewer shares their own.
+  const presenceLabel =
+    !isGroup && showPresence ? formatPresence(conversation?.presence ?? null) : null;
   const subtitle =
     typingLabel ??
-    (isGroup && conversation?.memberCount ? `${conversation.memberCount} members` : null);
+    (isGroup && conversation?.memberCount ? `${conversation.memberCount} members` : presenceLabel);
 
   const latestIncomingId = useMemo(
     () =>
@@ -398,6 +403,16 @@ export function ChatRoomScreen(): React.JSX.Element {
   const participant = conversation?.participant;
   const initialLoading = messagesQuery.isPending && messages.length === 0;
   const loadFailed = messagesQuery.isError && !messagesQuery.data;
+  const openDetails = () => {
+    if (!participant) return;
+    if (conversation?.kind === 'group')
+      router.push({ pathname: '/groups/[id]', params: { id: participant.id } });
+    else router.push(`/profile/${participant.id}`);
+  };
+  const closeEdit = () => {
+    setEditing(undefined);
+    setEditText('');
+  };
 
   return (
     <SafeAreaView
@@ -420,23 +435,28 @@ export function ChatRoomScreen(): React.JSX.Element {
         {participant ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`View ${participant.name}'s profile`}
-            onPress={() =>
-              conversation?.kind === 'group'
-                ? router.push({ pathname: '/groups/[id]', params: { id: participant.id } })
-                : router.push(`/profile/${participant.id}`)
-            }
+            accessibilityLabel={`View ${participant.name}'s ${isGroup ? 'group' : 'profile'}`}
+            onPress={openDetails}
             style={styles.person}
           >
-            <Avatar uri={participant.avatarUri} label={participant.name} size={40} />
+            <Avatar
+              uri={participant.avatarUri}
+              label={participant.name}
+              size={38}
+              online={Boolean(presenceLabel && conversation?.presence?.online)}
+            />
             <View style={styles.personCopy}>
-              <Text variant="subheading" serif numberOfLines={1}>
+              <Text variant="subheading" numberOfLines={1}>
                 {participant.name}
               </Text>
               {subtitle ? (
                 <Text
                   variant="caption"
-                  color={typingLabel ? 'primary' : 'secondary'}
+                  color={
+                    typingLabel || (presenceLabel && conversation?.presence?.online)
+                      ? 'primary'
+                      : 'muted'
+                  }
                   numberOfLines={1}
                   accessibilityLiveRegion="polite"
                 >
@@ -451,64 +471,77 @@ export function ChatRoomScreen(): React.JSX.Element {
             <Skeleton style={styles.headerName} />
           </View>
         )}
+        {participant ? (
+          <IconButton
+            icon={isGroup ? 'people-circle-outline' : 'person-circle-outline'}
+            label={isGroup ? 'Group info' : 'View profile'}
+            onPress={openDetails}
+          />
+        ) : null}
       </View>
 
       {messagesQuery.isRefetchError && messagesQuery.data ? (
         <OfflineBanner message="Can't reach the server. We'll keep trying." />
       ) : null}
 
-      <Modal
-        visible={Boolean(editing)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setEditing(undefined);
-          setEditText('');
-        }}
-      >
-        <View
-          style={{
-            flex: 1,
-            justifyContent: 'center',
-            padding: 24,
-            backgroundColor: theme.colors.overlay,
-          }}
-        >
-          <View
-            style={{
-              padding: 20,
-              gap: 16,
-              backgroundColor: theme.colors.surfaceElevated,
-              borderRadius: 16,
-            }}
-          >
-            <Text variant="subheading">Edit message</Text>
+      <Modal visible={Boolean(editing)} transparent animationType="fade" onRequestClose={closeEdit}>
+        <View style={[styles.editBackdrop, { backgroundColor: theme.colors.overlay }]}>
+          <View style={[styles.editCard, { backgroundColor: theme.colors.surfaceElevated }]}>
+            <View style={styles.editTitle}>
+              <Ionicons name="pencil" size={18} color={theme.colors.primaryText} />
+              <Text variant="subheading">Edit message</Text>
+            </View>
             <TextInput
               accessibilityLabel="Edit message text"
               multiline
+              autoFocus
               maxLength={2000}
               value={editText}
               onChangeText={setEditText}
-              style={{ color: theme.colors.text, minHeight: 80, fontFamily: typography.fontFamily }}
+              selectionColor={theme.colors.primary}
+              cursorColor={theme.colors.primary}
+              maxFontSizeMultiplier={typography.maxFontScale}
+              style={[
+                styles.editInput,
+                { color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted },
+              ]}
             />
-            <Pressable accessibilityRole="button" onPress={saveEdit}>
-              <Text color="primary">Save edit</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                setEditing(undefined);
-                setEditText('');
-              }}
-            >
-              <Text>Cancel</Text>
-            </Pressable>
+            <View style={styles.editActions}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                size="sm"
+                fullWidth={false}
+                onPress={closeEdit}
+                style={styles.editAction}
+              />
+              <Button
+                label="Save edit"
+                size="sm"
+                fullWidth={false}
+                disabled={!editText.trim()}
+                onPress={saveEdit}
+                style={styles.editAction}
+              />
+            </View>
           </View>
         </View>
       </Modal>
       {!isGroup && firstUnread && allMessages.some((message) => message.id === firstUnread) ? (
-        <Pressable accessibilityRole="button" onPress={jumpFirstUnread} style={{ padding: 12 }}>
-          <Text color="primary">Jump to first unread</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={jumpFirstUnread}
+          style={({ pressed }) => [
+            styles.unreadBar,
+            {
+              backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.primarySoft,
+            },
+          ]}
+        >
+          <Ionicons name="arrow-up" size={16} color={theme.colors.primaryText} />
+          <Text variant="label" color="primary">
+            Jump to first unread
+          </Text>
         </Pressable>
       ) : null}
       <KeyboardAvoidingScreen>
@@ -524,7 +557,11 @@ export function ChatRoomScreen(): React.JSX.Element {
             <EmptyState
               icon="sparkles-outline"
               title="No messages yet"
-              message={`Start the conversation in ${participant.name}.`}
+              message={
+                isGroup
+                  ? `Start the conversation in ${participant.name}.`
+                  : `Say hello to ${participant.name} and start the conversation.`
+              }
             />
           ) : (
             <FlashList
@@ -581,8 +618,14 @@ export function ChatRoomScreen(): React.JSX.Element {
                   },
                 ]}
               >
-                <Ionicons name="arrow-down" size={20} color={theme.colors.text} />
-                {newIncoming > 0 ? <Text variant="caption">{newIncoming}</Text> : null}
+                <Ionicons name="chevron-down" size={22} color={theme.colors.text} />
+                {newIncoming > 0 ? (
+                  <View style={[styles.jumpBadge, { backgroundColor: theme.colors.primary }]}>
+                    <Text variant="caption" weight="bold" color="inverse">
+                      {newIncoming > 99 ? '99+' : newIncoming}
+                    </Text>
+                  </View>
+                ) : null}
               </Pressable>
             </Animated.View>
           ) : null}
@@ -626,11 +669,11 @@ const styles = StyleSheet.create({
   inverted: { transform: [{ scaleY: -1 }] },
   root: { flex: 1 },
   header: {
-    minHeight: 60,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   back: {
@@ -640,9 +683,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  person: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 48 },
-  personCopy: { flex: 1 },
-  headerAvatar: { width: 40, height: 40, borderRadius: radius.full },
+  person: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm + 2,
+    minHeight: 48,
+    minWidth: 0,
+  },
+  personCopy: { flex: 1, minWidth: 0 },
+  headerAvatar: { width: 38, height: 38, borderRadius: radius.full },
   headerName: { width: 120 },
   body: { flex: 1, width: '100%', maxWidth: spacing.contentMax + 120, alignSelf: 'center' },
   list: { paddingHorizontal: spacing.screen, paddingVertical: spacing.md },
@@ -659,4 +709,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  jumpBadge: {
+    position: 'absolute',
+    top: -8,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs + 2,
+    minHeight: 40,
+  },
+  editBackdrop: { flex: 1, justifyContent: 'center', padding: spacing.xl },
+  editCard: {
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
+    padding: spacing.lg + 2,
+    gap: spacing.md,
+    borderRadius: radius.lg,
+  },
+  editTitle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  editInput: {
+    minHeight: 96,
+    maxHeight: 220,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+    textAlignVertical: 'top',
+    fontSize: typography.size.md,
+    lineHeight: typography.lineHeight.md,
+    fontFamily: typography.fontFamily,
+  },
+  editActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  editAction: { minWidth: 96 },
 });
