@@ -26,6 +26,7 @@ import { NotificationModule } from './notification/notification.module';
 import { ContactModule } from './contact/contact.module';
 import { memoryStorage } from 'multer';
 import { PhotosModule } from './photos/photos.module';
+import { VaultModule } from './vault/vault.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { PhotosModule } from './photos/photos.module';
       limits: { fileSize: 5 * 1024 * 1024, files: 5, fields: 30, parts: 35 },
     }),
     PhotosModule,
+    VaultModule,
     AuthModule,
     UsersModule,
     MailModule,

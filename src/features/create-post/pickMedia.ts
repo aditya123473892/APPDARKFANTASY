@@ -3,6 +3,8 @@ import { Alert, Linking, Platform } from 'react-native';
 import type { UploadAsset } from '@/features/feed/types';
 
 async function permission(): Promise<boolean> {
+  // Android's system photo picker grants access to the selected URI; no broad read permission.
+  if (Platform.OS === 'android') return true;
   if (Platform.OS === 'web') return true;
   const status = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status.granted) return true;

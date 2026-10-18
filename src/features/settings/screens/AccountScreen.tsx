@@ -15,7 +15,7 @@ export function AccountScreen(): React.JSX.Element {
   const deletion = useMutation({
     mutationFn: async () => unwrap((await apiClient.delete('/users/me')).data),
     onSuccess: async () => {
-      await useAuthStore.getState().logout();
+      await useAuthStore.getState().logout({ discardUnsynced: true });
       toast.success('Your account is disabled and permanent deletion is queued.');
     },
     onError: () => toast.error('Unable to request deletion. Please try again.'),

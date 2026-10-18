@@ -236,7 +236,7 @@ export class S3BucketService implements OnModuleInit {
       })
       .promise();
   }
-  async getSignedURL(Key: string, Bucket?: string, expiresInSeconds = 120) {
+  async getSignedURL(Key: string, Bucket?: string, expiresInSeconds = 120, noStore = false) {
     if (!Key) return null;
     this.assertBucket(Bucket);
     await this.ensurePrivate();
@@ -244,6 +244,7 @@ export class S3BucketService implements OnModuleInit {
       Bucket: this.bucket,
       Key,
       Expires: Math.max(30, Math.min(300, Number(expiresInSeconds) || 120)),
+      ...(noStore ? { ResponseCacheControl: 'no-store, private' } : {}),
     });
   }
   async deleteOne(Key: string, Bucket?: string) {

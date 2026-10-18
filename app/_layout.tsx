@@ -50,10 +50,10 @@ function RootNavigator(): React.JSX.Element {
     if (status === 'loading') return;
     const inAuth = segments[0] === '(auth)';
     if (status === 'authenticated' && inAuth) router.replace('/home');
-    else if (status === 'unauthenticated' && !inAuth) router.replace('/login');
+    else if (status === 'unauthenticated' && !inAuth && (segments as string[])[0] !== 'vault') router.replace('/login');
     else if (
       ['blocked', 'unverified', 'expired'].includes(status) &&
-      segments[0] !== 'account-state'
+      segments[0] !== 'account-state' && (segments as string[])[0] !== 'vault'
     )
       router.replace('/account-state');
     if (fontsLoaded || fontError) void SplashScreen.hideAsync();
@@ -85,6 +85,7 @@ function RootNavigator(): React.JSX.Element {
           <Stack.Screen name="index" />
           <Stack.Screen name="account-state" />
           <Stack.Screen name="not-allowed" />
+          <Stack.Screen name="vault" />
         </Stack>
       )}
       {/* Keep toasts clear of the tab bar on tab screens. */}

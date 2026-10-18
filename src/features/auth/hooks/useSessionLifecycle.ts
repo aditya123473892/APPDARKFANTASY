@@ -27,7 +27,7 @@ export function useSessionLifecycle(): boolean {
       if (store.session) {
         const action =
           env.backgroundTimeoutMinutes > 0 && elapsed >= env.backgroundTimeoutMinutes * 60_000
-            ? store.logout()
+            ? store.expire()
             : store.refreshProfile();
         void action
           .catch(() => undefined)

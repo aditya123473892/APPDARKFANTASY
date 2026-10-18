@@ -7,6 +7,32 @@ const ts = require('typescript');
 const axios = require('axios');
 const { validateAuthBuild } = require('./auth-build-config.cjs');
 
+test('temporary profile validation failure locks the vault without discarding local photos', async () => {
+  const h = harness(); let wiped = 0, paused = 0;
+  h.load('src/features/auth/localVaultLifecycle.ts').registerLocalVaultLifecycle({
+    logout: async () => { wiped++; }, pause: () => { paused++; }, signIn: async () => {},
+  });
+  h.secure.set('darkfantasy.token.v2', h.token());
+  h.apiClient.defaults.adapter = async config => { throw new axios.AxiosError('offline', 'ERR_NETWORK', config); };
+  await h.useAuthStore.getState().hydrate();
+  assert.equal(wiped, 0); assert.ok(paused > 0);
+  assert.equal(h.useAuthStore.getState().status, 'unverified'); assert.equal(h.runtime.sessionIdentity.userId, null);
+});
+
+test('only the explicit development EAS profile allows HTTP when doctor sets production NODE_ENV', () => {
+  const before = { ...process.env };
+  try {
+    process.env.APP_VARIANT = 'development'; process.env.NODE_ENV = 'production';
+    process.env.EXPO_PUBLIC_API_URL = 'http://10.0.2.2:9000/api'; process.env.EAS_BUILD_PROFILE = 'development';
+    const config = require('../app.config.js');
+    assert.doesNotThrow(() => config({ config: { plugins: [] } }));
+    for (const profile of ['production', 'preview', 'apk', '']) {
+      process.env.EAS_BUILD_PROFILE = profile;
+      assert.throws(() => config({ config: { plugins: [] } }), /HTTPS/);
+    }
+  } finally { process.env = before; }
+});
+
 test('signup sends the backend DTO, clears passwords, and does not invent a session', async () => {
   const h = harness();
   const requests = [];
@@ -946,6 +972,9 @@ function harness(overrides = {}) {
   const logs = [];
   const queryData = new Map();
   const stubs = {
+    '@/features/vault/vaultService': {
+      publishPhoto: async (asset, transport) => transport({ ...asset, uri: asset.uri.includes('picked') ? 'file:///cache/sanitized.jpg' : 'file:///cache/small.jpg' }),
+    },
     'expo-file-system': {
       File: class extends Blob {
         constructor(uri) {
@@ -2297,7 +2326,7 @@ test('sends carry the disappearing timer and view-once flag only when chosen', a
   assert.deepEqual(Object.keys(JSON.parse(bodies[2])).sort(), ['clientId', 'message', 'receiver']);
 });
 
-test('photos resize/compress, upload directly without API credentials, confirm once and clean scratch files', async () => {
+test('vault-prepared photos upload directly without API credentials, confirm once and clean scratch files', async () => {
   const requests = [],
     uploads = [],
     deleted = [],
@@ -2380,10 +2409,8 @@ test('photos resize/compress, upload directly without API credentials, confirm o
   assert.equal(uploads[0].options.parameters.key, 'temp/owner/server.jpg');
   assert.ok(requests.every((row) => row.auth?.startsWith('Bearer ')));
   assert.equal(JSON.stringify(requests).includes('file:///'), false);
-  assert.deepEqual(JSON.parse(JSON.stringify(resize)), [{ width: 1080 }]);
-  assert.deepEqual(JSON.parse(JSON.stringify(saves)), [
-    { compress: 0.8, format: 'jpeg', base64: false },
-  ]);
+  assert.deepEqual(resize, [], 'vault preparation already resized the image');
+  assert.deepEqual(saves, [], 'transport does not create another plaintext manipulator copy');
   assert.deepEqual(deleted, ['file:///cache/sanitized.jpg']);
   h.runtime.teardownSession();
 });

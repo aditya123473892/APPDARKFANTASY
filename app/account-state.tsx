@@ -1,8 +1,9 @@
 import { View } from 'react-native';
-import { Redirect } from 'expo-router';
+import { Redirect, useRouter, type Href } from 'expo-router';
 import { Button, Text } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/store/authStore';
 export default function AccountState() {
+  const router = useRouter();
   const status = useAuthStore((s) => s.status);
   const error = useAuthStore((s) => s.profileError);
   const tokenPresent = useAuthStore((s) => s.tokenPresent);
@@ -19,6 +20,7 @@ export default function AccountState() {
   return (
     <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 20 }}>
       <Text>{title}</Text>
+      {status !== 'blocked' && <Button label="Open offline Photo Vault" onPress={() => router.push('/vault' as Href)} />}
       <Text>
         {error ||
           (status === 'blocked'
@@ -38,7 +40,7 @@ export default function AccountState() {
       <Button
         label="Back to sign in"
         onPress={() => {
-          void logout();
+          void logout().catch(() => undefined);
         }}
       />
     </View>

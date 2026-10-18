@@ -1,4 +1,5 @@
 node_modules/
+vault-build-preflight/
 .npm-cache/
 .expo/
 dist/

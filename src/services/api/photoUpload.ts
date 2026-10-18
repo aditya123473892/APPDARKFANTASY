@@ -12,6 +12,7 @@ import {
   sessionIdentity,
 } from '@/features/auth/sessionRuntime';
 import type { UploadAsset } from '@/features/feed/types';
+import { publishPhoto } from '@/features/vault/vaultService';
 
 type SignedUpload = {
   uploadId: string;
@@ -55,7 +56,11 @@ export function uploadPhoto(asset: UploadAsset): Promise<string> {
   const scope = sessionIdentity.generation;
   const cached = completed.get(asset);
   if (cached?.generation === scope) return cached.promise;
-  const promise = performUpload(asset, scope).catch((error) => {
+  const operation =
+    Platform.OS === 'android'
+      ? publishPhoto(asset, (prepared) => performUpload(prepared, scope, true))
+      : performUpload(asset, scope);
+  const promise = operation.catch((error) => {
     completed.delete(asset);
     if (error instanceof ServiceError) throw error;
     throw serviceError(error);
@@ -64,22 +69,26 @@ export function uploadPhoto(asset: UploadAsset): Promise<string> {
   return promise;
 }
 
-async function performUpload(asset: UploadAsset, scope: number): Promise<string> {
+async function performUpload(asset: UploadAsset, scope: number, prepared = false): Promise<string> {
   if (!asset.type.startsWith('image/'))
     throw new ServiceError('VALIDATION', 'Choose a photo. Video uploads are unavailable.');
   let temporaryUri: string | undefined;
   let stage: 'prepare' | 'request' | 'transfer' | 'confirm' = 'prepare';
   try {
     assertSessionCurrent(scope);
-    const context = ImageManipulator.manipulate(asset.uri);
-    const source = await context.renderAsync();
-    if (source.width > 1080) context.resize({ width: 1080 });
-    const rendered = await context.renderAsync();
-    const clean = await rendered.saveAsync({
-      compress: 0.8,
-      format: SaveFormat.JPEG,
-      base64: false,
-    });
+    let clean: { uri: string };
+    if (prepared) clean = { uri: asset.uri };
+    else {
+      const context = ImageManipulator.manipulate(asset.uri);
+      const source = await context.renderAsync();
+      if (source.width > 1080) context.resize({ width: 1080 });
+      const rendered = await context.renderAsync();
+      clean = await rendered.saveAsync({
+        compress: 0.8,
+        format: SaveFormat.JPEG,
+        base64: false,
+      });
+    }
     temporaryUri = clean.uri;
     let file: Blob | undefined;
     if (Platform.OS === 'web') {

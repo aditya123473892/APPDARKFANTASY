@@ -15,6 +15,7 @@ import {
 import { sessionFromToken } from '../session';
 import { parseUser, toUserView, type User as BackendUser, type Role } from '../userModel';
 import { userCache } from '../userCache';
+import { prepareVaultLogout, pauseLocalVault, prepareVaultSignIn } from '../localVaultLifecycle';
 
 let revision = 0;
 let profileRevision = 0;
@@ -44,7 +45,7 @@ type AuthState = {
   session: Session | null;
   hydrate: () => Promise<void>;
   setAuthenticated: (result: AuthResult) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: (options?: { discardUnsynced?: boolean; preserveVault?: boolean }) => Promise<void>;
   /** Refreshes the authoritative profile after a profile edit. */
   updateUser: (user: User) => void;
   beginLogin: () => number;
@@ -70,7 +71,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const token = await secureStorage.getSession();
       if (current !== revision) return;
       if (!token) {
-        await get().logout();
+        await get().logout({ preserveVault: true });
         return;
       }
       const session = sessionFromToken(token);
@@ -78,6 +79,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await authService.getCurrentUser(session);
       if (current === revision) {
         parseUser(user);
+        await prepareVaultSignIn(user._id);
+        if (current !== revision) return;
         setSessionIdentity(user._id, token);
         userCache.put(user);
         set({
@@ -93,7 +96,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       // Fail closed; no cached profile is rendered while validation is unavailable.
       if (current === revision) {
-        await get().logout();
+        await get().logout({ preserveVault: true });
         if (error instanceof AuthError && error.code === 'BLOCKED') set({ status: 'blocked' });
         else if (error instanceof AuthError && error.code === 'SESSION_EXPIRED')
           set({ status: 'expired' });
@@ -109,6 +112,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     parseUser(user);
     const current = revision;
     sessionFromToken(session.accessToken);
+    await prepareVaultSignIn(user._id);
+    if (current !== revision) return;
     await persist(() => secureStorage.setSession(session.accessToken));
     if (current !== revision) return;
     if (sessionIdentity.userId && sessionIdentity.userId !== user._id) {
@@ -130,7 +135,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       sessionRevision: state.sessionRevision + 1,
     }));
   },
-  logout: async () => {
+  logout: async (options = {}) => {
+    if (options.preserveVault) pauseLocalVault();
+    else await prepareVaultLogout(options.discardUnsynced);
     ++revision;
     teardownSession();
     void queryClient.cancelQueries();
@@ -160,7 +167,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (attempt === revision) await get().setAuthenticated(result);
   },
   expire: async () => {
-    await get().logout();
+    await get().logout({ preserveVault: true });
     set({ status: 'expired' });
   },
   refreshProfile: async () => {
@@ -185,7 +192,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error instanceof AuthError && error.code === 'BLOCKED') {
         // /auth/me rejects blocked accounts without returning a profile.
         if (current === revision && request === profileRevision) {
-          await get().logout();
+          await get().logout({ preserveVault: true });
           set({ status: 'blocked' });
         }
         return;
@@ -202,7 +209,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 }));
 registerSessionInvalidation(async (blocked) => {
-  await useAuthStore.getState().logout();
+  await useAuthStore.getState().logout({ preserveVault: true });
   useAuthStore.setState({ status: blocked ? 'blocked' : 'expired' });
 });
 let refreshingForbidden: Promise<void> | null = null;

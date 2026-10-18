@@ -1,11 +1,13 @@
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
 import { StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
-import { Text, Wordmark } from '@/components/ui';
+import { Text, Wordmark, Button } from '@/components/ui';
+import { useRouter, type Href } from 'expo-router';
 import { LoginForm } from '../components/LoginForm';
 import { SocialButtons } from '../components/SocialButtons';
 import { spacing } from '@/theme';
 export function LoginScreen(): React.JSX.Element {
+  const router = useRouter();
   useScreenshotProtection('login');
   return (
     <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
@@ -20,6 +22,11 @@ export function LoginScreen(): React.JSX.Element {
         </Text>
       </View>
       <LoginForm />
+      <Button
+        label="Open offline Photo Vault"
+        variant="ghost"
+        onPress={() => router.push('/vault' as Href)}
+      />
       <View style={styles.social}>
         <Text variant="caption" color="muted" center>
           OR CONTINUE WITH

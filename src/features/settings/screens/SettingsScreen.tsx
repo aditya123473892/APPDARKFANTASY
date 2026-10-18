@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
@@ -61,6 +61,7 @@ export function SettingsScreen(): React.JSX.Element {
           />
         </SettingsGroup>
         <SettingsGroup title="Account">
+          <SettingsRow icon="lock-closed-outline" title="Photo Vault" subtitle="Private photos, available offline" onPress={() => router.push('/vault' as Href)} />
           <SettingsRow
             icon="person-outline"
             title="Account"

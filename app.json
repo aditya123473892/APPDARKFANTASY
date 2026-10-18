@@ -22,10 +22,23 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["expo-splash-screen", { "backgroundColor": "#0E0912" }]
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0E0912",
+          "android": { "drawable": { "icon": "./assets/android-splash.xml" } }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "136eb041-ed2c-4aef-9120-b8f0f344c0d3"
+      }
+    },
+    "owner": "aditya-61818"
   }
 }

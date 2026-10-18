@@ -348,8 +348,9 @@ export class PhotosService implements OnModuleInit {
     if (value instanceof Date || value._bsontype || Buffer.isBuffer(value))
       return value;
     if (Array.isArray(value))
-      return Promise.all(value.map((item) => this.present(item, cache)));
+      return (await Promise.all(value.map((item) => this.present(item, cache)))).filter(item => item !== null);
     const source = value.toObject ? value.toObject() : value;
+    if ([source.storageKey, source.filename, source.url].some(item => typeof item === 'string' && item.includes('/vault/'))) return null;
     const result: any = {};
     for (const [field, item] of Object.entries(source)) {
       if (
@@ -381,7 +382,7 @@ export class PhotosService implements OnModuleInit {
         (async () => {
           const key = this.storage.keyFromReference(reference);
           // Legacy/unmoderated media stays hidden until explicitly migrated.
-          if (!key || !key.startsWith('users/')) return '';
+          if (!key || !key.startsWith('users/') || key.includes('/vault/')) return '';
           const photo = await this.uploads.findOne({
             key,
             state: { $in: ['approved', 'attached'] },
@@ -394,6 +395,7 @@ export class PhotosService implements OnModuleInit {
   }
 
   async accessUrl(key: string, seconds = 120) {
+    if (key.includes('/vault/')) throw new NotFoundException('Photo not available');
     const photo = await this.uploads.findOne({
       key,
       state: { $in: ['approved', 'attached'] },
@@ -617,6 +619,7 @@ export class PhotosService implements OnModuleInit {
 
   private async inUse(key: string) {
     if (key.startsWith('temp/')) return false;
+    if (await this.db.db.collection('VaultPhotos').findOne({ key, state: { $in: ['approved', 'processing'] } })) return true;
     // Deletion and image replacement can race. An object referenced by a live
     // record must survive, even if an older mutation already enqueued it.
     const urlPattern = new RegExp(
@@ -740,6 +743,8 @@ export class PhotosService implements OnModuleInit {
     // Any failure keeps the account blocked and the durable job present.
     for (const key of keys) await this.storage.deleteOne(key);
     await this.uploads.deleteMany({ owner });
+    await this.db.db.collection('VaultPhotos').deleteMany({ owner });
+    await this.db.db.collection('VaultTombstones').deleteMany({ owner });
     await this.db.db.collection('Posts').deleteMany({ user: id });
     // Photos authored by other users in removed conversations also get durable
     // cleanup jobs; another live reference protects shared legacy objects.

@@ -4,11 +4,22 @@ module.exports = ({ config }) => {
   const development =
     process.env.APP_VARIANT === 'development' &&
     !['production', 'preview', 'apk'].includes(process.env.EAS_BUILD_PROFILE || '') &&
-    process.env.NODE_ENV !== 'production';
+    (process.env.NODE_ENV !== 'production' || process.env.EAS_BUILD_PROFILE === 'development');
   validateAuthBuild(process.env, { development });
   return {
     ...config,
-    android: { ...config.android, allowBackup: false },
+    platforms: ['android'],
+    android: {
+      ...config.android,
+      allowBackup: false,
+      blockedPermissions: [
+        ...(config.android?.blockedPermissions || []),
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
+        'android.permission.READ_MEDIA_AUDIO',
+        'android.permission.ACCESS_MEDIA_LOCATION',
+      ],
+    },
     ios: {
       ...config.ios,
       infoPlist: {
@@ -22,11 +33,12 @@ module.exports = ({ config }) => {
     plugins: [
       ...(config.plugins || []).filter((plugin) => plugin !== 'expo-secure-store'),
       ['expo-secure-store', { configureAndroidBackup: true }],
+      './plugins/withVaultBackup.cjs',
       [
         'expo-image-picker',
         {
           photosPermission: 'Allow DARKFANTASY to select photos and videos you choose to share.',
-          cameraPermission: false,
+          cameraPermission: 'Allow DARKFANTASY to take a photo for your private vault.',
           microphonePermission: false,
         },
       ],
