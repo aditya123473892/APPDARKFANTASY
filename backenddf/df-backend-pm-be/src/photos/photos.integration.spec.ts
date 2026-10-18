@@ -1,6 +1,7 @@
 import { createConnection, Connection, Types } from 'mongoose';
 import { randomUUID } from 'crypto';
 import { PhotosService } from './photos.service';
+import { storageIndexes } from './storage-indexes';
 
 // A real MongoDB is necessary to verify unique-index races, not a mocked counter.
 // Tests always use their own randomly named database; never the application's DB.
@@ -31,13 +32,14 @@ integration('Photo upload concurrency with MongoDB', () => {
         .fn()
         .mockResolvedValue(Buffer.from('sanitized')),
       putApproved: jest.fn().mockResolvedValue({}),
+      copyPrivate: jest.fn().mockResolvedValue({}),
       deleteOne: jest.fn().mockResolvedValue({}),
       keyFromReference: (key: string) => key,
       getSignedURL: jest.fn().mockResolvedValue('https://signed.example/photo'),
       keysUnder: jest.fn().mockResolvedValue([]),
     };
     service = new PhotosService(db, storage);
-    await service.onModuleInit();
+    await storageIndexes(db, true, () => undefined);
   }, 15000);
   beforeEach(async () => {
     for (const collection of [
@@ -88,7 +90,12 @@ integration('Photo upload concurrency with MongoDB', () => {
     }
   });
   it('confirms once, supports replay and denies another owner before reading S3', async () => {
-    const issued = await service.issue(owner, 'image/jpeg', randomUUID());
+    const clientRequestId = randomUUID();
+    const issued = await service.issue(owner, 'image/jpeg', clientRequestId);
+    const intent = await db.db.collection<any>('PhotoUploads').findOne({ _id: issued.uploadId });
+    expect(intent).toMatchObject({ ownerId: owner, resourceType: 'temp', resourceId: issued.uploadId, s3Key: intent.tempKey, status: 'pending', storageLayoutVersion: 1 });
+    expect(intent.tempKey).not.toContain(clientRequestId);
+    expect((await service.issue(owner, 'image/jpeg', clientRequestId)).uploadId).toBe(issued.uploadId);
     await expect(service.confirm(other, issued.uploadId)).rejects.toThrow(
       'Upload not found',
     );
@@ -99,7 +106,7 @@ integration('Photo upload concurrency with MongoDB', () => {
     const row = await db.db
       .collection<any>('PhotoUploads')
       .findOne({ _id: issued.uploadId });
-    expect(row.key).toMatch(new RegExp('^users/' + owner + '/photos/'));
+    expect(row.key).toMatch(new RegExp('^temp/' + owner + '/'));
     expect(row.key).not.toContain('original');
   });
   it('does not mark a photo approved when moderation fails', async () => {

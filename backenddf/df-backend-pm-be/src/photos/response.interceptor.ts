@@ -11,7 +11,7 @@ import { PhotosService } from './photos.service';
 @Injectable()
 export class PhotoResponseInterceptor implements NestInterceptor {
   constructor(private readonly photos: PhotosService) {}
-  intercept(_context: ExecutionContext, next: CallHandler) {
-    return next.handle().pipe(mergeMap((value) => this.photos.present(value)));
+  intercept(context: ExecutionContext, next: CallHandler) {
+    return next.handle().pipe(mergeMap((value) => this.photos.present(value, context.switchToHttp().getRequest().user?.id)));
   }
 }

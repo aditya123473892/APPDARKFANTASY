@@ -10,6 +10,7 @@ import {
   UseInterceptors,
   Body,
   ValidationPipe,
+  Header,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
@@ -50,6 +51,7 @@ export class ChatsController {
   }
 
   @Post('messages/:messageId/media/:mediaId/access-url')
+  @Header('Cache-Control', 'private, no-store')
   async getAccessUrl(
     @AuthUser() user: IAuthUser,
     @Param('messageId') messageId: string,
@@ -58,6 +60,23 @@ export class ChatsController {
     return successGetRes(
       await this.chatService.getMediaAccessUrl(user.id, messageId, mediaId),
     );
+  }
+
+  @Post('messages/:messageId/media/:mediaId/open')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Pragma', 'no-cache')
+  async openPhoto(
+    @AuthUser() user: IAuthUser,
+    @Param('messageId') messageId: string,
+    @Param('mediaId') mediaId: string,
+  ) {
+    const result = await this.chatService.openRestrictedPhoto(
+      user.id,
+      messageId,
+      mediaId,
+    );
+    this.chatGateway.broadcastSavedMessage(result.message, 'messageUpdated');
+    return successGetRes(result);
   }
 
   @Patch('messages/:messageId/media/:mediaId/revoke')

@@ -17,6 +17,21 @@ describe('S3BucketService', () => {
     expect(service).toBeDefined();
   });
 
+  it('copies private media with replaced metadata and an ETag condition, without fetching pixels', async () => {
+    jest.spyOn(service, 'ensurePrivate').mockResolvedValue(undefined);
+    jest.spyOn(service, 'bucketFor').mockImplementation(key => key.startsWith('temp/') ? 'source-bucket' : 'private-bucket');
+    const copyObject = jest.fn(() => ({ promise: async () => ({}) }));
+    service.s3 = { headObject: () => ({ promise: async () => ({ ETag: 'immutable-etag', ContentType: 'image/jpeg' }) }), copyObject } as any;
+    const sanitize = jest.spyOn(service, 'sanitizeAndModerate');
+    await service.copyPrivate('temp/owner/server.jpg', 'chat/conversation/message/server.jpg');
+    expect(copyObject).toHaveBeenCalledWith(expect.objectContaining({
+      Bucket: 'private-bucket', Key: 'chat/conversation/message/server.jpg',
+      CopySource: 'source-bucket/temp/owner/server.jpg', CopySourceIfMatch: 'immutable-etag',
+      MetadataDirective: 'REPLACE', ContentType: 'image/jpeg', CacheControl: 'private, no-store',
+    }));
+    expect(sanitize).not.toHaveBeenCalled();
+  });
+
   it('compresses photos to JPEG within 1080x1920 and strips EXIF/GPS', async () => {
     const scanner = jest.spyOn(service as any, 'moderationResult').mockResolvedValue({
       ModerationModelVersion: 'test', ModerationLabels: [],

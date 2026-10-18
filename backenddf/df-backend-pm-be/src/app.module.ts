@@ -41,6 +41,7 @@ import { VaultModule } from './vault/vault.module';
       useFactory: async (configService: ConfigService) => ({
         uri: configService.get<string>('DATABASE_URL'),
         dbName: configService.get<string>('DATABASE_NAME'),
+        autoIndex: false,
       }),
       inject: [ConfigService],
     }),

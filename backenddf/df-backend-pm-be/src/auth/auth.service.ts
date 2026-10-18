@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { compare, genSalt, hash } from 'bcrypt';
 import { UsersService } from 'src/users/users.service';
@@ -18,7 +18,7 @@ export class AuthService {
       user.password = '';
       return user;
     }
-    throw new Error('Invalid password');
+    throw new UnauthorizedException('Invalid username or password');
   }
 
   async hashPassword(password: string): Promise<string> {

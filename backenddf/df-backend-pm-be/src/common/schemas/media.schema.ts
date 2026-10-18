@@ -8,6 +8,15 @@ export enum ChatMediaStatus {
 
 @Schema({ _id: true })
 export class Media {
+  @Prop() ownerId?: string;
+  @Prop() resourceType?: string;
+  @Prop() resourceId?: string;
+  @Prop({ select: false }) s3Key?: string;
+  @Prop() conversationId?: string;
+  @Prop() messageId?: string;
+  @Prop() storageLayoutVersion?: number;
+  @Prop() contentType?: string;
+
   @Prop({ required: false })
   mimetype: string;
 

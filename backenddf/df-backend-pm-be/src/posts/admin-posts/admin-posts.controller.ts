@@ -11,7 +11,12 @@ import {
   UseGuards,
   Query,
   Put,
+  ValidationPipe,
+  BadRequestException,
 } from '@nestjs/common';
+import { Types } from 'mongoose';
+import { PhotosService } from '../../photos/photos.service';
+import { AdminPhotoPostDto, AdminCreatePhotoPostDto } from '../dto/admin-photo-post.dto';
 
 import { AuthUser, Roles } from 'src/common/decorators';
 import { DefaultFindParams, IAuthUser } from 'src/common/interfaces';
@@ -34,6 +39,7 @@ export class AdminPostsController {
   constructor(
     private readonly postsService: PostsService,
     private readonly s3BucketService: S3BucketService,
+    private readonly photos: PhotosService,
   ) {}
 
   @Get()
@@ -49,15 +55,35 @@ export class AdminPostsController {
   }
 
   @Put(':id')
-  async update(@Param('id') _id: string, @Body() payload: UpdatePostDto) {
+  async update(@Param('id') _id: string, @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })) payload: AdminPhotoPostDto) {
+    if ('media' in payload || 'user' in payload) throw new BadRequestException('Use upload IDs only');
     const post = await this.postsService.findById(_id);
 
     if (!post) return badRequestRes('Post not found!');
 
-    const updatePost = await this.postsService.updateOne(_id, payload);
+    const author = String((post.user as any)?._id || post.user);
+    const media = payload.photoIds ? await this.photos.bind(author, payload.photoIds, `post:${_id}`) : post.media;
+    const patch: any = { media };
+    for (const field of ['caption', 'location', 'visibility', 'status'])
+      if (payload[field] !== undefined) patch[field] = payload[field];
+    const updatePost = await this.postsService.updateOne(_id, patch);
 
     if (!updatePost) return badRequestRes('Failed to update post');
+    if (payload.photoIds) {
+      const keep = new Set(media.map(item => item.filename));
+      await this.photos.retire(`post:${_id}`, (post.media || []).filter(item => !keep.has(item.filename)).map(item => item.filename));
+    }
 
     return successRes(updatePost);
+  }
+  @Post()
+  async create(@Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })) payload: AdminCreatePhotoPostDto) {
+    if ('media' in payload) throw new BadRequestException('Use upload IDs only');
+    const id = new Types.ObjectId().toString();
+    const media = await this.photos.bind(payload.user, payload.photoIds || [], `post:${id}`);
+    const patch: any = { _id: id, user: payload.user, media };
+    for (const field of ['caption', 'location', 'visibility', 'status'])
+      if (payload[field] !== undefined) patch[field] = payload[field];
+    return successRes(await this.postsService.create(patch));
   }
 }

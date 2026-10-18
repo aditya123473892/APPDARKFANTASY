@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import * as AWS from 'aws-sdk';
 import sharp = require('sharp');
+import { bucketForKey } from './storage-layout';
 
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 export function imageType(bytes: Buffer): string | undefined {
@@ -73,7 +74,7 @@ export class S3BucketService implements OnModuleInit {
     };
   }
   private client?: AWS.S3;
-  private configuration?: { until: number; check: Promise<void> };
+  private configurations = new Map<string, { until: number; check: Promise<void> }>();
   get s3() {
     return (this.client ||= new AWS.S3(this.options));
   }
@@ -86,6 +87,20 @@ export class S3BucketService implements OnModuleInit {
       throw new ServiceUnavailableException('Photo storage is not configured');
     }
     return value;
+  }
+  bucketFor(key: string) { return bucketForKey(key, this.bucket); }
+  async copyPrivate(sourceKey: string, destinationKey: string) {
+    const source = this.bucketFor(sourceKey);
+    await Promise.all([this.ensurePrivate(source), this.ensurePrivate(this.bucketFor(destinationKey))]);
+    const head = await this.s3.headObject({ Bucket: source, Key: sourceKey }).promise();
+    if (!head.ETag || head.ContentType !== 'image/jpeg') throw new BadRequestException('Invalid prepared photo');
+    return this.s3.copyObject({
+      Bucket: this.bucketFor(destinationKey), Key: destinationKey,
+      CopySource: `${source}/${sourceKey.split('/').map(encodeURIComponent).join('/')}`,
+      CopySourceIfMatch: head.ETag, MetadataDirective: 'REPLACE',
+      ContentType: 'image/jpeg', CacheControl: /^(chat|vault)\//.test(destinationKey) ? 'private, no-store' : 'private, max-age=120',
+      ContentDisposition: 'inline', ServerSideEncryption: 'AES256',
+    }).promise();
   }
   async uploadFile(_file: unknown, _folder: string): Promise<any> {
     throw new BadRequestException(
@@ -101,11 +116,11 @@ export class S3BucketService implements OnModuleInit {
     );
   }
   async presign(key: string, contentType: string, seconds = 300) {
-    await this.ensurePrivate();
+    await this.ensurePrivate(this.bucketFor(key));
     return new Promise<AWS.S3.PresignedPost>((resolve, reject) =>
       this.s3.createPresignedPost(
         {
-          Bucket: this.bucket,
+          Bucket: this.bucketFor(key),
           Expires: Math.max(1, Math.min(300, seconds)),
           Fields: {
             key,
@@ -125,7 +140,7 @@ export class S3BucketService implements OnModuleInit {
   }
   async readVerified(key: string, expectedType: string) {
     const head = await this.s3
-      .headObject({ Bucket: this.bucket, Key: key })
+      .headObject({ Bucket: this.bucketFor(key), Key: key })
       .promise();
     if (
       !head.ContentLength ||
@@ -136,7 +151,7 @@ export class S3BucketService implements OnModuleInit {
       throw new BadRequestException('Invalid image size or type');
     }
     const stream = this.s3
-      .getObject({ Bucket: this.bucket, Key: key, IfMatch: head.ETag })
+      .getObject({ Bucket: this.bucketFor(key), Key: key, IfMatch: head.ETag })
       .createReadStream();
     const chunks: Buffer[] = [];
     let length = 0;
@@ -226,22 +241,22 @@ export class S3BucketService implements OnModuleInit {
   async putApproved(key: string, bytes: Buffer) {
     return this.s3
       .putObject({
-        Bucket: this.bucket,
+        Bucket: this.bucketFor(key),
         Key: key,
         Body: bytes,
         ContentType: 'image/jpeg',
         ContentDisposition: 'inline',
         ServerSideEncryption: 'AES256',
-        CacheControl: 'private, max-age=120',
+        CacheControl: /^(vault|chat)\//.test(key) ? 'private, no-store' : 'private, max-age=120',
       })
       .promise();
   }
   async getSignedURL(Key: string, Bucket?: string, expiresInSeconds = 120, noStore = false) {
     if (!Key) return null;
-    this.assertBucket(Bucket);
-    await this.ensurePrivate();
+    this.assertBucket(Bucket, Key);
+    await this.ensurePrivate(this.bucketFor(Key));
     return this.s3.getSignedUrlPromise('getObject', {
-      Bucket: this.bucket,
+      Bucket: this.bucketFor(Key),
       Key,
       Expires: Math.max(30, Math.min(300, Number(expiresInSeconds) || 120)),
       ...(noStore ? { ResponseCacheControl: 'no-store, private' } : {}),
@@ -250,13 +265,13 @@ export class S3BucketService implements OnModuleInit {
   async deleteOne(Key: string, Bucket?: string) {
     if (!Key || Key.startsWith('/') || Key.includes('://'))
       throw new BadRequestException('Invalid storage key');
-    this.assertBucket(Bucket);
+    this.assertBucket(Bucket, Key);
     let KeyMarker: string;
     let VersionIdMarker: string;
     do {
       const page = await this.s3
         .listObjectVersions({
-          Bucket: this.bucket,
+          Bucket: this.bucketFor(Key),
           Prefix: Key,
           KeyMarker,
           VersionIdMarker,
@@ -267,7 +282,7 @@ export class S3BucketService implements OnModuleInit {
         .map((item) => ({ Key, VersionId: item.VersionId }));
       if (objects.length) {
         const result = await this.s3
-          .deleteObjects({ Bucket: this.bucket, Delete: { Objects: objects } })
+          .deleteObjects({ Bucket: this.bucketFor(Key), Delete: { Objects: objects } })
           .promise();
         if (result.Errors?.length)
           throw new ServiceUnavailableException(
@@ -277,7 +292,7 @@ export class S3BucketService implements OnModuleInit {
       KeyMarker = page.IsTruncated ? page.NextKeyMarker : undefined;
       VersionIdMarker = page.IsTruncated ? page.NextVersionIdMarker : undefined;
     } while (KeyMarker);
-    return this.s3.deleteObject({ Bucket: this.bucket, Key }).promise();
+    return this.s3.deleteObject({ Bucket: this.bucketFor(Key), Key }).promise();
   }
   async keysUnder(prefix: string) {
     const keys: string[] = [];
@@ -285,7 +300,7 @@ export class S3BucketService implements OnModuleInit {
     do {
       const page = await this.s3
         .listObjectsV2({
-          Bucket: this.bucket,
+          Bucket: this.bucketFor(prefix),
           Prefix: prefix,
           ContinuationToken,
         })
@@ -298,9 +313,9 @@ export class S3BucketService implements OnModuleInit {
     return keys;
   }
   keyFromReference(value?: string): string | undefined {
-    if (!value) return undefined;
+    if (!value || value.includes('\\') || value.split('/').some(part => part === '..' || part === '.')) return undefined;
     if (
-      /^(users|temp|posts|avatars|groupIcon|events|chat-media)\//.test(value) &&
+      /^(users|temp|profile|posts|avatars|groupIcon|events|groups|vault|chat|quarantine|reports|chat-media)\//.test(value) &&
       !value.includes('://')
     )
       return value;
@@ -308,42 +323,44 @@ export class S3BucketService implements OnModuleInit {
       const url = new URL(value);
       if (url.protocol !== 'https:' || url.username || url.password)
         return undefined;
-      const bucket = this.bucket;
-      if (
-        url.hostname === `${bucket}.s3.amazonaws.com` ||
-        url.hostname === `${bucket}.s3.${this.options.region}.amazonaws.com`
-      ) {
-        return decodeURIComponent(url.pathname.slice(1));
+      const buckets = new Set([this.bucket, process.env.PHOTO_MEDIA_BUCKET, process.env.PHOTO_PRIVATE_BUCKET].filter(Boolean));
+      for (const bucket of buckets) {
+        if (url.hostname === `${bucket}.s3.amazonaws.com` || url.hostname === `${bucket}.s3.${this.options.region}.amazonaws.com`) {
+          const key = decodeURIComponent(url.pathname.slice(1));
+          if (bucket === this.bucketFor(key) && !key.split('/').some(part => part === '..' || part === '.') && !key.includes('\\')) return key;
+        }
       }
     } catch {
       /* Foreign or invalid URLs are not storage keys. */
     }
     return undefined;
   }
-  private assertBucket(bucket?: string) {
-    if (bucket && bucket !== this.bucket)
+  private assertBucket(bucket?: string, key = '') {
+    if (bucket && bucket !== this.bucketFor(key))
       throw new BadRequestException('Invalid storage bucket');
   }
-  async ensurePrivate(): Promise<void> {
+  async ensurePrivate(bucket?: string): Promise<void> {
     // Temporary operator override; object validation and moderation still run.
     if (process.env.PHOTO_VERIFY_BUCKET_SETTINGS === 'false') return;
-    if (!this.configuration || this.configuration.until < Date.now()) {
-      this.configuration = {
+    bucket ||= this.bucket;
+    let configuration = this.configurations.get(bucket);
+    if (!configuration || configuration.until < Date.now()) {
+      configuration = {
         until: Date.now() + 60000,
-        check: this.verifyConfiguration(),
+        check: this.verifyConfiguration(bucket),
       };
+      this.configurations.set(bucket, configuration);
     }
     try {
-      await this.configuration.check;
+      await configuration.check;
     } catch {
-      this.configuration = undefined;
+      this.configurations.delete(bucket);
       throw new ServiceUnavailableException(
         'Private photo storage settings could not be verified',
       );
     }
   }
-  private async verifyConfiguration() {
-    const Bucket = this.bucket;
+  private async verifyConfiguration(Bucket = this.bucket) {
     const [access, ownership, encryption, lifecycle, cors] = await Promise.all([
       this.s3.getPublicAccessBlock({ Bucket }).promise(),
       this.s3.getBucketOwnershipControls({ Bucket }).promise(),
@@ -385,7 +402,7 @@ export class S3BucketService implements OnModuleInit {
     const prefix = (rule: AWS.S3.LifecycleRule) =>
       rule.Prefix ?? (rule.Filter as any)?.Prefix;
     if (
-      !rules.some(
+      Bucket === this.bucketFor('temp/') && !rules.some(
         (rule) =>
           rule.Status === 'Enabled' &&
           prefix(rule) === 'temp/' &&

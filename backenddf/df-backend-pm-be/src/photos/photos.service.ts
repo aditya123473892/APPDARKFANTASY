@@ -12,6 +12,8 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Connection, Types } from 'mongoose';
 import { createHash, randomUUID } from 'crypto';
+import { allocateKey, bindingFromRef, matchesBinding, ResourceContext, storedKey } from '../s3-bucket/storage-layout';
+import { storageIndexes } from './storage-indexes';
 import { Subject } from 'rxjs';
 import { S3BucketService } from '../s3-bucket/s3-bucket.service';
 
@@ -37,16 +39,11 @@ export class PhotosService implements OnModuleInit {
     return this.db.db.collection<any>('AccountPurges');
   }
   async onModuleInit() {
-    await this.uploads.createIndex({ owner: 1, slot: 1 }, { unique: true });
-    await this.uploads.createIndex(
-      { owner: 1, requestId: 1 },
-      { unique: true },
-    );
-    await this.uploads.createIndex({ key: 1 }, { unique: true, sparse: true });
-    await this.limits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-    await this.jobs.createIndex({ dueAt: 1 });
-    await this.purges.createIndex({ dueAt: 1 });
+    if (['apply', 'report'].includes(process.env.PHOTO_STORAGE_INDEXES)) {
+      await storageIndexes(this.db, process.env.PHOTO_STORAGE_INDEXES === 'apply', (report) => this.logger.log(report));
+    }
   }
+
   private async active(owner: string) {
     if (
       !Types.ObjectId.isValid(owner) ||
@@ -91,7 +88,7 @@ export class PhotosService implements OnModuleInit {
     if (!['image/jpeg', 'image/webp'].includes(contentType))
       throw new BadRequestException('Unsupported image type');
     let intent = await this.uploads.findOne({ owner, requestId });
-    if (intent && intent.contentType !== contentType)
+    if (intent && (intent.uploadContentType || intent.contentType) !== contentType)
       throw new ConflictException('Upload request has changed');
     if (!intent) {
       const maximum = Math.min(
@@ -103,15 +100,18 @@ export class PhotosService implements OnModuleInit {
         const candidate = {
           _id,
           owner,
+          ownerId: owner, resourceType: 'temp', resourceId: _id,
+          s3Key: '', status: 'pending', storageLayoutVersion: 1, storageKeyUniqueEligible: true,
           requestId,
           slot,
-          contentType,
+          contentType, uploadContentType: contentType,
           state: 'pending',
-          tempKey: `temp/${owner}/${_id}.${contentType === 'image/jpeg' ? 'jpg' : 'webp'}`,
+          tempKey: allocateKey({ ownerId: owner, resourceType: 'temp', resourceId: _id }).key,
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 300000),
         };
         try {
+          candidate.s3Key = candidate.tempKey;
           await this.uploads.insertOne(candidate);
           intent = candidate;
           break;
@@ -170,7 +170,7 @@ export class PhotosService implements OnModuleInit {
         },
         {
           $set: {
-            state: 'processing',
+            state: 'processing', status: 'processing',
             token,
             leaseUntil: new Date(Date.now() + 180000),
           },
@@ -178,13 +178,14 @@ export class PhotosService implements OnModuleInit {
       );
       if (!claim.modifiedCount)
         throw new ConflictException('Upload is processing or expired');
-      const key = `users/${owner}/photos/${token}.jpg`;
+      const key = initial.processingKey || allocateKey({ ownerId: owner, resourceType: 'temp', resourceId: id }).key;
+      await this.uploads.updateOne({ _id: id, token }, { $set: { processingKey: key } });
       // A durable cleanup job exists before writing any output. A crash cannot orphan it.
       await this.enqueue([key], new Date(Date.now() + 600000), true);
       try {
         const bytes = await this.storage.readVerified(
           initial.tempKey,
-          initial.contentType,
+          initial.uploadContentType || initial.contentType,
         );
         const clean = await this.storage.sanitizeAndModerate(bytes);
         await this.active(owner);
@@ -193,8 +194,8 @@ export class PhotosService implements OnModuleInit {
           { _id: id, owner, state: 'processing', token },
           {
             $set: {
-              state: 'approved',
-              key,
+              state: 'approved', status: 'approved',
+              key, s3Key: key, contentType: 'image/jpeg',
               size: clean.length,
               checksum: createHash('sha256').update(clean).digest('hex'),
               approvedAt: new Date(),
@@ -212,7 +213,7 @@ export class PhotosService implements OnModuleInit {
       } catch (error) {
         await this.uploads.updateOne(
           { _id: id, token },
-          { $set: { state: 'pending' }, $unset: { token: '', leaseUntil: '' } },
+          { $set: { state: 'pending', status: 'pending' }, $unset: { token: '', leaseUntil: '' } },
         );
         throw error;
       }
@@ -222,8 +223,11 @@ export class PhotosService implements OnModuleInit {
   }
 
   /** Claim each approved photo for exactly one server-selected resource. Retry uses the same resource ID. */
-  async bind(owner: string, ids: string[], ref: string) {
+  async bind(owner: string, ids: string[], ref: string, trusted?: ResourceContext) {
     await this.active(owner);
+    const context = trusted || bindingFromRef(owner, ref);
+    if (context.ownerId !== owner || context.resourceId !== ref.split(':')[1])
+      throw new BadRequestException('Invalid resource context');
     if (
       !Array.isArray(ids) ||
       ids.length > 5 ||
@@ -241,25 +245,52 @@ export class PhotosService implements OnModuleInit {
         throw new BadRequestException(
           'Photo must be approved and belong to this account',
         );
+      if (photo.ref && photo.ref !== ref) throw new ConflictException('Photo is already in use');
+      if (photo.state === 'attached' && !matchesBinding(photo, context))
+        throw new ConflictException('Photo resource does not match');
+      // Reserve the binding and immutable destination before S3. Another resource cannot steal it.
+      const allocation = photo.finalKey ? { key: photo.finalKey } : allocateKey(context);
+      const reserved = await this.uploads.updateOne({
+        _id: id, owner, state: { $in: ['approved', 'attached'] },
+        $or: [{ ref: { $exists: false } }, { ref }],
+        ...(photo.finalKey ? { finalKey: photo.finalKey } : { finalKey: { $exists: false } }),
+      }, { $set: { ref, finalKey: allocation.key } });
+      if (!reserved.matchedCount) {
+        const retry = await this.uploads.findOne({ _id: id, owner, ref });
+        if (!retry?.finalKey) throw new ConflictException('Photo is already in use');
+        allocation.key = retry.finalKey;
+      }
+      const sourceKey = storedKey(photo);
+      const destination = photo.state === 'attached' ? sourceKey : allocation.key;
+      if (photo.state !== 'attached' && sourceKey !== destination) {
+        await this.enqueue([destination], new Date(Date.now() + 600000), true);
+        await this.storage.copyPrivate(sourceKey, destination);
+      }
       const update = await this.uploads.updateOne(
         {
           _id: id,
           owner,
+          ref,
           $or: [{ state: 'approved' }, { state: 'attached', ref }],
         },
-        { $set: { state: 'attached', ref } },
+        { $set: { state: 'attached', status: 'attached', ref, ...context,
+          key: destination, s3Key: destination, storageLayoutVersion: photo.storageLayoutVersion || 1,
+          contentType: 'image/jpeg' } },
       );
       if (!update.matchedCount)
         throw new ConflictException('Photo is already in use');
       media.push({
-        storageKey: photo.key,
-        filename: photo.key,
+        storageKey: destination,
+        filename: destination,
+        s3Key: destination, storageLayoutVersion: 1, contentType: 'image/jpeg', ownerId: owner, resourceType: context.resourceType, resourceId: context.resourceId,
+        conversationId: context.conversationId, messageId: context.messageId,
         mimetype: 'image/jpeg',
         size: photo.size,
         checksum: photo.checksum,
         originalname: 'photo.jpg',
         status: 'active',
       });
+      if (sourceKey !== destination) await this.enqueue([sourceKey], new Date(Date.now() + 600000), true);
     }
     return media;
   }
@@ -271,14 +302,14 @@ export class PhotosService implements OnModuleInit {
     await this.enqueue(old.map((item) => item.key));
     await this.uploads.updateMany(
       { owner, ref, state: 'attached', key: { $nin: keep } },
-      { $set: { state: 'deleting' } },
+      { $set: { state: 'deleting', status: 'deleting' } },
     );
   }
   async retire(ref: string, keys: string[]) {
     await this.enqueue(keys);
     await this.uploads.updateMany(
       { ref, key: { $in: keys } },
-      { $set: { state: 'deleting' } },
+      { $set: { state: 'deleting', status: 'deleting' } },
     );
   }
   async replaceImage(
@@ -314,7 +345,7 @@ export class PhotosService implements OnModuleInit {
     if (!photo) throw new NotFoundException('Unattached photo not found');
     const changed = await this.uploads.updateOne(
       { _id: id, owner, state: { $in: ['pending', 'approved', 'deleting'] } },
-      { $set: { state: 'deleting' } },
+      { $set: { state: 'deleting', status: 'deleting' } },
     );
     if (!changed.matchedCount)
       throw new ConflictException('Photo is already in use');
@@ -340,69 +371,91 @@ export class PhotosService implements OnModuleInit {
     }
   }
 
-  async present(
-    value: any,
-    cache = new Map<string, Promise<string>>(),
-  ): Promise<any> {
+  /** Context is obtained from the authorized response's resource ID, then verified against DB. */
+  async present(value: any, requester?: string, inherited?: ResourceContext): Promise<any> {
     if (!value || typeof value !== 'object') return value;
-    if (value instanceof Date || value._bsontype || Buffer.isBuffer(value))
-      return value;
-    if (Array.isArray(value))
-      return (await Promise.all(value.map((item) => this.present(item, cache)))).filter(item => item !== null);
+    if (value instanceof Date || value._bsontype || Buffer.isBuffer(value)) return value;
+    if (Array.isArray(value)) return (await Promise.all(value.map(item => this.present(item, requester, inherited)))).filter(item => item !== null);
     const source = value.toObject ? value.toObject() : value;
-    if ([source.storageKey, source.filename, source.url].some(item => typeof item === 'string' && item.includes('/vault/'))) return null;
+    if ([source.storageKey, source.filename, source.url].some(item => typeof item === 'string' && (item.includes('/vault/') || item.startsWith('vault/')))) return null;
+    let context = inherited;
+    // Never infer ownership or resource type from a photo key or client metadata.
+    if (source._id && Types.ObjectId.isValid(String(source._id))) {
+      context = await this.responseContext(String(source._id), requester) || inherited;
+    }
     const result: any = {};
     for (const [field, item] of Object.entries(source)) {
-      if (
-        [
-          'password',
-          'passwordResetToken',
-          'verifyEmailToken',
-          'storageKey',
-        ].includes(field)
-      )
-        continue;
-      if (['avatar', 'groupIcon'].includes(field))
-        result[field] = await this.displayUrl(String(item || ''), cache);
-      else result[field] = await this.present(item, cache);
+      if (['password', 'passwordResetToken', 'verifyEmailToken', 'storageKey'].includes(field)) continue;
+      if (field === 's3Key' && source.filename) continue;
+      if (['avatar', 'groupIcon'].includes(field)) {
+        const expected = field === 'avatar' ? 'profile' : 'group';
+        result[field] = context?.resourceType === expected ? await this.displayUrl(String(item || ''), context) : '';
+      } else result[field] = await this.present(item, requester, context);
     }
     const key = source.storageKey || source.filename;
     if (key || (source.url && source.mimetype))
-      result.url = await this.displayUrl(key || source.url, cache);
+      result.url = context ? await this.displayUrl(key || source.url, context) : '';
     return result;
   }
-  private async displayUrl(
-    reference: string,
-    cache: Map<string, Promise<string>>,
-  ) {
-    if (!reference) return '';
-    if (!cache.has(reference))
-      cache.set(
-        reference,
-        (async () => {
-          const key = this.storage.keyFromReference(reference);
-          // Legacy/unmoderated media stays hidden until explicitly migrated.
-          if (!key || !key.startsWith('users/') || key.includes('/vault/')) return '';
-          const photo = await this.uploads.findOne({
-            key,
-            state: { $in: ['approved', 'attached'] },
-          });
-          if (!photo) return '';
-          return await this.storage.getSignedURL(key, undefined, 120);
-        })(),
-      );
-    return cache.get(reference);
+  private async responseContext(id: string, requester?: string): Promise<ResourceContext | undefined> {
+    for (const [collection, resourceType, ownerField] of [
+      ['Users', 'profile', '_id'], ['Posts', 'post', 'user'], ['Events', 'event', 'creator'], ['Groups', 'group', 'admin'],
+    ] as const) {
+      const row = await this.db.db.collection(collection).findOne({ _id: new Types.ObjectId(id) });
+      if (row) return { ownerId: String(row[ownerField]?._id || row[ownerField]), resourceType, resourceId: id, requester };
+    }
+  }
+  async displayUrl(reference: string, context: ResourceContext) {
+    if (!reference || !context || ['vault', 'chat', 'temp'].includes(context.resourceType)) return '';
+    const key = this.storage.keyFromReference(reference);
+    if (!key) return '';
+    try { return await this.accessUrl(key, 120, context); }
+    catch (error) { if (error instanceof NotFoundException || error instanceof ForbiddenException) return ''; throw error; }
+  }
+  async accessUrl(key: string, seconds: number, context: ResourceContext) {
+    if (!context || context.resourceType === 'vault' || context.resourceType === 'temp' || key.includes('/vault/') || key.startsWith('vault/'))
+      throw new NotFoundException('Photo not available');
+    const photo = await this.uploads.findOne({
+      $or: [{ s3Key: key }, { key }], state: { $in: ['approved', 'attached'] },
+    });
+    if (!photo || storedKey(photo) !== key || !matchesBinding(photo, context))
+      throw new NotFoundException('Photo not available');
+    await this.active(context.ownerId);
+    // No cross-request URL cache: every request rechecks resource and authorization state.
+    return this.storage.getSignedURL(storedKey(photo), undefined, seconds, context.resourceType === 'chat');
   }
 
-  async accessUrl(key: string, seconds = 120) {
-    if (key.includes('/vault/')) throw new NotFoundException('Photo not available');
+  /** Read restricted chat photos through the API; never expose a reusable S3 URL. */
+  async readChatPhoto(key: string, context: ResourceContext): Promise<Buffer> {
+    if (context?.resourceType !== 'chat') throw new NotFoundException('Photo not available');
     const photo = await this.uploads.findOne({
-      key,
-      state: { $in: ['approved', 'attached'] },
+      $or: [{ s3Key: key }, { key }], state: 'attached',
     });
-    if (!photo || !key.startsWith(`users/${photo.owner}/photos/`))
+    if (!photo || storedKey(photo) !== key || !matchesBinding(photo, context))
       throw new NotFoundException('Photo not available');
-    return this.storage.getSignedURL(key, undefined, seconds);
+    await this.active(context.ownerId);
+    return this.storage.readVerified(key, 'image/jpeg');
+  }
+  async reserveChatMessage(owner: string, requestId: string, target: string) {
+    // Preserve retries of messages created before server-ID reservations were introduced.
+    const legacyId = createHash('sha256').update(`chat:${owner}:${requestId}`).digest('hex').slice(0, 24);
+    const legacy = await this.db.db.collection('ChatMessages').findOne({ _id: new Types.ObjectId(legacyId), sender: new Types.ObjectId(owner) });
+    if (legacy) {
+      const legacyTarget = legacy.groupId ? `group:${legacy.groupId}` : `direct:${[owner, String(legacy.receiver)].sort().join('-')}`;
+      if (legacyTarget !== target) throw new ConflictException('Message request changed');
+      return legacyId;
+    }
+    const _id = createHash('sha256').update(owner + ':' + requestId).digest('hex');
+    const reservations = this.db.db.collection<any>('PhotoChatSends');
+    await reservations.updateOne({ _id }, { $setOnInsert: { owner, target, messageId: new Types.ObjectId().toString() } }, { upsert: true });
+    const row = await reservations.findOne({ _id });
+    if (row.target !== target) throw new ConflictException('Message request changed');
+    return row.messageId as string;
+  }
+  async failedChatSend(owner: string, ids: string[], ref: string) {
+    for (const photo of await this.uploads.find({ owner, _id: { $in: ids }, ref, state: { $in: ['approved', 'attached'] } }).toArray()) {
+      await this.enqueue([photo.tempKey, photo.key, photo.finalKey], new Date(Date.now() + 600000), true);
+    }
   }
 
   /** Operator-only migration entry point; it is deliberately not an HTTP endpoint. */
@@ -465,7 +518,7 @@ export class PhotosService implements OnModuleInit {
         { _id: new Types.ObjectId(owner) },
         { $set: { isBlocked: true, deletionRequestedAt: new Date() } },
       );
-    await this.uploads.updateMany({ owner }, { $set: { state: 'deleting' } });
+    await this.uploads.updateMany({ owner }, { $set: { state: 'deleting', status: 'deleting' } });
     this.accountDeletion$.next(owner);
   }
 
@@ -490,13 +543,13 @@ export class PhotosService implements OnModuleInit {
         .toArray();
       for (const photo of abandoned) {
         await this.enqueue(
-          [photo.tempKey, photo.key],
+          [photo.tempKey, photo.key, photo.processingKey, photo.finalKey],
           new Date(Math.max(Date.now(), photo.expiresAt.getTime() + 60000)),
           true,
         );
         await this.uploads.updateOne(
           { _id: photo._id, state: photo.state },
-          { $set: { state: 'deleting' } },
+          { $set: { state: 'deleting', status: 'deleting' } },
         );
       }
       // A process may die after claiming photos but before saving the resource.
@@ -511,7 +564,7 @@ export class PhotosService implements OnModuleInit {
           await this.enqueue([photo.key, photo.tempKey]);
           await this.uploads.updateOne(
             { _id: photo._id, state: 'attached', ref: photo.ref },
-            { $set: { state: 'deleting' } },
+            { $set: { state: 'deleting', status: 'deleting' } },
           );
         }
       }
@@ -536,7 +589,7 @@ export class PhotosService implements OnModuleInit {
             await this.enqueue([media.storageKey || media.filename]);
             await this.uploads.updateMany(
               { key: media.storageKey || media.filename },
-              { $set: { state: 'deleting' } },
+              { $set: { state: 'deleting', status: 'deleting' } },
             );
           }
         }
@@ -618,8 +671,9 @@ export class PhotosService implements OnModuleInit {
   }
 
   private async inUse(key: string) {
-    if (key.startsWith('temp/')) return false;
+    if (key.startsWith('temp/')) return !!(await this.uploads.findOne({ key, state: { $in: ['approved', 'attached'] } }));
     if (await this.db.db.collection('VaultPhotos').findOne({ key, state: { $in: ['approved', 'processing'] } })) return true;
+    if (await this.uploads.findOne({ $or: [{ processingKey: key }, { finalKey: key }], state: 'processing', leaseUntil: { $gt: new Date() } })) return true;
     // Deletion and image replacement can race. An object referenced by a live
     // record must survive, even if an older mutation already enqueued it.
     const urlPattern = new RegExp(
@@ -737,8 +791,10 @@ export class PhotosService implements OnModuleInit {
     for (const photo of await this.uploads.find({ owner }).toArray()) {
       add(photo.key);
       add(photo.tempKey);
+      add(photo.processingKey);
+      add(photo.finalKey);
     }
-    for (const prefix of [`users/${owner}/`, `temp/${owner}/`])
+    for (const prefix of [`users/${owner}/`, `temp/${owner}/`, `profile/${owner}/`, `posts/${owner}/`, `vault/${owner}/`])
       (await this.storage.keysUnder(prefix)).forEach(add);
     // Any failure keeps the account blocked and the durable job present.
     for (const key of keys) await this.storage.deleteOne(key);

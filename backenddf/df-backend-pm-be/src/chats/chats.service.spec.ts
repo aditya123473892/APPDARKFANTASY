@@ -81,6 +81,9 @@ function makeService(document = makeDocument()) {
     ),
     enqueue: jest.fn().mockResolvedValue(undefined),
     release: jest.fn().mockResolvedValue(undefined),
+    reserveChatMessage: jest.fn().mockResolvedValue(messageId),
+    bind: jest.fn().mockResolvedValue([{ storageKey: 'chat/server/key.jpg', checksum: 'checksum', mimetype: 'image/jpeg' }]),
+    failedChatSend: jest.fn().mockResolvedValue(undefined),
   };
   return {
     service: new ChatService(chatModel, users, groups, audit, s3, photos),
@@ -89,11 +92,48 @@ function makeService(document = makeDocument()) {
     groups,
     audit,
     s3,
+    photos,
   };
 }
 
 describe('ChatService media authorization', () => {
   afterEach(() => jest.restoreAllMocks());
+
+  it('uses a reserved server message ID and passes trusted conversation context at send time', async () => {
+    const { service, chatModel, photos } = makeService();
+    chatModel.findOne = jest.fn().mockResolvedValue(null);
+    await service.createMediaMessage(senderId, { receiver: recipientId, clientId: 'client-retry-123', photoIds: ['upload-id'] } as any);
+    expect(photos.reserveChatMessage).toHaveBeenCalledWith(senderId, 'client-retry-123', expect.any(String));
+    expect(photos.bind).toHaveBeenCalledWith(senderId, ['upload-id'], `chat:${messageId}`, expect.objectContaining({ ownerId: senderId, resourceType: 'chat', resourceId: messageId, messageId, conversationId: expect.any(String) }));
+    expect(photos.failedChatSend).not.toHaveBeenCalled();
+  });
+  it('queues orphan cleanup when a copy/bind fails', async () => {
+    const { service, chatModel, photos } = makeService();
+    chatModel.findOne = jest.fn().mockResolvedValue(null);
+    photos.bind.mockRejectedValue(new Error('copy failed'));
+    await expect(service.createMediaMessage(senderId, { receiver: recipientId, clientId: 'client-retry-123', photoIds: ['upload-id'] } as any)).rejects.toThrow('copy failed');
+    expect(photos.failedChatSend).toHaveBeenCalledWith(senderId, ['upload-id'], `chat:${messageId}`);
+  });
+  it('queues orphan cleanup when saving the message fails', async () => {
+    const { service, chatModel, photos } = makeService();
+    chatModel.findOne = jest.fn().mockResolvedValue(null);
+    chatModel.mockImplementationOnce(() => ({ save: jest.fn().mockRejectedValue(new Error('DB failed')) }));
+    await expect(service.createMediaMessage(senderId, { receiver: recipientId, clientId: 'client-retry-123', photoIds: ['upload-id'] } as any)).rejects.toThrow('DB failed');
+    expect(photos.failedChatSend).toHaveBeenCalledWith(senderId, ['upload-id'], `chat:${messageId}`);
+  });
+  it('rechecks revoke and membership after previously issuing a URL', async () => {
+    const document = makeDocument();
+    const { service, s3 } = makeService(document);
+    await service.getMediaAccessUrl(senderId, messageId, mediaId);
+    await service.revokeMedia(senderId, messageId, mediaId);
+    await expect(service.getMediaAccessUrl(senderId, messageId, mediaId)).rejects.toThrow(NotFoundException);
+    expect(s3.getSignedURL).toHaveBeenCalledTimes(1);
+    const group = makeService(makeDocument({ groupId, receiver: undefined }));
+    await group.service.getMediaAccessUrl(senderId, messageId, mediaId);
+    group.groups.exists.mockResolvedValue(null);
+    await expect(group.service.getMediaAccessUrl(senderId, messageId, mediaId)).rejects.toThrow(NotFoundException);
+    expect(group.s3.getSignedURL).toHaveBeenCalledTimes(1);
+  });
 
   it('allows a direct-chat sender and recipient to access media', async () => {
     const { service } = makeService();
@@ -239,6 +279,7 @@ describe('ChatService media authorization', () => {
     const { service, chatModel } = makeService();
     await service.getChatHistory(senderId, recipientId);
     expect(chatModel.find).toHaveBeenCalledWith({
+      $and: [{ $or: [{ expiresAt: null }, { expiresAt: { $gt: expect.any(Date) } }] }],
       $or: [
         { sender: senderId, receiver: recipientId },
         { sender: recipientId, receiver: senderId },

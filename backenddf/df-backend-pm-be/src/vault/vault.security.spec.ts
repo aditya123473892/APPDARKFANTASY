@@ -6,6 +6,29 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 const owner = '0123456789abcdef01234567';
 const id = '12345678-1234-4234-8234-123456789abc';
 describe('Vault isolation and durable deletion', () => {
+  it.each(['legacy', 'canonical'])('signs stored legacy and canonical vault keys in %s mode', async mode => {
+    const previous = process.env.STORAGE_LAYOUT_READ;
+    try {
+      process.env.STORAGE_LAYOUT_READ = mode;
+      for (const canonical of [false, true]) {
+        const key = canonical ? `vault/${owner}/${id}.jpg` : `users/${owner}/vault/${id}/${id}.jpg`;
+        const row = { owner, id, key, state: 'approved', ...(canonical ? { ownerId: owner, resourceType: 'vault', resourceId: id, serverPhotoId: id, s3Key: key } : {}) };
+        const db: any = { db: { collection: (name: string) => ({ findOne: async () => name === 'VaultPhotos' ? row : null }) } };
+        const storage: any = { getSignedURL: jest.fn(async () => 'https://signed.test/vault') };
+        const service = new VaultService(db, storage, { assertActiveAccount: jest.fn(), rate: jest.fn() } as any);
+        await expect(service.download(owner, id)).resolves.toMatchObject({ url: 'https://signed.test/vault' });
+        expect(storage.getSignedURL).toHaveBeenCalledWith(key, undefined, 120, true);
+      }
+    } finally { if (previous === undefined) delete process.env.STORAGE_LAYOUT_READ; else process.env.STORAGE_LAYOUT_READ = previous; }
+  });
+  it('denies canonical vault records whose resource binding does not match the requested photo', async () => {
+    const row = { owner, id, key: `vault/${owner}/${id}.jpg`, ownerId: owner, resourceType: 'vault', resourceId: 'different-photo', serverPhotoId: id };
+    const db: any = { db: { collection: (name: string) => ({ findOne: async () => name === 'VaultPhotos' ? row : null }) } };
+    const storage: any = { getSignedURL: jest.fn() };
+    const service = new VaultService(db, storage, { assertActiveAccount: jest.fn(), rate: jest.fn() } as any);
+    await expect(service.download(owner, id)).rejects.toThrow(NotFoundException);
+    expect(storage.getSignedURL).not.toHaveBeenCalled();
+  });
   it('the scheduled cleanup worker defers an unused-object job while a vault photo references it', async () => {
     const key = `users/${owner}/vault/${id}.jpg`;
     const job = { _id: 'job', key, dueAt: new Date(0), attempts: 0, onlyIfUnused: true };
@@ -40,7 +63,7 @@ describe('Vault isolation and durable deletion', () => {
     const key = `users/${owner}/vault/${id}.jpg`;
     const result = await service.present({ avatar: key, media: [{ filename: key, mimetype: 'image/jpeg' }] });
     expect(result.avatar).toBe(''); expect(result.media).toEqual([]);
-    await expect(service.accessUrl(key)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.accessUrl(key, 120, undefined)).rejects.toBeInstanceOf(NotFoundException);
     expect(storage.getSignedURL).not.toHaveBeenCalled();
   });
   it('removes S3 versions and the live DB row, retains a tombstone, and retries failures', async () => {

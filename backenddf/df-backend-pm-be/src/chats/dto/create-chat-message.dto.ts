@@ -1,4 +1,7 @@
 import {
+  IsBoolean,
+  IsIn,
+  IsInt,
   IsDateString,
   IsArray,
   ArrayMaxSize,
@@ -12,6 +15,20 @@ import {
 } from 'class-validator';
 
 export class CreateChatMessageDto {
+  @IsOptional()
+  @IsBoolean()
+  viewOnce?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @IsIn([3, 10, 30, 60])
+  viewDurationSeconds?: number;
+
+  @IsOptional()
+  @IsInt()
+  @IsIn([30, 300, 3600, 86400, 604800])
+  ttlSeconds?: number;
+
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5)

@@ -4,6 +4,7 @@ import { Connection } from 'mongoose';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash, randomUUID } from 'crypto';
 import { PhotosService } from '../photos/photos.service';
+import { allocateKey, storedKey } from '../s3-bucket/storage-layout';
 import { S3BucketService } from '../s3-bucket/s3-bucket.service';
 
 @Injectable()
@@ -13,11 +14,9 @@ export class VaultService implements OnModuleInit {
   private get rows() { return this.db.db.collection<any>('VaultPhotos'); }
   private get tombstones() { return this.db.db.collection<any>('VaultTombstones'); }
   async onModuleInit() {
-    await this.rows.createIndex({ owner: 1, id: 1 }, { unique: true });
-    await this.rows.createIndex({ owner: 1, slot: 1 }, { unique: true });
-    await this.rows.createIndex({ key: 1 }, { unique: true, sparse: true });
-    await this.tombstones.createIndex({ owner: 1, id: 1 }, { unique: true });
+    // Photo indexes are managed centrally only with PHOTO_STORAGE_INDEXES=apply.
   }
+
   private async guard(owner: string, action: string, max = 60) {
     await this.photos.assertActiveAccount(owner); await this.photos.rate(owner, `vault:${action}`, max);
   }
@@ -26,7 +25,7 @@ export class VaultService implements OnModuleInit {
     return value;
   }
   private present(row: any) {
-    return { id: row.id, s3Key: row.deletedAt ? null : row.key ?? null, sha256: row.sha256 ?? '', size: row.size ?? 0,
+    return { id: row.id, s3Key: row.deletedAt || row.state !== 'approved' ? null : storedKey(row) ?? null, sha256: row.sha256 ?? '', size: row.size ?? 0,
       status: row.state === 'rejected' ? 'rejected' : row.state === 'approved' ? 'approved' : 'local', hidden: row.hidden ? 1 : 0,
       sortOrder: row.order ?? 0, createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null };
   }
@@ -38,15 +37,20 @@ export class VaultService implements OnModuleInit {
       const maximum = Math.min(100, Math.max(1, Number(process.env.VAULT_MAX_PHOTOS) || 50));
       for (let slot = 0; slot < maximum; slot++) {
         try {
-          const candidate = { _id: `${owner}:${input.id}`, owner, ...input, slot, state: 'pending',
-            tempKey: `temp/${owner}/${input.id}.jpg`, createdAt: Date.now(), expiresAt: new Date(Date.now() + 300000) };
+          const allocation = allocateKey({ ownerId: owner, resourceType: 'vault', resourceId: randomUUID() });
+          const resourceId = allocation.objectId;
+          const finalKey = allocation.key;
+          const tempKey = allocateKey({ ownerId: owner, resourceType: 'temp', resourceId }).key;
+          const candidate = { ownerId: owner, resourceType: 'temp', resourceId, serverPhotoId: resourceId, s3Key: tempKey, finalKey,
+            status: 'pending', storageLayoutVersion: 1, contentType: 'image/jpeg', storageKeyUniqueEligible: true, _id: `${owner}:${input.id}`, owner, ...input, slot, state: 'pending',
+            tempKey, createdAt: Date.now(), expiresAt: new Date(Date.now() + 300000) };
           await this.rows.insertOne(candidate); row = candidate; break;
         } catch (error) { if (error.code !== 11000) throw error; row = await this.rows.findOne({ owner, id: input.id }); if (row) break; }
       }
       if (!row) throw new ConflictException('Vault photo limit reached');
     }
     // Recheck tombstone after the quota reservation: delete always wins a concurrent add.
-    if (await this.tombstones.findOne({ owner, id: input.id })) { await this.rows.updateOne({ _id: row._id }, { $set: { state: 'deleting', deleteAfter: new Date(Date.now() + 600000) } }); throw new ConflictException('Photo was deleted'); }
+    if (await this.tombstones.findOne({ owner, id: input.id })) { await this.rows.updateOne({ _id: row._id }, { $set: { state: 'deleting', status: 'deleting', deleteAfter: new Date(Date.now() + 600000) } }); throw new ConflictException('Photo was deleted'); }
     if (row.state === 'approved' || row.state === 'rejected') return { status: row.state, photo: this.present(row) };
     if (row.state === 'deleting') throw new ConflictException('Photo was deleted');
     if (row.state === 'processing' && row.leaseUntil > new Date()) throw new ConflictException('Photo processing');
@@ -64,8 +68,14 @@ export class VaultService implements OnModuleInit {
     if (row.state === 'rejected') throw new UnprocessableEntityException('Photo did not pass moderation');
     if (this.processing >= 2) throw new ConflictException('Image processing is busy');
     const token = randomUUID();
-    const key = `users/${owner}/vault/${id}/${token}.jpg`;
-    const claim = await this.rows.updateOne({ _id: row._id, state: 'pending', expiresAt: { $gt: new Date() } }, { $set: { state: 'processing', token, processingKey: key, leaseUntil: new Date(Date.now() + 180000) } });
+    let key = row.finalKey;
+    if (!key) {
+      const allocation = allocateKey({ ownerId: owner, resourceType: 'vault', resourceId: randomUUID() });
+      await this.rows.updateOne({ _id: row._id, finalKey: { $exists: false } }, { $set: { finalKey: allocation.key, serverPhotoId: allocation.objectId } });
+      const reserved = await this.rows.findOne({ _id: row._id });
+      key = reserved.finalKey; row.serverPhotoId = reserved.serverPhotoId;
+    }
+    const claim = await this.rows.updateOne({ _id: row._id, state: 'pending', expiresAt: { $gt: new Date() } }, { $set: { state: 'processing', status: 'processing', token, processingKey: key, leaseUntil: new Date(Date.now() + 180000) } });
     if (!claim.modifiedCount) throw new ConflictException('Upload expired or processing');
     this.processing++;
     try {
@@ -76,7 +86,7 @@ export class VaultService implements OnModuleInit {
       try { clean = await this.storage.sanitizeAndModerate(input); }
       catch (error) {
         if (error instanceof UnsupportedMediaTypeException) {
-          await this.rows.updateOne({ _id: row._id, token, state: 'processing' }, { $set: { state: 'rejected' }, $unset: { token: '', leaseUntil: '' } });
+          await this.rows.updateOne({ _id: row._id, token, state: 'processing' }, { $set: { state: 'rejected', status: 'rejected' }, $unset: { token: '', leaseUntil: '' } });
           await this.photos.enqueue([row.tempKey], new Date(row.expiresAt.getTime() + 60000));
           throw new UnprocessableEntityException('Photo did not pass moderation or safe image validation');
         }
@@ -85,13 +95,13 @@ export class VaultService implements OnModuleInit {
       await this.photos.assertActiveAccount(owner);
       if (await this.tombstones.findOne({ owner, id })) throw new ConflictException('Photo was deleted');
       await this.storage.putApproved(key, clean);
-      const fields = { state: 'approved', key, size: clean.length, sha256: createHash('sha256').update(clean).digest('hex') };
+      const fields = { state: 'approved', status: 'approved', ownerId: owner, resourceType: 'vault', resourceId: row.serverPhotoId || id, storageLayoutVersion: row.storageLayoutVersion || 1, contentType: 'image/jpeg', key, s3Key: key, size: clean.length, sha256: createHash('sha256').update(clean).digest('hex') };
       const commit = await this.rows.updateOne({ _id: row._id, state: 'processing', token }, { $set: fields, $unset: { token: '', leaseUntil: '', processingKey: '' } });
       if (!commit.modifiedCount) throw new ConflictException('Photo changed');
       await this.photos.enqueue([row.tempKey], new Date(row.expiresAt.getTime() + 60000));
       return this.present({ ...row, ...fields });
     } catch (error) {
-      await this.rows.updateOne({ _id: row._id, state: 'processing', token }, { $set: { state: 'pending' }, $unset: { token: '', leaseUntil: '' } });
+      await this.rows.updateOne({ _id: row._id, state: 'processing', token }, { $set: { state: 'pending', status: 'pending' }, $unset: { token: '', leaseUntil: '' } });
       throw error;
     } finally { this.processing--; }
   }
@@ -110,8 +120,16 @@ export class VaultService implements OnModuleInit {
     await this.guard(owner, 'download');
     if (await this.tombstones.findOne({ owner, id })) throw new NotFoundException('Photo not found');
     const row = await this.rows.findOne({ owner, id, state: 'approved' });
-    if (!row || typeof row.key !== 'string' || !row.key.startsWith(`users/${owner}/vault/${id}/`) || !/\/[0-9a-f-]{36}\.jpg$/.test(row.key)) throw new NotFoundException('Photo not found');
-    return { url: await this.storage.getSignedURL(row.key, undefined, 120, true), photo: this.present(row) };
+    const key = row && storedKey(row);
+    const legacyPrefix = key?.startsWith(`users/${owner}/vault/${id}/`) && /\/[0-9a-f-]{36}\.jpg$/.test(key);
+    const canonicalPrefix = key?.startsWith(`vault/${owner}/`) && /^vault\/[^/]+\/[0-9a-f-]{36}\.jpg$/.test(key);
+    // Owner/id were selected by the existing dedicated route; no role bypass.
+    if (!row || !key || !(legacyPrefix || canonicalPrefix) ||
+        (row.ownerId && row.ownerId !== owner) ||
+        (row.resourceType && row.resourceType !== 'vault') ||
+        (row.resourceId && row.resourceId !== (row.serverPhotoId || id)) ||
+        (row.s3Key && row.key && row.s3Key !== row.key)) throw new NotFoundException('Photo not found');
+    return { url: await this.storage.getSignedURL(key, undefined, 120, true), photo: this.present(row) };
   }
   async edit(owner: string, id: string, input: { hidden?: boolean; order?: number; updatedAt: number }) {
     await this.guard(owner, 'edit'); this.stamp(input.updatedAt);
@@ -132,7 +150,7 @@ export class VaultService implements OnModuleInit {
     if (row) {
       // Wait beyond every outstanding POST/processing lease before final deletion.
       const deleteAfter = new Date(Math.max(row.state === 'processing' ? now + 300000 : now, row.expiresAt?.getTime() + 60000 || now, row.leaseUntil?.getTime() + 60000 || now));
-      await this.rows.updateOne({ owner, id }, { $set: { state: 'deleting', deletedAt: now, deleteAfter }, $unset: { token: '' } });
+      await this.rows.updateOne({ owner, id }, { $set: { state: 'deleting', status: 'deleting', deletedAt: now, deleteAfter }, $unset: { token: '' } });
       await this.cleanup();
     }
     return { deleted: true };
