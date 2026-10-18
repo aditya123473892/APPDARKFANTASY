@@ -24,15 +24,12 @@ function load(file, modules = {}) {
   return exports;
 }
 const crypto = load('src/features/vault/crypto.ts', {
-  'expo-crypto': {
-    CryptoDigestAlgorithm: { SHA256: 'SHA-256' },
-    digest: (algorithm, bytes) => require('node:crypto').webcrypto.subtle.digest(algorithm, bytes),
-    randomUUID: require('node:crypto').randomUUID,
-  },
+  // Deliberately do not mock a native crypto module: checksum tests run the real JS library.
+  'expo-modules-core': { uuid: { v4: require('node:crypto').randomUUID } },
 });
 module.exports = { load };
 
-test('Expo Go hashing verifies bytes and UUIDs are unique', async () => {
+test('hashing works without ExpoCrypto and UUIDs use the existing Expo core', async () => {
   const bytes = Buffer.from('private photo pixels');
   assert.equal(
     await crypto.hash(bytes),
@@ -41,6 +38,13 @@ test('Expo Go hashing verifies bytes and UUIDs are unique', async () => {
   assert.notEqual(await crypto.hash(bytes), await crypto.hash(Buffer.from('corrupted photo')));
   assert.match(crypto.uuid(), /^[0-9a-f-]{36}$/);
   assert.notEqual(crypto.uuid(), crypto.uuid());
+  for (const size of [0, 55, 56, 64, 65, 1024 * 1024]) {
+    const input = require('node:crypto').randomBytes(size);
+    assert.equal(
+      await crypto.hash(input),
+      require('node:crypto').createHash('sha256').update(input).digest('hex'),
+    );
+  }
 });
 
 test('simpler storage is separate; logout counts unsynced photos left by the encrypted build', async () => {

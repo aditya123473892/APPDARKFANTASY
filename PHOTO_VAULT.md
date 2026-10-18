@@ -7,7 +7,7 @@ The working `claude` branch uses the simpler vault requested afterwards.
 
 Run `npm start` and scan with an **SDK 57 compatible Expo Go** on the same Wi-Fi.
 The launcher explicitly selects `--go`. Quick Crypto, Quick Base64, Nitro and expo-dev-client have been removed.
-`expo-crypto@57.0.4` provides UUIDs and SHA-256 checksums through the module already included in Expo Go. No custom native crypto is imported.
+`@noble/hashes@1.8.0` provides JavaScript-only SHA-256 checksums; UUIDs use the existing Expo core runtime. `expo-crypto` is not required. This also avoids the `Cannot find native module 'ExpoCrypto'` startup crash when using an older installed development APK. No custom native crypto is imported.
 Expo Go is a shared development host; app configuration, Android backup exclusions and package-specific permissions apply only to a standalone/development APK built from this project, not to Expo Go itself.
 
 ## What the simpler vault does
