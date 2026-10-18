@@ -55,26 +55,11 @@ import {
 } from '../hooks/useChat';
 import { buildRows, type ChatRow as Row } from '../utils/buildRows';
 import { TimerSheet } from '../components/TimerSheet';
+import { MediaShareSheet, type MediaShareChoice } from '../components/MediaShareSheet';
 import { timerShortLabel } from '../disappearing';
 import { featureFlags } from '@/config/featureFlags';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { formatPresence } from '@/utils/formatters';
-
-function chooseViewOnce(type?: string | null): Promise<boolean | null> {
-  const kind = type?.startsWith('video/') ? 'video' : 'photo';
-  return new Promise((resolve) =>
-    Alert.alert(
-      `Send ${kind}`,
-      `A view-once ${kind} can be opened a single time by the recipient. They may still capture it with another device.`,
-      [
-        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-        { text: 'View once', onPress: () => resolve(true) },
-        { text: 'Send', onPress: () => resolve(false) },
-      ],
-      { cancelable: true, onDismiss: () => resolve(null) },
-    ),
-  );
-}
 
 function MessagesSkeleton(): React.JSX.Element {
   return (
@@ -107,6 +92,29 @@ export function ChatRoomScreen(): React.JSX.Element {
   const canShareMedia = useCan('canShareMedia');
   const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
   const [timerSheet, setTimerSheet] = useState(false);
+  const [shareCount, setShareCount] = useState(0);
+  const [sharePreview, setSharePreview] = useState<string>();
+  const shareMounted = useRef(true);
+  const shareConversation = useRef(conversationId);
+  const shareChoice = useRef<((value: MediaShareChoice | null) => void) | null>(null);
+  const finishShareChoice = useCallback((value: MediaShareChoice | null) => {
+    const resolve = shareChoice.current;
+    shareChoice.current = null;
+    setShareCount(0);
+    setSharePreview(undefined);
+    resolve?.(value);
+  }, []);
+  useEffect(() => {
+    shareMounted.current = true;
+    shareConversation.current = conversationId;
+    const cancel = () => finishShareChoice(null);
+    const unsubscribe = registerSessionTeardown(cancel);
+    return () => {
+      shareMounted.current = false;
+      unsubscribe();
+      cancel();
+    };
+  }, [conversationId, finishShareChoice]);
   const attach = useMutation({
     mutationFn: async () => {
       const scope = renderScope;
@@ -114,6 +122,8 @@ export function ChatRoomScreen(): React.JSX.Element {
         const auth = useAuthStore.getState();
         return (
           isSessionCurrent(scope) &&
+          shareMounted.current &&
+          shareConversation.current === conversationId &&
           auth.status === 'authenticated' &&
           hasCapability(auth.roles, 'canShareMedia')
         );
@@ -124,25 +134,28 @@ export function ChatRoomScreen(): React.JSX.Element {
         await cleanupPickedAssets(assets);
         return;
       }
-      const viewOnce =
-        featureFlags.ENABLE_EPHEMERAL_CHAT &&
-        conversationId.startsWith('user:') &&
-        assets.length === 1
-          ? await chooseViewOnce(assets[0]?.type)
-          : false;
-      if (viewOnce === null || !allowed()) {
+      const choice = await new Promise<MediaShareChoice | null>((resolve) => {
+        shareChoice.current = resolve;
+        setSharePreview(assets[0]?.uri);
+        setShareCount(assets.length);
+      });
+      if (choice === null || !allowed()) {
         await cleanupPickedAssets(assets);
         return;
       }
       try {
-        await chatService.sendMessage({
-          conversationId,
-          text: '',
-          assets,
-          clientId: createClientId(),
-          ...(ttlSeconds ? { ttlSeconds } : {}),
-          ...(viewOnce ? { viewOnce: true } : {}),
-        });
+        // Each view-once photo gets its own opening and sent-message status.
+        const batches = choice.viewOnce ? assets.map((asset) => [asset]) : [assets];
+        for (const batch of batches) {
+          if (!allowed()) return;
+          await chatService.sendMessage({
+            conversationId,
+            text: '',
+            assets: batch,
+            clientId: createClientId(),
+            ...choice,
+          });
+        }
       } catch (error) {
         if (isSessionCurrent(scope))
           toast.error(
@@ -670,6 +683,15 @@ export function ChatRoomScreen(): React.JSX.Element {
         onChange={setTtlSeconds}
         onClose={() => setTimerSheet(false)}
       />
+      {shareCount > 0 ? (
+        <MediaShareSheet
+          visible
+          count={shareCount}
+          previewUri={sharePreview}
+          canViewOnce={conversationId.startsWith('user:')}
+          onChoose={finishShareChoice}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

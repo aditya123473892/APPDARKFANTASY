@@ -11,6 +11,8 @@ function createDevApiProxy(next, port = 9000) {
         port,
         path: request.url,
         method: request.method,
+        // Local backend restarts must not leave a stale pooled socket for login/profile requests.
+        agent: false,
         headers: { ...request.headers, host: `127.0.0.1:${port}` },
       },
       (incoming) => {
@@ -26,7 +28,10 @@ function createDevApiProxy(next, port = 9000) {
       response.end(JSON.stringify({ message: 'Local backend is unavailable on port 9000' }));
     });
     request.on('aborted', () => upstream.destroy());
-    response.on('close', () => upstream.destroy());
+    response.on('close', () => {
+      // A normal completed response is not a client abort.
+      if (!response.writableFinished) upstream.destroy();
+    });
     request.pipe(upstream);
   };
 }

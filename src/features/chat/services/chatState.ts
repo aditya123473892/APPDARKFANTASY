@@ -45,6 +45,8 @@ function preserveRead(message: Message): Message {
   return {
     ...message,
     clientId: message.clientId ?? previous?.clientId,
+    // Delayed history/socket responses cannot make a consumed photo look unopened.
+    viewedAt: message.viewedAt ?? previous?.viewedAt,
     status: previous?.status === 'read' ? 'read' : message.status,
   };
 }

@@ -19,7 +19,7 @@ Expo Go is a shared development host; app configuration, Android backup exclusio
 - Keeps offline additions, persistent SQLite upload/edit/delete jobs, retry/backoff, tombstones, moderation rejection, hide/show/order, separate 50-photo vault limit, lazy downloads and SHA-256 checks.
 - Never writes to the gallery except after explicit export confirmation. Camera/gallery originals in the gallery are not removed. Picker/manipulator temporary copies are cleaned up.
 - Uses React Native Image with app-cache viewing copies; deletes those copies on close/background/logout. No expo-image URL/disk cache is used for vault photos.
-- Uses expo-screen-capture on vault screens; production always requests blocking. `EXPO_PUBLIC_ALLOW_SCREENSHOTS_FOR_TESTING=true` is honored only in development.
+- Uses expo-screen-capture on vault screens; production always requests blocking. Screenshots are allowed by default in development, including Expo Go. Set `EXPO_PUBLIC_ALLOW_SCREENSHOTS_FOR_TESTING=false` to test blocking during development.
 - Retains explicit export/share, metadata removal, logout/discard guard, private backend endpoints, independent public publication copies and cleanup protections.
 
 Existing Android `uploadPhoto()` callers still prepare a hidden vault copy and publish a separate approved copy through the original `/photos/upload-url` → S3 POST → `/photos/confirm` protocol. A vault key is never attached to public profile/chat/post/discovery resources. Deleting a private vault copy does not retract an already published photo.

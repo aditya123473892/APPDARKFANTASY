@@ -8,7 +8,7 @@ import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRu
 import { apiClient } from '@/services/api/apiClient';
 import { getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
 import { ServiceError } from '@/services/errors';
-import { uploadPhoto } from '@/services/api/photoUpload';
+import { uploadChatPhoto } from '@/services/api/photoUpload';
 import { isClientId } from '@/utils/clientId';
 import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
@@ -178,14 +178,16 @@ export const realChatService: ChatService = {
     const scope = sessionIdentity.generation;
     assertSessionCurrent(scope);
     const to = target(input.conversationId);
-    if ((input.ttlSeconds || input.viewOnce) && !featureFlags.ENABLE_EPHEMERAL_CHAT)
-      throw new ServiceError(
-        'VALIDATION',
-        'This backend does not support disappearing or view-once messages.',
-      );
+    if (input.ttlSeconds && !featureFlags.ENABLE_EPHEMERAL_CHAT)
+      throw new ServiceError('VALIDATION', 'This backend does not support disappearing messages.');
     if (input.ttlSeconds && !MESSAGE_TIMERS.some((timer) => timer.seconds === input.ttlSeconds))
       throw new ServiceError('VALIDATION');
-    if (input.viewOnce && (!input.conversationId.startsWith('user:') || input.assets?.length !== 1))
+    if (
+      (input.viewOnce || input.viewDurationSeconds) &&
+      (!input.conversationId.startsWith('user:') || input.assets?.length !== 1)
+    )
+      throw new ServiceError('VALIDATION');
+    if (input.viewDurationSeconds && ![3, 10, 30, 60].includes(input.viewDurationSeconds))
       throw new ServiceError('VALIDATION');
     try {
       const payload = {
@@ -194,10 +196,11 @@ export const realChatService: ChatService = {
         // Retries reuse the key so the server stores the message once.
         ...(isClientId(input.clientId) ? { clientId: input.clientId } : {}),
         ...(input.ttlSeconds ? { ttlSeconds: input.ttlSeconds } : {}),
-        ...(input.viewOnce ? { viewOnce: true } : {}),
+        ...(input.viewOnce || input.viewDurationSeconds ? { viewOnce: true } : {}),
+        ...(input.viewDurationSeconds ? { viewDurationSeconds: input.viewDurationSeconds } : {}),
       };
       const photoIds: string[] = [];
-      for (const asset of input.assets || []) photoIds.push(await uploadPhoto(asset));
+      for (const asset of input.assets || []) photoIds.push(await uploadChatPhoto(asset));
       assertSessionCurrent(scope);
       const response = await apiClient.post('/chats/messages', {
         ...payload,

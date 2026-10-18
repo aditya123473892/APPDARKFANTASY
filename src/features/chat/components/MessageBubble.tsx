@@ -147,10 +147,12 @@ export const MessageBubble = memo(function MessageBubble({
         ) : null}
         {message.viewOnce && message.media?.[0] ? (
           <ViewOnceAttachment
+            key={`${message.id}:${message.media[0]._id}`}
             media={message.media[0]}
             messageId={message.id}
             mine={mine}
             viewedAt={message.viewedAt}
+            viewDurationSeconds={message.viewDurationSeconds}
           />
         ) : (
           message.media?.map((media) => (

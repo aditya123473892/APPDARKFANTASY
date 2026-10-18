@@ -4,9 +4,9 @@ import {
   isSessionCurrent,
   registerSessionTeardown,
 } from '@/features/auth/sessionRuntime';
-import { Pressable, View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { Button, Text } from '@/components/ui';
-import { RemoteMedia } from '@/components/ui/RemoteMedia';
+import { ChatPhotoViewer } from './ChatPhotoViewer';
 import { toast } from '@/components/ui/Toast';
 import { apiClient } from '@/services/api/apiClient';
 import { unwrap, serviceError } from '@/services/api/backend';
@@ -17,6 +17,8 @@ export function ChatAttachment({ media, messageId }: { media: ChatMedia; message
   const request = useRef(0);
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
   const [now] = useState(() => Date.now());
   const [expired, setExpired] = useState(false);
   useEffect(() => {
@@ -28,12 +30,17 @@ export function ChatAttachment({ media, messageId }: { media: ChatMedia; message
       invalidate();
       setUrl(null);
       setLoading(false);
+      setVisible(false);
     };
     const unsubscribe = registerSessionTeardown(clear);
+    const listener = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') clear();
+    });
     return () => {
       mounted.current = false;
       invalidate();
       unsubscribe();
+      listener.remove();
     };
   }, []);
   useEffect(() => {
@@ -43,6 +50,7 @@ export function ChatAttachment({ media, messageId }: { media: ChatMedia; message
     const timer = setTimeout(
       () => {
         setUrl(null);
+        setVisible(false);
         setExpired(true);
       },
       Math.max(0, remaining),
@@ -75,6 +83,8 @@ export function ChatAttachment({ media, messageId }: { media: ChatMedia; message
         return;
       if (media.expiresAt && Date.parse(media.expiresAt) <= Date.now()) return;
       setUrl(value);
+      setImageLoading(!media.mimetype?.startsWith('video/'));
+      setVisible(true);
     } catch (error) {
       if (!valid()) return;
       toast.error(describeError(serviceError(error), 'This attachment is unavailable or expired.'));
@@ -84,26 +94,37 @@ export function ChatAttachment({ media, messageId }: { media: ChatMedia; message
   };
   return (
     <View style={{ gap: 8, marginTop: 8, maxWidth: '100%' }}>
-      {url && !unavailable ? (
-        <Pressable onPress={() => setUrl(null)} accessibilityLabel="Close attachment">
-          <RemoteMedia uri={url} mimetype={media.mimetype} width={220} height={180} privateMedia />
-        </Pressable>
-      ) : (
-        <Button
-          label={
-            unavailable
-              ? 'Attachment unavailable'
-              : media.mimetype?.startsWith('video/')
-                ? 'Open video'
-                : 'Open photo'
-          }
-          disabled={Boolean(unavailable)}
-          loading={loading}
-          size="sm"
-          variant="secondary"
-          onPress={() => void open()}
-        />
-      )}
+      <Button
+        label={
+          unavailable
+            ? 'Attachment unavailable'
+            : media.mimetype?.startsWith('video/')
+              ? 'Open video'
+              : 'Open photo'
+        }
+        disabled={Boolean(unavailable)}
+        loading={loading}
+        size="sm"
+        variant="secondary"
+        onPress={() => void open()}
+      />
+      <ChatPhotoViewer
+        visible={visible && !Boolean(unavailable)}
+        uri={url}
+        mimetype={media.mimetype}
+        loading={imageLoading}
+        label="Photo"
+        onClose={() => {
+          setVisible(false);
+          setUrl(null);
+        }}
+        onLoad={() => setImageLoading(false)}
+        onError={() => {
+          setVisible(false);
+          setUrl(null);
+          toast.error('This photo could not be displayed.');
+        }}
+      />
       {media.originalname ? (
         <Text variant="caption" numberOfLines={1}>
           {media.originalname}

@@ -1,19 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
-import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
-import { useEffect, useRef, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-  ActivityIndicator,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Pressable, StyleSheet } from 'react-native';
 import { Text } from '@/components/ui';
-import { RemoteMedia } from '@/components/ui/RemoteMedia';
 import { toast } from '@/components/ui/Toast';
+import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
 import {
   isSessionCurrent,
   registerSessionTeardown,
@@ -24,151 +15,170 @@ import { serviceError, unwrap } from '@/services/api/backend';
 import { describeError } from '@/services/errors';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
+import { acceptMessage } from '../services/chatState';
+import type { BackendMessage } from '../services/chatPayload';
 import type { ChatMedia } from '../types';
+import { ChatPhotoViewer } from './ChatPhotoViewer';
 
-const CAPTURE_KEY = 'view-once';
-
-/**
- * A photo or video the recipient can open once. The server issues a single
- * short-lived URL and refuses any further request; nothing is cached here.
- * Screenshots and screen recordings cannot be fully prevented on every device.
- */
 export function ViewOnceAttachment({
   media,
   messageId,
   mine,
   viewedAt,
+  viewDurationSeconds,
 }: {
   media: ChatMedia;
   messageId: string;
   mine: boolean;
   viewedAt?: string;
+  viewDurationSeconds?: number;
 }): React.JSX.Element {
   const { theme } = useTheme();
-  const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const mounted = useRef(true);
-  const [url, setUrl] = useState<string | null>(null);
+  const [uri, setUri] = useState<string | null>(null);
+  const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [consumed, setConsumed] = useState(false);
-  const video = Boolean(media.mimetype?.startsWith('video/'));
-  const kind = video ? 'video' : 'photo';
-  const opened = Boolean(viewedAt) || consumed || (media.status && media.status !== 'active');
-  useScreenshotProtection(CAPTURE_KEY, Boolean(url));
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState(viewDurationSeconds ?? 0);
+  const [initialTime] = useState(() => Date.now());
+  const request = useRef(0);
+  const pending = useRef(false);
+  const used = useRef(false);
+  const loaded = useRef(false);
+  const controller = useRef<AbortController | null>(null);
+  const unavailable = Boolean(
+    viewedAt ||
+    consumed ||
+    (media.status && media.status !== 'active') ||
+    (media.expiresAt && Date.parse(media.expiresAt) <= initialTime),
+  );
+  const mode = viewDurationSeconds ? `${viewDurationSeconds}s photo` : 'View-once photo';
+  useScreenshotProtection(`chat-photo:${messageId}`, visible);
 
-  useEffect(() => {
-    mounted.current = true;
-    const unsubscribe = registerSessionTeardown(() => setUrl(null));
-    return () => {
-      mounted.current = false;
-      unsubscribe();
-    };
+  const close = useCallback(() => {
+    request.current++;
+    controller.current?.abort();
+    controller.current = null;
+    pending.current = false;
+    setUri(null);
+    setVisible(false);
+    setLoading(false);
+    setDeadline(null);
   }, []);
+  useEffect(() => {
+    const unsubscribe = registerSessionTeardown(close);
+    const listener = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') close();
+    });
+    return () => {
+      unsubscribe();
+      listener.remove();
+      close();
+    };
+  }, [close]);
+  useEffect(() => {
+    if (!deadline) return;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setRemaining(left);
+      if (!left) close();
+    };
+    tick();
+    const timer = setInterval(tick, 100);
+    return () => clearInterval(timer);
+  }, [deadline, close]);
 
   const open = async () => {
-    if (mine || opened || loading) return;
+    // Refs block double taps before React has committed the loading state.
+    if (mine || unavailable || pending.current || used.current) return;
+    pending.current = true;
+    loaded.current = false;
+    const sequence = ++request.current;
     const scope = sessionIdentity.generation;
+    const valid = () => request.current === sequence && isSessionCurrent(scope);
+    const abort = new AbortController();
+    controller.current = abort;
+    setVisible(true);
     setLoading(true);
     try {
       const response = await apiClient.post(
-        `/chats/messages/${messageId}/media/${media._id}/access-url`,
+        `/chats/messages/${messageId}/media/${media._id}/open`,
+        undefined,
+        { signal: abort.signal, timeout: 60_000 },
       );
-      if (!mounted.current || !isSessionCurrent(scope)) return;
-      const value = unwrap<{ url: unknown }>(response.data).url;
+      if (!valid()) return;
+      used.current = true;
       setConsumed(true);
-      if (typeof value !== 'string') return;
-      const target = new URL(value);
+      const value = unwrap<{ dataUri: string; message: BackendMessage }>(response.data);
+      acceptMessage(value.message);
       if (
-        !['https:', ...(__DEV__ ? ['http:'] : [])].includes(target.protocol) ||
-        target.username ||
-        target.password
+        typeof value.dataUri !== 'string' ||
+        !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.dataUri)
       )
-        return;
-      setUrl(value);
+        throw new Error('Invalid photo response');
+      // Only this component holds the bytes. No reusable URL or filesystem copy.
+      setUri(value.dataUri);
     } catch (error) {
-      if (!mounted.current || !isSessionCurrent(scope)) return;
+      if (!valid()) return;
       if (axios.isAxiosError(error) && error.response?.status === 410) {
+        used.current = true;
         setConsumed(true);
-        toast.error(`This ${kind} was already opened.`);
-      } else {
-        toast.error(describeError(serviceError(error), `This ${kind} is unavailable.`));
-      }
+        toast.error('This photo was already opened or has expired.');
+      } else toast.error(describeError(serviceError(error), 'Could not open this photo.'));
+      close();
     } finally {
-      if (mounted.current) setLoading(false);
+      if (valid()) pending.current = false;
     }
   };
-
-  const label = mine
-    ? `View-once ${kind} · ${opened ? 'Opened' : 'Not opened yet'}`
-    : opened
-      ? 'Opened'
-      : `View once ${kind}`;
+  const onLoad = () => {
+    if (loaded.current) return;
+    loaded.current = true;
+    setLoading(false);
+    if (viewDurationSeconds) {
+      setRemaining(viewDurationSeconds);
+      setDeadline(Date.now() + viewDurationSeconds * 1000);
+    }
+  };
+  const label = `${mode} · ${unavailable ? 'Opened or expired' : mine ? 'Not opened yet' : 'Tap to open'}`;
   const tint = mine ? theme.colors.onPrimary : theme.colors.text;
-
   return (
     <>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
-        accessibilityHint={
-          !mine && !opened ? `Opens the ${kind}. It can only be viewed once.` : undefined
-        }
-        accessibilityState={{ disabled: mine || Boolean(opened) }}
-        disabled={mine || Boolean(opened) || loading}
+        accessibilityState={{ disabled: mine || unavailable || loading }}
+        disabled={mine || unavailable || loading}
         onPress={() => void open()}
-        style={[styles.chip, { borderColor: tint, opacity: opened && !mine ? 0.6 : 1 }]}
+        style={[styles.chip, { borderColor: tint, opacity: unavailable ? 0.6 : 1 }]}
       >
-        {loading ? (
-          <ActivityIndicator size="small" color={tint} />
-        ) : (
-          <Ionicons name={opened ? 'radio-button-off' : 'radio-button-on'} size={18} color={tint} />
-        )}
+        <Ionicons
+          name={viewDurationSeconds ? 'timer-outline' : 'radio-button-on'}
+          size={20}
+          color={tint}
+        />
         <Text style={{ color: tint }}>{label}</Text>
       </Pressable>
-      <Modal
-        visible={Boolean(url)}
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setUrl(null)}
-      >
-        <View
-          style={[
-            styles.viewer,
-            {
-              backgroundColor: theme.colors.mediaBackground,
-              paddingTop: insets.top,
-              paddingBottom: insets.bottom,
-            },
-          ]}
-        >
-          {url ? (
-            <RemoteMedia
-              uri={url}
-              mimetype={media.mimetype}
-              width={width}
-              height={height - insets.top - insets.bottom - 72}
-              privateMedia
-            />
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Close ${kind}`}
-            onPress={() => setUrl(null)}
-            style={styles.close}
-          >
-            <Ionicons name="close" size={22} color={theme.colors.onImage} />
-            <Text style={{ color: theme.colors.onImage }}>Close · it can't be opened again</Text>
-          </Pressable>
-        </View>
-      </Modal>
+      <ChatPhotoViewer
+        visible={visible}
+        uri={uri}
+        loading={loading}
+        label={
+          viewDurationSeconds && !loading ? `${remaining}s remaining` : `${mode} · one opening`
+        }
+        onClose={close}
+        onLoad={onLoad}
+        onError={() => {
+          toast.error('This photo could not be displayed.');
+          close();
+        }}
+      />
     </>
   );
 }
-
 const styles = StyleSheet.create({
   chip: {
     marginTop: spacing.xs,
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: spacing.md,
     borderRadius: radius.full,
     borderWidth: StyleSheet.hairlineWidth,
@@ -176,13 +186,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     alignSelf: 'flex-start',
-  },
-  viewer: { flex: 1, justifyContent: 'center' },
-  close: {
-    height: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
   },
 });

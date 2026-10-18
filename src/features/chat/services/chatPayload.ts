@@ -17,6 +17,7 @@ export type BackendMessage = {
   media?: ChatMedia[];
   expiresAt?: string;
   viewOnce?: boolean;
+  viewDurationSeconds?: number;
   viewedAt?: string;
   /** Idempotency key the sender supplied; echoed back on saved messages. */
   clientId?: string;
@@ -59,6 +60,11 @@ export function parseMessage(value: unknown): BackendMessage | null {
   if (raw.expiresAt != null && !date(raw.expiresAt)) return null;
   if (raw.viewedAt != null && !date(raw.viewedAt)) return null;
   if (raw.viewOnce != null && typeof raw.viewOnce !== 'boolean') return null;
+  if (
+    raw.viewDurationSeconds != null &&
+    ![3, 10, 30, 60].includes(raw.viewDurationSeconds as number)
+  )
+    return null;
   const media: ChatMedia[] = [];
   for (const value of (raw.media ?? []) as unknown[]) {
     const item = record(value);
@@ -93,7 +99,9 @@ export function parseMessage(value: unknown): BackendMessage | null {
     isRead: raw.isRead === true,
     media,
     expiresAt: typeof raw.expiresAt === 'string' ? raw.expiresAt : undefined,
-    viewOnce: raw.viewOnce === true || undefined,
+    viewOnce: raw.viewOnce === true || raw.viewDurationSeconds != null || undefined,
+    viewDurationSeconds:
+      typeof raw.viewDurationSeconds === 'number' ? raw.viewDurationSeconds : undefined,
     viewedAt: typeof raw.viewedAt === 'string' ? raw.viewedAt : undefined,
     // A malformed key is dropped; it never invalidates the message itself.
     clientId: isClientId(raw.clientId) ? raw.clientId : undefined,
@@ -137,6 +145,7 @@ export function mapMessage(value: unknown, key: string): Message {
     media: raw.media ?? [],
     ...(raw.expiresAt ? { expiresAt: raw.expiresAt } : {}),
     ...(raw.viewOnce ? { viewOnce: true } : {}),
+    ...(raw.viewDurationSeconds ? { viewDurationSeconds: raw.viewDurationSeconds } : {}),
     ...(raw.viewedAt ? { viewedAt: raw.viewedAt } : {}),
     // Only the viewer's own key can correlate with their local outbox.
     ...(raw.clientId && senderId(raw.sender) === sessionIdentity.userId

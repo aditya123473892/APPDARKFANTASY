@@ -48,3 +48,32 @@ test('Metro proxy forwards API bodies, auth headers, uploads and Socket.IO polli
   }
   assert.equal(await (await fetch(`http://127.0.0.1:${port}/status`)).text(), 'metro');
 });
+
+test('repeated login/profile requests do not reuse stale backend sockets', async (t) => {
+  const sockets = new Set();
+  const backend = http.createServer((req, res) => {
+    sockets.add(req.socket);
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ path: req.url }));
+    });
+  });
+  const backendPort = await listen(backend);
+  const proxy = http.createServer(createDevApiProxy((req, res) => res.end('metro'), backendPort));
+  const port = await listen(proxy);
+  t.after(() => {
+    proxy.closeAllConnections(); proxy.close();
+    backend.closeAllConnections(); backend.close();
+  });
+  for (let attempt = 0; attempt < 15; attempt++) {
+    for (const path of ['/api/auth/login', '/api/auth/me']) {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+        method: path.endsWith('login') ? 'POST' : 'GET',
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).path, path);
+    }
+  }
+  assert.equal(sockets.size, 30, 'each request uses a fresh connection to the restartable backend');
+});

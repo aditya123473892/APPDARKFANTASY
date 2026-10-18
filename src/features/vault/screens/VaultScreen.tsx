@@ -13,7 +13,7 @@ import { useVaultNetwork, retrySync } from '../sync';
 import { exportPhotos } from '../export';
 
 export function VaultScreen(): React.JSX.Element {
-  useScreenshotProtection('vault', true, true);
+  useScreenshotProtection('vault');
   const router = useRouter();
   const network = useVaultNetwork();
   const { unlocked, revision } = useVaultLock();

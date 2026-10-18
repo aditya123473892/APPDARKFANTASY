@@ -12,7 +12,7 @@ import { downloadPhoto } from '../sync';
 import { exportPhotos } from '../export';
 
 export function VaultViewer(): React.JSX.Element {
-  useScreenshotProtection('vault-viewer', true, true);
+  useScreenshotProtection('vault-viewer');
   const { id } = useLocalSearchParams<{ id: string }>();
   const unlocked = useVaultLock((s) => s.unlocked);
   const [display, setDisplay] = useState<{ id: string; uri: string }>();

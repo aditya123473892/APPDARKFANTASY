@@ -18,6 +18,7 @@ export type Message = {
   expiresAt?: string;
   /** View-once media: the recipient can open it a single time. */
   viewOnce?: boolean;
+  viewDurationSeconds?: number;
   /** When the recipient opened the view-once media. */
   viewedAt?: string;
 };
@@ -64,4 +65,6 @@ export type SendMessageInput = {
   ttlSeconds?: number;
   /** Send the single attachment as view-once (direct chats only). */
   viewOnce?: boolean;
+  /** One opening that closes automatically after the photo loads. */
+  viewDurationSeconds?: number;
 };

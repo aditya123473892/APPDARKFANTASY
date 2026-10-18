@@ -985,6 +985,7 @@ function harness(overrides = {}) {
     },
     '@/services/api/photoUpload': {
       uploadPhoto: async () => 'c191eb48-9c83-4996-99c1-01c2af8d9426',
+      uploadChatPhoto: async () => 'c191eb48-9c83-4996-99c1-01c2af8d9426',
       cleanupPickedAssets: async () => {},
     },
     react: {
@@ -1078,6 +1079,8 @@ function harness(overrides = {}) {
         Date: overrides.__date ?? Date,
         setTimeout: overrides.__setTimeout ?? setTimeout,
         clearTimeout: overrides.__clearTimeout ?? clearTimeout,
+        setInterval: overrides.__setInterval ?? setInterval,
+        clearInterval: overrides.__clearInterval ?? clearInterval,
         console: { debug: (...args) => logs.push(args), error: (...args) => logs.push(args) },
       },
       { filename },
@@ -1263,8 +1266,8 @@ test('401 expires session; 403 preserves session; expired token cannot restore',
   assert.equal(h.runtime.getRuntimeToken(), null);
 });
 
-test('generic errors conceal nonexistent account vs backend wrong-password 500', async () => {
-  for (const status of [400, 500]) {
+test('generic errors conceal nonexistent account vs incorrect password', async () => {
+  for (const status of [400, 401]) {
     const h = harness();
     h.apiClient.defaults.adapter = async (config) => {
       const response = h.ok(config, null);
@@ -1282,6 +1285,23 @@ test('generic errors conceal nonexistent account vs backend wrong-password 500',
       (error) => error.code === 'INVALID_CREDENTIALS' && !error.message.includes('sensitive'),
     );
     assert.deepEqual(h.logs, []);
+  }
+});
+
+test('login distinguishes backend and proxy outages from incorrect credentials', async () => {
+  for (const status of [500, 502, 503, 504]) {
+    for (const envelope of [false, true]) {
+      const h = harness();
+      h.apiClient.defaults.adapter = async (config) => {
+        const response = h.ok(config, null);
+        response.data = { error: 'Service unavailable', statusCode: status, message: 'Local backend is unavailable on port 9000' };
+        if (envelope) return response;
+        response.status = status;
+        throw new axios.AxiosError('Server unavailable', 'ERR_BAD_RESPONSE', config, undefined, response);
+      };
+      await assert.rejects(h.service.login({ email: 'admin@darkfantasy.local', password: 'private', strategy: 'email_password' }),
+        (error) => error.code === 'SERVER');
+    }
   }
 });
 
@@ -2469,6 +2489,194 @@ test('a failed S3 POST is never confirmed and scratch files are removed', async 
   assert.equal(confirmations, 0);
   assert.equal(cleanup, 1);
   h.runtime.teardownSession();
+});
+
+test('Android gallery chat uploads bypass a locked vault and clean only temporary files', async () => {
+  const deleted = [], requests = [];
+  let vaultCalls = 0;
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    '@/features/vault/vaultService': { publishPhoto: async () => { vaultCalls++; throw Error('Vault is locked'); } },
+    'expo-image-manipulator': {
+      ImageManipulator: { manipulate: () => ({ renderAsync: async () => ({
+        width: 100, saveAsync: async () => ({ uri: 'file:///cache/chat-clean.jpg' }),
+      }) }) }, SaveFormat: { JPEG: 'jpeg' },
+    },
+    'expo-file-system/legacy': {
+      cacheDirectory: 'file:///cache/', getInfoAsync: async () => ({ exists: true, size: 1000 }),
+      deleteAsync: async (uri) => deleted.push(uri), FileSystemUploadType: { MULTIPART: 1 },
+      createUploadTask: () => ({ uploadAsync: async () => ({ status: 204 }), cancelAsync: async () => {} }),
+    },
+  });
+  h.runtime.setSessionIdentity('111111111111111111111111', h.token('111111111111111111111111'));
+  h.apiClient.defaults.adapter = async (config) => {
+    requests.push(config.url);
+    return h.ok(config, config.url === '/photos/upload-url'
+      ? { uploadId: 'gallery-upload', status: 'pending', url: 'https://private.example/', fields: { key: 'temp/server-key' } }
+      : { uploadId: 'gallery-upload', status: 'approved' });
+  };
+  const upload = h.load('src/services/api/photoUpload.ts');
+  const asset = { uri: 'content://gallery/original.jpg', type: 'image/jpeg', name: 'photo.jpg' };
+  assert.equal(await upload.uploadChatPhoto(asset), 'gallery-upload');
+  assert.equal(vaultCalls, 0);
+  assert.deepEqual(requests, ['/photos/upload-url', '/photos/confirm']);
+  assert.deepEqual(deleted, ['file:///cache/chat-clean.jpg']);
+  await upload.cleanupPickedAssets([asset]);
+  assert.equal(deleted.includes(asset.uri), false, 'never delete or export the original gallery photo');
+  h.runtime.teardownSession();
+});
+
+test('timed photo sends carry their one-opening duration without requiring the message TTL flag', async () => {
+  const h = harness({ './socketSession': { refreshUnread: async () => {}, getHistory: async () => [] } });
+  const me = '111111111111111111111111', other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  let body;
+  h.apiClient.defaults.adapter = async (config) => {
+    body = JSON.parse(config.data);
+    return h.ok(config, { _id: '444444444444444444444444', sender: me, receiver: other,
+      sentAt: '2026-10-18T00:00:00Z', viewOnce: true, viewDurationSeconds: 10 });
+  };
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  const sent = await service.sendMessage({ conversationId: `user:${other}`, text: '', clientId: 'timer-photo-1',
+    viewDurationSeconds: 10, assets: [{ uri: 'content://photo', type: 'image/jpeg', name: 'photo.jpg' }] });
+  assert.equal(body.viewOnce, true);
+  assert.equal(body.viewDurationSeconds, 10);
+  assert.equal('ttlSeconds' in body, false);
+  assert.equal(sent.viewDurationSeconds, 10);
+  assert.equal(sent.viewOnce, true);
+  h.runtime.teardownSession();
+});
+
+test('stale socket and history responses cannot reset an opened photo', () => {
+  const h = harness();
+  const me = '111111111111111111111111', other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const chat = h.load('src/features/chat/services/chatState.ts');
+  const key = `user:${other}`;
+  const message = { id: '444444444444444444444444', conversationId: key, senderId: other,
+    text: '', createdAt: '2026-10-18T00:00:00Z', status: 'sent', viewOnce: true };
+  chat.mergeMessage({ ...message, viewedAt: '2026-10-18T00:00:10Z' });
+  chat.mergeMessage(message);
+  let rows = chat.reconcileHistory(key, [message], chat.historyVersion());
+  assert.equal(rows[0].viewedAt, '2026-10-18T00:00:10Z');
+  h.runtime.teardownSession();
+});
+
+function photoViewerHarness(seconds) {
+  const hooks = [], effects = [], intervals = new Map();
+  let cursor = 0, now = Date.now(), intervalId = 0, background;
+  const same = (a, b) => a && b && a.length === b.length && a.every((item, i) => item === b[i]);
+  const react = {
+    useState(initial) {
+      const index = cursor++;
+      hooks[index] ??= { value: typeof initial === 'function' ? initial() : initial };
+      return [hooks[index].value, (next) => { hooks[index].value = next; }];
+    },
+    useRef(initial) { const index = cursor++; return hooks[index] ??= { current: initial }; },
+    useCallback(fn, deps) {
+      const index = cursor++;
+      if (!same(hooks[index]?.deps, deps)) hooks[index] = { value: fn, deps };
+      return hooks[index].value;
+    },
+    useEffect(fn, deps) {
+      const index = cursor++;
+      if (!same(hooks[index]?.deps, deps)) {
+        const previous = hooks[index];
+        hooks[index] = { deps };
+        effects.push(() => { previous?.cleanup?.(); hooks[index].cleanup = fn(); });
+      }
+    },
+  };
+  class Clock extends Date { static now() { return now; } }
+  const h = harness({
+    react,
+    'react-native': { Platform: { OS: 'android' }, Pressable: 'Pressable',
+      StyleSheet: { create: (s) => s, hairlineWidth: 1 },
+      AppState: { addEventListener: (_name, fn) => { background = fn; return { remove() {} }; } },
+    },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    '@/components/ui': { Text: 'Text' },
+    '@/components/ui/Toast': { toast: { error() {} } },
+    '@/hooks/useScreenshotProtection': { useScreenshotProtection() {} },
+    '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
+    '../services/chatState': { acceptMessage() {} },
+    './ChatPhotoViewer': { ChatPhotoViewer: 'Viewer' },
+    __date: Clock,
+    __setInterval: (fn) => { intervals.set(++intervalId, fn); return intervalId; },
+    __clearInterval: (id) => intervals.delete(id),
+  });
+  const me = '111111111111111111111111', other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  let requests = 0;
+  h.apiClient.defaults.adapter = async (config) => {
+    requests++;
+    assert.match(config.url, /\/open$/);
+    return h.ok(config, { dataUri: 'data:image/jpeg;base64,/9j/', message: {
+      _id: '444444444444444444444444', sender: other, receiver: me,
+      sentAt: new Date(now).toISOString(), viewedAt: new Date(now).toISOString(), viewOnce: true,
+    } });
+  };
+  const { ViewOnceAttachment } = h.load('src/features/chat/components/ViewOnceAttachment.tsx');
+  const render = () => {
+    cursor = 0;
+    const tree = ViewOnceAttachment({ messageId: '444444444444444444444444', mine: false,
+      media: { _id: '555555555555555555555555', mimetype: 'image/jpeg', status: 'active' },
+      viewDurationSeconds: seconds });
+    effects.splice(0).forEach((fn) => fn());
+    return tree.props.children;
+  };
+  return { h, render, intervals, requests: () => requests,
+    background: () => background('background'),
+    advance: (ms) => { now += ms; [...intervals.values()].forEach((fn) => fn()); } };
+}
+
+test('view-once viewer blocks double taps and clears in-memory bytes on close', async () => {
+  const v = photoViewerHarness();
+  const [chip] = v.render();
+  chip.props.onPress(); chip.props.onPress();
+  await new Promise(setImmediate);
+  let [, viewer] = v.render();
+  assert.equal(v.requests(), 1);
+  assert.equal(viewer.props.uri, 'data:image/jpeg;base64,/9j/');
+  viewer.props.onLoad();
+  viewer.props.onClose();
+  const [closedChip, closedViewer] = v.render();
+  assert.equal(closedViewer.props.uri, null);
+  assert.equal(closedViewer.props.visible, false);
+  closedChip.props.onPress();
+  await new Promise(setImmediate);
+  assert.equal(v.requests(), 1);
+  v.h.runtime.teardownSession();
+});
+
+test('timed photo countdown starts after decoding, then clears bytes and prevents reopening', async () => {
+  const v = photoViewerHarness(3);
+  v.render()[0].props.onPress();
+  await new Promise(setImmediate);
+  let [, viewer] = v.render();
+  assert.equal(v.intervals.size, 0, 'download time is not charged against viewing time');
+  viewer.props.onLoad();
+  v.render();
+  v.advance(3100);
+  const [chip, closed] = v.render();
+  assert.equal(closed.props.visible, false);
+  assert.equal(closed.props.uri, null);
+  chip.props.onPress();
+  await new Promise(setImmediate);
+  assert.equal(v.requests(), 1);
+  v.h.runtime.teardownSession();
+});
+
+test('backgrounding a restricted photo removes it immediately', async () => {
+  const v = photoViewerHarness(10);
+  v.render()[0].props.onPress();
+  await new Promise(setImmediate);
+  assert.equal(v.render()[1].props.visible, true);
+  v.background();
+  const [, closed] = v.render();
+  assert.equal(closed.props.uri, null);
+  assert.equal(closed.props.visible, false);
+  v.h.runtime.teardownSession();
 });
 
 test('release media URLs reject HTTP and file URIs', () => {

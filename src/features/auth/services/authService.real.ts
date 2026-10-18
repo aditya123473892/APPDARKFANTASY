@@ -7,6 +7,7 @@ import { parseUser, type User as BackendUser } from '../userModel';
 type Envelope<T> = { data: T; error: false | string; message?: string; statusCode: number };
 function unwrap<T>(body: Envelope<T>, login = false): T {
   if (body.error || body.statusCode >= 400) {
+    if (body.statusCode >= 500) throw new AuthError('SERVER');
     if (body.message === "Your account isn't verified yet, Please check your email.")
       throw new AuthError('UNVERIFIED');
     if (
@@ -16,7 +17,8 @@ function unwrap<T>(body: Envelope<T>, login = false): T {
     )
       throw new AuthError('BLOCKED');
     if (body.statusCode === 429) throw new AuthError('RATE_LIMITED');
-    if (body.statusCode === 401) throw new AuthError('SESSION_EXPIRED');
+    if (body.statusCode === 401)
+      throw new AuthError(login ? 'INVALID_CREDENTIALS' : 'SESSION_EXPIRED');
     throw new AuthError(login ? 'INVALID_CREDENTIALS' : 'SERVER');
   }
   if (!body.data) throw new AuthError('SERVER');
@@ -29,7 +31,8 @@ function translate(error: unknown, login = false): AuthError {
       return new AuthError('BLOCKED');
     if (!error.response) return new AuthError('NETWORK');
     if (error.response.status === 429) return new AuthError('RATE_LIMITED');
-    // Backend emits 500 for wrong passwords: do not expose account existence.
+    // Backend and proxy outages must not be presented as incorrect passwords.
+    if (error.response.status >= 500) return new AuthError('SERVER');
     if (login) return new AuthError('INVALID_CREDENTIALS');
     if (error.response.status === 401) return new AuthError('SESSION_EXPIRED');
   }

@@ -5,7 +5,7 @@ import { View } from 'react-native';
 import { Text } from './Text';
 import { useTheme } from '@/theme/useTheme';
 function Video({ uri, width, height }: { uri: string; width: number; height: number }) {
-  const player = useVideoPlayer(uri);
+  const player = useVideoPlayer({ uri, useCaching: false });
   return (
     <VideoView player={player} nativeControls contentFit="contain" style={{ width, height }} />
   );

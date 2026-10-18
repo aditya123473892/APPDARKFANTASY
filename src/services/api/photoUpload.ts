@@ -12,7 +12,6 @@ import {
   sessionIdentity,
 } from '@/features/auth/sessionRuntime';
 import type { UploadAsset } from '@/features/feed/types';
-import { publishPhoto } from '@/features/vault/vaultService';
 
 type SignedUpload = {
   uploadId: string;
@@ -21,6 +20,7 @@ type SignedUpload = {
   fields?: Record<string, string>;
 };
 const completed = new WeakMap<UploadAsset, { generation: number; promise: Promise<string> }>();
+const chatCompleted = new WeakMap<UploadAsset, { generation: number; promise: Promise<string> }>();
 const controllers = new Set<AbortController>();
 registerSessionTeardown(() => {
   for (const controller of controllers) controller.abort();
@@ -58,7 +58,9 @@ export function uploadPhoto(asset: UploadAsset): Promise<string> {
   if (cached?.generation === scope) return cached.promise;
   const operation =
     Platform.OS === 'android'
-      ? publishPhoto(asset, (prepared) => performUpload(prepared, scope, true))
+      ? import('@/features/vault/vaultService').then(({ publishPhoto }) =>
+          publishPhoto(asset, (prepared) => performUpload(prepared, scope, true)),
+        )
       : performUpload(asset, scope);
   const promise = operation.catch((error) => {
     completed.delete(asset);
@@ -66,6 +68,20 @@ export function uploadPhoto(asset: UploadAsset): Promise<string> {
     throw serviceError(error);
   });
   completed.set(asset, { generation: scope, promise });
+  return promise;
+}
+
+/** Gallery-to-chat upload: no vault import, unlock, or persistent local copy. */
+export function uploadChatPhoto(asset: UploadAsset): Promise<string> {
+  const scope = sessionIdentity.generation;
+  const cached = chatCompleted.get(asset);
+  if (cached?.generation === scope) return cached.promise;
+  const promise = performUpload(asset, scope).catch((error) => {
+    chatCompleted.delete(asset);
+    if (error instanceof ServiceError) throw error;
+    throw serviceError(error);
+  });
+  chatCompleted.set(asset, { generation: scope, promise });
   return promise;
 }
 
