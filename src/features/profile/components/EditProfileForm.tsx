@@ -7,7 +7,10 @@ import { toast } from '@/components/ui/Toast';
 import type { UserView as User } from '@/features/auth/types';
 import { describeError } from '@/services/errors';
 import { spacing } from '@/theme';
-import { useUpdateMyProfile } from '../hooks/useProfiles';
+import { useUpdateMyProfile, useUpdateMyAvatar } from '../hooks/useProfiles';
+import { pickImage } from '@/features/create-post/pickMedia';
+import { cleanupPickedAssets } from '@/services/api/photoUpload';
+import { useRef, useState } from 'react';
 
 const MAX_INTERESTS = 6;
 export const INTEREST_OPTIONS = [
@@ -57,6 +60,27 @@ export function EditProfileForm({
   onDone: () => void;
 }): React.JSX.Element {
   const update = useUpdateMyProfile();
+  const avatar = useUpdateMyAvatar();
+  const photoBusy = useRef(false);
+  const [choosingPhoto, setChoosingPhoto] = useState(false);
+  const changePhoto = async () => {
+    if (photoBusy.current) return;
+    photoBusy.current = true;
+    setChoosingPhoto(true);
+    let asset;
+    try {
+      asset = await pickImage();
+      if (!asset) return;
+      await avatar.mutateAsync(asset);
+      toast.success('Profile photo updated');
+    } catch (error) {
+      toast.error(describeError(error, "Couldn't update your profile photo."));
+    } finally {
+      if (asset) await cleanupPickedAssets([asset]);
+      photoBusy.current = false;
+      setChoosingPhoto(false);
+    }
+  };
   const {
     control,
     handleSubmit,
@@ -89,6 +113,16 @@ export function EditProfileForm({
 
   return (
     <View style={styles.form}>
+      <Button
+        label="Change profile photo"
+        icon="camera-outline"
+        variant="secondary"
+        loading={choosingPhoto}
+        disabled={update.isPending}
+        onPress={() => {
+          void changePhoto();
+        }}
+      />
       <Controller
         control={control}
         name="name"

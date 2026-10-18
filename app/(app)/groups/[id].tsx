@@ -1,3 +1,4 @@
+import { cleanupPickedAssets } from '@/services/api/photoUpload';
 import { useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -93,7 +94,12 @@ export default function GroupInfo(): React.JSX.Element {
   const photo = useMutation({
     mutationFn: async () => {
       const asset = await pickImage();
-      return asset ? groupService.uploadIcon(id, asset) : null;
+      if (!asset) return null;
+      try {
+        return await groupService.uploadIcon(id, asset);
+      } finally {
+        await cleanupPickedAssets([asset]);
+      }
     },
     onSuccess: (result) => {
       if (result) refresh();

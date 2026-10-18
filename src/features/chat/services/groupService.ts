@@ -1,3 +1,4 @@
+import { uploadPhoto } from '@/services/api/photoUpload';
 import { apiClient } from '@/services/api/apiClient';
 import { getData, unwrap, serviceError } from '@/services/api/backend';
 import type { UploadAsset } from '@/features/feed/types';
@@ -45,21 +46,9 @@ export const groupService = {
       }),
     );
   },
-  uploadIcon(id: string, asset: UploadAsset) {
-    const form = new FormData();
-    if (asset.file) form.append('groupIcon', asset.file, asset.name);
-    else
-      form.append('groupIcon', {
-        uri: asset.uri,
-        name: asset.name,
-        type: asset.type,
-      } as unknown as Blob);
-    return call<BackendGroup>(() =>
-      apiClient.put(`/groups/${id}/upload-icon`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 60000,
-      }),
-    );
+  async uploadIcon(id: string, asset: UploadAsset) {
+    const uploadId = await uploadPhoto(asset);
+    return call<BackendGroup>(() => apiClient.put(`/groups/${id}/upload-icon`, { uploadId }));
   },
   add(id: string, members: string[]) {
     return call<BackendGroup>(() =>

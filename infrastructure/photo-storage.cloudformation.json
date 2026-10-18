@@ -1,0 +1,264 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private photo storage; deploy separate dev and prod stacks.",
+  "Parameters": {
+    "Environment": {
+      "Type": "String",
+      "AllowedValues": ["dev", "prod"]
+    },
+    "BackendRoleName": {
+      "Type": "String",
+      "Description": "Existing backend IAM role name"
+    },
+    "BrowserOrigin": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^https://[A-Za-z0-9.-]+(:[0-9]+)?$"
+    }
+  },
+  "Conditions": {
+    "HasBrowserOrigin": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "BrowserOrigin"
+            },
+            ""
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "PhotosBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": {
+          "Fn::Sub": "darkfantasy-${Environment}-${AWS::AccountId}-${AWS::Region}-photos"
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "IgnorePublicAcls": true,
+          "BlockPublicPolicy": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "ExpireTemp",
+              "Status": "Enabled",
+              "Prefix": "temp/",
+              "ExpirationInDays": 1,
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 1
+              }
+            },
+            {
+              "Id": "AbortIncomplete",
+              "Status": "Enabled",
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 1
+              },
+              "ExpiredObjectDeleteMarker": true
+            }
+          ]
+        },
+        "CorsConfiguration": {
+          "Fn::If": [
+            "HasBrowserOrigin",
+            {
+              "CorsRules": [
+                {
+                  "AllowedOrigins": [
+                    {
+                      "Ref": "BrowserOrigin"
+                    }
+                  ],
+                  "AllowedMethods": ["POST", "GET", "HEAD"],
+                  "AllowedHeaders": ["Content-Type"],
+                  "MaxAge": 300
+                }
+              ]
+            },
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": {
+              "Ref": "Environment"
+            }
+          }
+        ]
+      }
+    },
+    "PhotosBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "PhotosBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion",
+                "s3:ListBucket",
+                "s3:ListBucketVersions"
+              ],
+              "Resource": [
+                {
+                  "Fn::GetAtt": ["PhotosBucket", "Arn"]
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "PhotoObjectPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": {
+          "Fn::Sub": "darkfantasy-${Environment}-photos"
+        },
+        "Roles": [
+          {
+            "Ref": "BackendRoleName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "PhotoObjects",
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/temp/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/users/*"
+                }
+              ]
+            },
+            {
+              "Sid": "CleanupListing",
+              "Effect": "Allow",
+              "Action": ["s3:ListBucket", "s3:ListBucketVersions"],
+              "Resource": {
+                "Fn::GetAtt": ["PhotosBucket", "Arn"]
+              },
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": ["temp/*", "users/*"]
+                }
+              }
+            },
+            {
+              "Sid": "VerifyPrivateBucketSettings",
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetBucketPublicAccessBlock",
+                "s3:GetBucketOwnershipControls",
+                "s3:GetEncryptionConfiguration",
+                "s3:GetLifecycleConfiguration",
+                "s3:GetBucketCORS"
+              ],
+              "Resource": {
+                "Fn::GetAtt": ["PhotosBucket", "Arn"]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ModerationPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": {
+          "Fn::Sub": "darkfantasy-${Environment}-moderation"
+        },
+        "Roles": [
+          {
+            "Ref": "BackendRoleName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["rekognition:DetectModerationLabels"],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": {
+                    "Ref": "AWS::Region"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "Bucket": {
+      "Value": {
+        "Ref": "PhotosBucket"
+      }
+    },
+    "Region": {
+      "Value": {
+        "Ref": "AWS::Region"
+      }
+    }
+  }
+}

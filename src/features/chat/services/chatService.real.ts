@@ -8,7 +8,7 @@ import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRu
 import { apiClient } from '@/services/api/apiClient';
 import { getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
 import { ServiceError } from '@/services/errors';
-import { appendAsset } from '@/services/api/multipart';
+import { uploadPhoto } from '@/services/api/photoUpload';
 import { isClientId } from '@/utils/clientId';
 import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
@@ -196,20 +196,13 @@ export const realChatService: ChatService = {
         ...(input.ttlSeconds ? { ttlSeconds: input.ttlSeconds } : {}),
         ...(input.viewOnce ? { viewOnce: true } : {}),
       };
-      let body: FormData | typeof payload = payload;
-      if (input.assets?.length) {
-        const form = new FormData();
-        for (const [field, value] of Object.entries(payload)) form.append(field, String(value));
-        input.assets.forEach((asset) => appendAsset(form, asset));
-        body = form;
-      }
-      const response = await apiClient.post(
-        '/chats/messages',
-        body,
-        input.assets?.length
-          ? { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 }
-          : undefined,
-      );
+      const photoIds: string[] = [];
+      for (const asset of input.assets || []) photoIds.push(await uploadPhoto(asset));
+      assertSessionCurrent(scope);
+      const response = await apiClient.post('/chats/messages', {
+        ...payload,
+        ...(photoIds.length ? { photoIds } : {}),
+      });
       assertSessionCurrent(scope);
       if (Number(response.data?.statusCode) >= 500) throw new ServiceError('UNKNOWN');
       const message: Message = {

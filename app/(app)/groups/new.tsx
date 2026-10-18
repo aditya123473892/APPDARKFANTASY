@@ -1,3 +1,4 @@
+import { usePhotoDraftCleanup } from '@/hooks/usePhotoDraftCleanup';
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -36,6 +37,7 @@ function NewGroup(): React.JSX.Element {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [photo, setPhoto] = useState<UploadAsset | null>(null);
+  usePhotoDraftCleanup(photo ? [photo] : []);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<ProfileView[]>([]);
   const [submitted, setSubmitted] = useState(false);

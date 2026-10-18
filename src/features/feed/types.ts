@@ -36,4 +36,9 @@ export type LikeState = { liked: boolean; likeCount: number };
 export type CommentPage = { comments: PostComment[]; hasMore: boolean; count: number };
 
 export type UploadAsset = { uri: string; name: string; type: string; file?: File };
-export type CreatePostInput = { body: string; audience: PostAudience; assets?: UploadAsset[] };
+export type CreatePostInput = {
+  clientId?: string;
+  body: string;
+  audience: PostAudience;
+  assets?: UploadAsset[];
+};

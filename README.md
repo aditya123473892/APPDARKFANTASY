@@ -59,7 +59,10 @@ EXPO_PUBLIC_DEV_API_PROXY=true
 Restart with `npm start -- --clear --lan`. Metro forwards `/api`, `/uploads`,
 and Socket.IO polling to `127.0.0.1:9000`; the backend keeps running on 9000.
 This proxy runs only with the development launcher. Chat uses polling while
-the proxy is enabled. For direct backend access, restore port 9000 and set both
+the proxy is enabled. The app uses the host and port of its Expo connection,
+so LAN address changes do not require updating the API URL in proxy mode.
+The configured API URL remains the fallback when Expo has no host information.
+For direct backend access, restore port 9000 and set both
 proxy flags to `false`.
 
 Mobile signup now calls `/auth/signup` with the required profile fields. After

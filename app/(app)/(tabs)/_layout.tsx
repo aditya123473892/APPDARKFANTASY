@@ -14,6 +14,7 @@ import { Text } from '@/components/ui/Text';
 const tabCapabilities: Record<string, Capability> = {
   home: 'canUseApp',
   discover: 'canUseApp',
+  events: 'canUseApp',
   chats: 'canSendMessages',
   activity: 'canUseApp',
   profile: 'canUseApp',
@@ -23,6 +24,7 @@ type IconName = keyof typeof Ionicons.glyphMap;
 const icons: Record<string, [IconName, IconName]> = {
   home: ['home', 'home-outline'],
   discover: ['compass', 'compass-outline'],
+  events: ['calendar', 'calendar-outline'],
   chats: ['chatbubbles', 'chatbubbles-outline'],
   activity: ['heart', 'heart-outline'],
   profile: ['person-circle', 'person-circle-outline'],
@@ -30,6 +32,7 @@ const icons: Record<string, [IconName, IconName]> = {
 const labels: Record<string, string> = {
   home: 'Home',
   discover: 'Discover',
+  events: 'Events',
   chats: 'Chats',
   activity: 'Likes',
   profile: 'Profile',
@@ -106,6 +109,7 @@ export default function TabsLayout(): React.JSX.Element {
     >
       <Tabs.Screen name="home" options={{ title: 'Home', tabBarAccessibilityLabel: 'Home feed' }} />
       <Tabs.Screen name="discover" options={{ title: 'Discover' }} />
+      <Tabs.Screen name="events" options={{ title: 'Events' }} />
       <Tabs.Screen
         name="chats"
         options={{

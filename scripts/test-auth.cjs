@@ -946,6 +946,18 @@ function harness(overrides = {}) {
   const logs = [];
   const queryData = new Map();
   const stubs = {
+    'expo-file-system': {
+      File: class extends Blob {
+        constructor(uri) {
+          super([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], { type: 'image/jpeg' });
+          this.uri = uri;
+        }
+      },
+    },
+    '@/services/api/photoUpload': {
+      uploadPhoto: async () => 'c191eb48-9c83-4996-99c1-01c2af8d9426',
+      cleanupPickedAssets: async () => {},
+    },
     react: {
       useState: (initial) => [initial, () => {}],
       useRef: (initial) => ({ current: initial }),
@@ -1033,6 +1045,7 @@ function harness(overrides = {}) {
         URL,
         AbortController,
         FormData,
+        fetch: overrides.__fetch ?? globalThis.fetch,
         Date: overrides.__date ?? Date,
         setTimeout: overrides.__setTimeout ?? setTimeout,
         clearTimeout: overrides.__clearTimeout ?? clearTimeout,
@@ -1578,6 +1591,81 @@ test('group read uses the markGroupAsRead acknowledgement; typing emits the gate
   realChatService.setTyping(`user:${h.other}`, true); // offline: dropped, never queued
   assert.equal(socket.packets.length, count);
   h.runtime.teardownSession();
+});
+
+test('comment services match the backend listing, submission and deletion envelopes', async () => {
+  const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
+  const calls = [];
+  const raw = {
+    _id: 'comment-id',
+    content: 'hello',
+    createdAt: '2026-10-18T00:00:00Z',
+    user: { _id: 'author-id', displayname: 'Comment author' },
+  };
+  h.apiClient.defaults.adapter = async (config) => {
+    calls.push({
+      url: config.url,
+      params: config.params,
+      body: config.data && JSON.parse(config.data),
+    });
+    return h.ok(
+      config,
+      config.method === 'get'
+        ? { comments: [raw], hasMore: true, count: 21 }
+        : config.method === 'post'
+          ? raw
+          : { commentCount: 20 },
+    );
+  };
+  const service = h.load('src/features/feed/services/feedService.real.ts');
+  const page = await service.listComments('post-id', 'cursor-id');
+  assert.equal(page.comments[0].author.name, 'Comment author');
+  assert.equal(page.hasMore, true);
+  assert.equal(page.count, 21);
+  assert.equal((await service.addComment('post-id', ' hello ', 'retry-key-123')).id, raw._id);
+  assert.equal(await service.deleteComment('post-id', raw._id), 20);
+  assert.equal(calls[0].url, '/posts/post-id/comments');
+  assert.equal(calls[0].params.before, 'cursor-id');
+  assert.equal(
+    JSON.stringify(calls[1].body),
+    JSON.stringify({ post: 'post-id', content: 'hello', clientId: 'retry-key-123' }),
+  );
+  assert.equal(calls[2].url, '/posts/post-id/comment/comment-id');
+});
+
+test('comment submission survives an unloaded cache and a refetch replacing the optimistic row', async () => {
+  let cache;
+  let cancelled = false;
+  const client = {
+    cancelQueries: async () => {
+      cancelled = true;
+    },
+    setQueryData: (_key, update) => {
+      assert.ok(cancelled);
+      cache = update(cache);
+    },
+    setQueriesData: () => {},
+    invalidateQueries: async () => {},
+  };
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    '@tanstack/react-query': { useQueryClient: () => client, useMutation: (options) => options },
+    '@/components/ui/Toast': { toast: { error: () => {}, success: () => {} } },
+  });
+  const mutation = h.load('src/features/feed/hooks/useFeed.ts').useAddComment('post-id');
+  const pending = await mutation.onMutate({ content: 'hello', clientId: 'retry-key-123' });
+  assert.equal(cache.pages[0].comments[0].id, pending);
+  const confirmed = { id: 'server-id', content: 'hello', author: { id: 'author-id' } };
+  // A background refresh can remove the local row before submission succeeds.
+  cache.pages[0].comments = [];
+  mutation.onSuccess(confirmed, {}, pending);
+  assert.equal(cache.pages[0].comments[0].id, 'server-id');
+  mutation.onSuccess(confirmed, {}, pending);
+  assert.equal(cache.pages[0].comments.length, 1, 'confirmed comments are not duplicated');
+  const failed = await mutation.onMutate({ content: 'failed', clientId: 'second-key-123' });
+  mutation.onError(new Error('offline'), {}, failed);
+  assert.equal(cache.pages[0].comments.length, 1);
+  assert.equal(cache.pages[0].comments[0].id, 'server-id');
 });
 
 test('posts use the server like state and cached posts update in every list', () => {
@@ -2195,15 +2283,233 @@ test('sends carry the disappearing timer and view-once flag only when chosen', a
     ttlSeconds: 30,
     assets: [{ uri: 'file:///photo.jpg', name: 'photo.jpg', type: 'image/jpeg' }],
   });
-  const form = bodies[1];
-  assert.equal(form.get('viewOnce'), 'true');
-  assert.equal(form.get('ttlSeconds'), '30');
-  assert.equal(form.get('receiver'), other);
-  assert.equal(form.get('clientId'), 'view-once-1', 'multipart sends carry the key too');
+  const form = JSON.parse(bodies[1]);
+  assert.equal(form.viewOnce, true);
+  assert.equal(form.ttlSeconds, 30);
+  assert.equal(form.receiver, other);
+  assert.equal(form.clientId, 'view-once-1', 'photo-reference sends carry the key too');
+  assert.deepEqual(form.photoIds, ['c191eb48-9c83-4996-99c1-01c2af8d9426']);
   await realChatService.sendMessage({
     conversationId: `user:${other}`,
     text: 'Plain',
     clientId: 'plain-key-1',
   });
   assert.deepEqual(Object.keys(JSON.parse(bodies[2])).sort(), ['clientId', 'message', 'receiver']);
+});
+
+test('photos resize/compress, upload directly without API credentials, confirm once and clean scratch files', async () => {
+  const requests = [],
+    uploads = [],
+    deleted = [],
+    resize = [],
+    saves = [];
+  let width = 1600;
+  const context = {
+    resize: (options) => {
+      resize.push(options);
+      width = options.width;
+    },
+    renderAsync: async () => ({
+      width,
+      height: 1000,
+      saveAsync: async (options) => {
+        saves.push(options);
+        return { uri: 'file:///cache/sanitized.jpg' };
+      },
+    }),
+  };
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    'expo-image-manipulator': {
+      ImageManipulator: { manipulate: () => context },
+      SaveFormat: { JPEG: 'jpeg' },
+    },
+    'expo-file-system/legacy': {
+      cacheDirectory: 'file:///cache/',
+      getInfoAsync: async () => ({ exists: true, size: 4000 }),
+      deleteAsync: async (uri) => {
+        deleted.push(uri);
+      },
+      FileSystemUploadType: { MULTIPART: 1 },
+      createUploadTask: (url, uri, options) => ({
+        uploadAsync: async () => {
+          uploads.push({ url, uri, options });
+          return { status: 204 };
+        },
+        cancelAsync: async () => {},
+      }),
+    },
+    __fetch: async () => {
+      throw new Error('Native image transfer must use the native uploader');
+    },
+  });
+  h.runtime.setSessionIdentity('111111111111111111111111', h.token('111111111111111111111111'));
+  h.apiClient.defaults.adapter = async (config) => {
+    requests.push({
+      url: config.url,
+      body: JSON.parse(config.data),
+      auth: config.headers.Authorization,
+    });
+    return h.ok(
+      config,
+      config.url === '/photos/upload-url'
+        ? {
+            uploadId: 'c191eb48-9c83-4996-99c1-01c2af8d9426',
+            status: 'pending',
+            url: 'https://private-bucket.s3.amazonaws.com/',
+            fields: { key: 'temp/owner/server.jpg', 'Content-Type': 'image/jpeg' },
+          }
+        : { uploadId: 'c191eb48-9c83-4996-99c1-01c2af8d9426', status: 'approved' },
+    );
+  };
+  const { uploadPhoto } = h.load('src/services/api/photoUpload.ts');
+  const asset = { uri: 'file:///cache/picked.jpg', type: 'image/jpeg', name: 'client-name.jpg' };
+  const results = await Promise.all([uploadPhoto(asset), uploadPhoto(asset)]);
+  assert.equal(results[0], results[1]);
+  assert.deepEqual(
+    requests.map((row) => row.url),
+    ['/photos/upload-url', '/photos/confirm'],
+  );
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].options.headers, undefined, 'API Bearer token must never reach S3');
+  assert.equal(uploads[0].uri, 'file:///cache/sanitized.jpg');
+  assert.equal(uploads[0].options.httpMethod, 'POST');
+  assert.equal(uploads[0].options.fieldName, 'file');
+  assert.equal(uploads[0].options.mimeType, 'image/jpeg');
+  assert.equal(uploads[0].options.uploadType, 1);
+  assert.equal(uploads[0].options.parameters.key, 'temp/owner/server.jpg');
+  assert.ok(requests.every((row) => row.auth?.startsWith('Bearer ')));
+  assert.equal(JSON.stringify(requests).includes('file:///'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(resize)), [{ width: 1080 }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(saves)), [
+    { compress: 0.8, format: 'jpeg', base64: false },
+  ]);
+  assert.deepEqual(deleted, ['file:///cache/sanitized.jpg']);
+  h.runtime.teardownSession();
+});
+
+test('a failed S3 POST is never confirmed and scratch files are removed', async () => {
+  let confirmations = 0,
+    puts = 0,
+    cleanup = 0;
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    'expo-image-manipulator': {
+      ImageManipulator: {
+        manipulate: () => ({
+          renderAsync: async () => ({
+            width: 100,
+            saveAsync: async () => ({ uri: 'file:///cache/small.jpg' }),
+          }),
+        }),
+      },
+      SaveFormat: { JPEG: 'jpeg' },
+    },
+    'expo-file-system/legacy': {
+      getInfoAsync: async () => ({ exists: true, size: 1000 }),
+      deleteAsync: async () => {
+        cleanup++;
+      },
+      FileSystemUploadType: { MULTIPART: 1 },
+      createUploadTask: () => ({
+        uploadAsync: async () => {
+          puts++;
+          return { status: 403 };
+        },
+        cancelAsync: async () => {},
+      }),
+    },
+  });
+  h.runtime.setSessionIdentity('111111111111111111111111', h.token('111111111111111111111111'));
+  h.apiClient.defaults.adapter = async (config) => {
+    if (config.url === '/photos/confirm') confirmations++;
+    return h.ok(config, {
+      uploadId: 'c191eb48-9c83-4996-99c1-01c2af8d9426',
+      status: 'pending',
+      url: 'https://private-bucket.s3.amazonaws.com/',
+      fields: { key: 'temp/owner/server.jpg' },
+    });
+  };
+  await assert.rejects(
+    h.load('src/services/api/photoUpload.ts').uploadPhoto({
+      uri: 'file:///cache/original.jpg',
+      type: 'image/jpeg',
+      name: 'photo.jpg',
+    }),
+    (error) => error.code === 'VALIDATION' && /S3 storage.*HTTP 403/.test(error.message),
+  );
+  assert.equal(puts, 1);
+  assert.equal(confirmations, 0);
+  assert.equal(cleanup, 1);
+  h.runtime.teardownSession();
+});
+
+test('release media URLs reject HTTP and file URIs', () => {
+  const h = harness();
+  const { mediaUrl } = h.load('src/services/api/backend.ts');
+  assert.equal(mediaUrl('http://public.example/photo.jpg'), '');
+  assert.equal(mediaUrl('file:///private.jpg'), '');
+  assert.equal(mediaUrl('https://private.example/photo.jpg'), 'https://private.example/photo.jpg');
+});
+
+test('profile photo saves a confirmed upload ID with auth and uses the returned private URL', async () => {
+  const h = harness();
+  const me = '111111111111111111111111';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const requests = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    requests.push({
+      method: config.method,
+      url: config.url,
+      body: JSON.parse(config.data),
+      auth: config.headers.Authorization,
+    });
+    return h.ok(config, {
+      user: { ...h.user, _id: me, avatar: 'https://private.example.test/photo.jpg' },
+    });
+  };
+  const { realProfileService } = h.load('src/features/profile/services/profileService.real.ts');
+  const user = await realProfileService.updateAvatar({
+    uri: 'file:///cache/picked.jpg',
+    type: 'image/jpeg',
+    name: 'picked.jpg',
+  });
+  assert.equal(user.avatarUri, 'https://private.example.test/photo.jpg');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'put');
+  assert.equal(requests[0].url, '/users/me/avatar');
+  assert.deepEqual(requests[0].body, { uploadId: 'c191eb48-9c83-4996-99c1-01c2af8d9426' });
+  assert.ok(requests[0].auth.startsWith('Bearer '));
+  assert.equal(JSON.stringify(requests).includes('file:///'), false);
+  h.runtime.teardownSession();
+});
+
+test('installed Expo fetch rejects URI parts and serializes Expo File bytes', async () => {
+  const filename = path.resolve('node_modules/expo/src/winter/fetch/convertFormData.ts');
+  const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(source, {
+    module,
+    exports: module.exports,
+    require: () => ({ blobToArrayBufferAsync: (blob) => blob.arrayBuffer() }),
+    Blob,
+    TextEncoder,
+    Uint8Array,
+  });
+  const { convertFormDataAsync } = module.exports;
+  const legacy = {
+    entries: () => [['file', { uri: 'file:///cache/photo.jpg', name: 'photo.jpg' }]],
+  };
+  await assert.rejects(convertFormDataAsync(legacy), /Unsupported FormDataPart/);
+  const file = {
+    name: 'photo.jpg',
+    type: 'image/jpeg',
+    bytes: async () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0]),
+  };
+  const { body } = await convertFormDataAsync({ entries: () => [['file', file]] });
+  const serialized = Buffer.from(body);
+  assert.ok(serialized.includes(Buffer.from([0xff, 0xd8, 0xff, 0xe0])));
+  assert.ok(serialized.includes(Buffer.from('filename="photo.jpg"')));
 });

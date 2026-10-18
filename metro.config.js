@@ -1,6 +1,16 @@
 const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
 const { getDefaultConfig } = require('expo/metro-config');
 const config = getDefaultConfig(__dirname);
+// File-map snapshots use V8 serialization, which can differ between Node runtimes.
+// Keep separate caches when starting Expo with system or portable Node installs.
+config.fileMapCacheDirectory = path.join(
+  os.tmpdir(),
+  'darkfantasy-metro-file-map',
+  `${process.versions.node}-${process.versions.v8}`,
+);
+fs.mkdirSync(config.fileMapCacheDirectory, { recursive: true });
 if (process.env.EXPO_DEV_API_PROXY === 'true' && process.env.APP_VARIANT === 'development') {
   const { createDevApiProxy } = require('./scripts/dev-api-proxy.cjs');
   const enhance = config.server.enhanceMiddleware;

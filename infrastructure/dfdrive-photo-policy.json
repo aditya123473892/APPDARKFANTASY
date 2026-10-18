@@ -1,0 +1,49 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "VerifyPrivatePhotoBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketOwnershipControls",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:GetBucketCORS"
+      ],
+      "Resource": "arn:aws:s3:::darkfantasymedia"
+    },
+    {
+      "Sid": "PhotoObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion"
+      ],
+      "Resource": [
+        "arn:aws:s3:::darkfantasymedia/temp/*",
+        "arn:aws:s3:::darkfantasymedia/users/*"
+      ]
+    },
+    {
+      "Sid": "PhotoCleanupListing",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:ListBucketVersions"],
+      "Resource": "arn:aws:s3:::darkfantasymedia",
+      "Condition": {
+        "StringLike": { "s3:prefix": ["temp/*", "users/*"] }
+      }
+    },
+    {
+      "Sid": "PhotoModeration",
+      "Effect": "Allow",
+      "Action": "rekognition:DetectModerationLabels",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "ap-south-1" }
+      }
+    }
+  ]
+}

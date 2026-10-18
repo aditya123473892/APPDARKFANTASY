@@ -10,6 +10,9 @@ import { toast } from '@/components/ui/Toast';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useCreatePost } from '@/features/feed/hooks/useFeed';
 import type { PostAudience, UploadAsset } from '@/features/feed/types';
+import { cleanupPickedAssets } from '@/services/api/photoUpload';
+import { usePhotoDraftCleanup } from '@/hooks/usePhotoDraftCleanup';
+import { createClientId } from '@/utils/clientId';
 import { pickMedia } from '../pickMedia';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { describeError } from '@/services/errors';
@@ -34,6 +37,8 @@ export function CreatePostScreen(): React.JSX.Element {
   const [assets, setAssets] = useState<UploadAsset[]>([]);
   const createPost = useCreatePost();
   const submitted = useRef(false);
+  const clientId = useRef(createClientId());
+  usePhotoDraftCleanup(assets);
 
   const trimmed = value.trim();
   const over = value.length > LIMIT;
@@ -61,7 +66,7 @@ export function CreatePostScreen(): React.JSX.Element {
   const submit = (): void => {
     if (!canPost) return;
     createPost.mutate(
-      { body: trimmed, audience, assets },
+      { body: trimmed, audience, assets, clientId: clientId.current },
       {
         onSuccess: (post) => {
           submitted.current = true;
@@ -133,21 +138,25 @@ export function CreatePostScreen(): React.JSX.Element {
           ) : null}
           <View style={{ gap: 12, marginTop: 20 }}>
             <Button
-              label={assets.length ? 'Change media' : 'Add photos or videos'}
+              label={assets.length ? 'Change media' : 'Add photos'}
               icon="images-outline"
               variant="secondary"
               disabled={createPost.isPending}
               onPress={() => {
                 void pickMedia()
                   .then((selected) => {
-                    if (selected.length) setAssets(selected);
+                    if (selected.length) {
+                      void cleanupPickedAssets(assets);
+                      setAssets(selected);
+                      clientId.current = createClientId();
+                    }
                   })
                   .catch(() => toast.error('Unable to open your photo library.'));
               }}
             />
             <Text variant="caption" color="secondary">
-              Choose at least one photo or video. Posts may require approval before appearing in the
-              public feed.
+              Choose at least one photo. Posts may require approval before appearing in the public
+              feed.
             </Text>
             {assets.map((asset, index) => (
               <View
@@ -163,7 +172,11 @@ export function CreatePostScreen(): React.JSX.Element {
                   variant="ghost"
                   fullWidth={false}
                   disabled={createPost.isPending}
-                  onPress={() => setAssets((items) => items.filter((_, i) => i !== index))}
+                  onPress={() => {
+                    void cleanupPickedAssets([asset]);
+                    setAssets((items) => items.filter((_, i) => i !== index));
+                    clientId.current = createClientId();
+                  }}
                 />
               </View>
             ))}

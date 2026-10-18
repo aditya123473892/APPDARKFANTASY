@@ -1,5 +1,12 @@
 import Constants from 'expo-constants';
-const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? (__DEV__ ? 'http://localhost:9000/api' : '');
+const localApiProxy = __DEV__ && process.env.EXPO_PUBLIC_DEV_API_PROXY === 'true';
+// Use the same host and port that delivered the app to this device. A saved
+// Wi-Fi IP becomes stale when DHCP assigns the development PC a new address.
+const metroHost = Constants.expoConfig?.hostUri;
+const apiUrl =
+  localApiProxy && metroHost
+    ? `http://${metroHost}/api`
+    : (process.env.EXPO_PUBLIC_API_URL ?? (__DEV__ ? 'http://localhost:9000/api' : ''));
 const parsed = new URL(apiUrl);
 if (
   !['http:', 'https:'].includes(parsed.protocol) ||
@@ -13,7 +20,7 @@ if (!__DEV__ && parsed.protocol !== 'https:') throw new Error('Release API must 
 export const env = {
   apiUrl: apiUrl.replace(/\/$/, ''),
   // Metro's HTTP proxy carries Socket.IO polling on the same reachable port.
-  localApiProxy: __DEV__ && process.env.EXPO_PUBLIC_DEV_API_PROXY === 'true',
+  localApiProxy,
   authMode:
     (process.env.EXPO_PUBLIC_AUTH_MODE ?? Constants.expoConfig?.extra?.authMode) === 'invite_only'
       ? ('invite_only' as const)

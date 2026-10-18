@@ -7,6 +7,7 @@ import { getCollection, getData, mediaUrl, unwrap, serviceError } from '@/servic
 import { ServiceError } from '@/services/errors';
 import type { ProfileView } from '../types';
 import type { ProfileService } from './profileService';
+import { uploadPhoto } from '@/services/api/photoUpload';
 
 export function mapProfile(user: User): ProfileView {
   if (!user || !/^[a-f\d]{24}$/i.test(user._id)) throw new ServiceError('UNKNOWN');
@@ -42,6 +43,16 @@ export const realProfileService: ProfileService = {
         bio: input.bio,
         intrests: input.interests,
       });
+      const { user } = unwrap<{ user: User }>(response.data);
+      return mapProfile(user);
+    } catch (error) {
+      throw serviceError(error);
+    }
+  },
+  async updateAvatar(asset) {
+    try {
+      const uploadId = await uploadPhoto(asset);
+      const response = await apiClient.put('/users/me/avatar', { uploadId });
       const { user } = unwrap<{ user: User }>(response.data);
       return mapProfile(user);
     } catch (error) {

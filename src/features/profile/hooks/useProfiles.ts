@@ -3,6 +3,7 @@ import { useAuthStore } from '@/features/auth/store/authStore';
 import { queryKeys } from '@/services/queryKeys';
 import { profileService } from '../services';
 import type { UpdateProfileInput } from '../types';
+import type { UploadAsset } from '@/features/feed/types';
 
 export function useDiscoverProfiles() {
   return useQuery({ queryKey: queryKeys.discover, queryFn: () => profileService.discover() });
@@ -27,6 +28,22 @@ export function useUpdateMyProfile() {
       updateUser(user);
       // Posts embed author details; refresh them so the new name shows everywhere.
       void queryClient.invalidateQueries({ queryKey: queryKeys.feed });
+    },
+  });
+}
+
+export function useUpdateMyAvatar() {
+  const queryClient = useQueryClient();
+  const refreshProfile = useAuthStore((state) => state.refreshProfile);
+  return useMutation({
+    mutationKey: ['profiles', 'updateAvatar'],
+    mutationFn: (asset: UploadAsset) => profileService.updateAvatar(asset),
+    onSuccess: async () => {
+      await refreshProfile();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.feed }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.discover }),
+      ]);
     },
   });
 }

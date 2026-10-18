@@ -1,16 +1,25 @@
 import { useMutation } from '@tanstack/react-query';
-import { Alert, Linking, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Input, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { authService } from '@/features/auth/services';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { spacing } from '@/theme';
-import { SUPPORT_EMAIL } from '@/utils/constants';
+import { apiClient } from '@/services/api/apiClient';
+import { unwrap } from '@/services/api/backend';
 import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
 
 export function AccountScreen(): React.JSX.Element {
   const user = useAuthStore((state) => state.user);
+  const deletion = useMutation({
+    mutationFn: async () => unwrap((await apiClient.delete('/users/me')).data),
+    onSuccess: async () => {
+      await useAuthStore.getState().logout();
+      toast.success('Your account is disabled and permanent deletion is queued.');
+    },
+    onError: () => toast.error('Unable to request deletion. Please try again.'),
+  });
   const reset = useMutation({
     mutationFn: (email: string) => authService.requestPasswordReset(email),
     onSuccess: (_data, email) =>
@@ -21,17 +30,14 @@ export function AccountScreen(): React.JSX.Element {
   const requestDeletion = (): void =>
     Alert.alert(
       'Delete your account?',
-      'This permanently removes your profile, connections and messages. Our support team will confirm the request with you by email.',
+      'Your account will be disabled immediately. Your profile, photos and messages will then be permanently removed.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Email support',
+          text: 'Delete account',
           style: 'destructive',
           onPress: () => {
-            const url = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Account deletion request')}`;
-            Linking.openURL(url).catch(() =>
-              toast.error(`No email app found. Contact ${SUPPORT_EMAIL}.`),
-            );
+            if (!deletion.isPending) deletion.mutate();
           },
         },
       ],
@@ -63,6 +69,7 @@ export function AccountScreen(): React.JSX.Element {
             title="Delete account"
             subtitle="Request permanent deletion of your data"
             danger
+            loading={deletion.isPending}
             onPress={requestDeletion}
             last
           />

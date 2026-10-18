@@ -16,7 +16,24 @@ npm-debug.log*
 expo-proxy.*.log
 
 # Keep this repository mobile-only.
-backenddf/
+# Keep backend dependencies/data/credentials ignored, while reviewing source.
+backenddf/*
+!backenddf/df-backend-pm-be/
+backenddf/df-backend-pm-be/*
+!backenddf/df-backend-pm-be/src/
+!backenddf/df-backend-pm-be/scripts/
+backenddf/df-backend-pm-be/scripts/*
+!backenddf/df-backend-pm-be/scripts/migrate-photos.ts
+!backenddf/df-backend-pm-be/package.json
+!backenddf/df-backend-pm-be/package-lock.json
+!backenddf/df-backend-pm-be/tsconfig.json
+!backenddf/df-backend-pm-be/tsconfig.build.json
+!backenddf/df-backend-pm-be/nest-cli.json
+!backenddf/df-backend-pm-be/Dockerfile
+!backenddf/df-backend-pm-be/.gitignore
+!backenddf/df-backend-pm-be/.dockerignore
+!backenddf/df-backend-pm-be/.env.example
+!backenddf/df-backend-pm-be/SECURE_PHOTOS.md
 Df-Fortend-pm-fe/
 darkfantasy-share/
 darkfantasy-runtime/

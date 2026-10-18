@@ -1,6 +1,7 @@
 import { apiClient } from '@/services/api/apiClient';
 import { getCollection, getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
-import { appendAsset } from '@/services/api/multipart';
+import { uploadPhoto } from '@/services/api/photoUpload';
+import { createClientId } from '@/utils/clientId';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
 import { displayName, type UserSummary } from '@/features/auth/userModel';
@@ -175,22 +176,20 @@ export const realFeedService: FeedService = {
   },
   async create(input) {
     if (!input.assets?.length)
-      throw new ServiceError('VALIDATION', 'Choose a photo or video before posting.');
-    const form = new FormData();
-    form.append('caption', input.body);
-    form.append(
-      'visibility',
-      input.audience === 'everyone'
-        ? 'public'
-        : input.audience === 'private'
-          ? 'private'
-          : 'friends',
-    );
-    input.assets.forEach((asset) => appendAsset(form, asset));
+      throw new ServiceError('VALIDATION', 'Choose a photo before posting.');
     try {
-      const response = await apiClient.post('/posts', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 60000,
+      const photoIds: string[] = [];
+      for (const asset of input.assets) photoIds.push(await uploadPhoto(asset));
+      const response = await apiClient.post('/posts', {
+        caption: input.body,
+        visibility:
+          input.audience === 'everyone'
+            ? 'public'
+            : input.audience === 'private'
+              ? 'private'
+              : 'friends',
+        photoIds,
+        clientId: input.clientId || createClientId(),
       });
       return mapPost(unwrap<BackendPost>(response.data));
     } catch (error) {

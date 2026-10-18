@@ -72,7 +72,13 @@ export function mediaUrl(value?: string): string {
   if (!value) return '';
   try {
     const url = new URL(value, `${new URL(env.apiUrl).origin}/`);
-    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      (!__DEV__ && url.protocol !== 'https:') ||
+      url.username ||
+      url.password
+    )
+      return '';
     // Local development files may have been stored with the server's loopback host.
     if (
       __DEV__ &&

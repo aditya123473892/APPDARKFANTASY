@@ -155,7 +155,7 @@ function setComments(
             index === 0 ? { ...page, comments: update(page.comments) } : page,
           ),
         }
-      : data,
+      : { pages: [{ comments: update([]), hasMore: false, count: 0 }], pageParams: [undefined] },
   );
 }
 
@@ -165,7 +165,8 @@ export function useAddComment(postId: string) {
   return useMutation({
     mutationFn: ({ content, clientId }: { content: string; clientId: string }) =>
       addComment(postId, content, clientId),
-    onMutate: ({ content, clientId }) => {
+    onMutate: async ({ content, clientId }) => {
+      await client.cancelQueries({ queryKey: queryKeys.comments(postId) });
       const me = useAuthStore.getState().user;
       const pending: PostComment = {
         id: `local-${clientId}`,
@@ -183,12 +184,12 @@ export function useAddComment(postId: string) {
       updateCachedPost(client, postId, (post) => ({ ...post, replies: post.replies + 1 }));
       return pending.id;
     },
-    onSuccess: (comment, _variables, pendingId) =>
-      setComments(client, postId, (comments) =>
-        comments
-          .filter((item) => item.id !== comment.id)
-          .map((item) => (item.id === pendingId ? comment : item)),
-      ),
+    onSuccess: (comment, _variables, pendingId) => {
+      setComments(client, postId, (comments) => [
+        comment,
+        ...comments.filter((item) => item.id !== comment.id && item.id !== pendingId),
+      ]);
+    },
     onError: (error, _variables, pendingId) => {
       setComments(client, postId, (comments) => comments.filter((item) => item.id !== pendingId));
       updateCachedPost(client, postId, (post) => ({
@@ -196,6 +197,12 @@ export function useAddComment(postId: string) {
         replies: Math.max(0, post.replies - 1),
       }));
       toast.error(describeError(error, "Couldn't post your comment."));
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.comments(postId) });
+      void client.invalidateQueries({ queryKey: queryKeys.feed });
+      void client.invalidateQueries({ queryKey: queryKeys.myPosts });
+      void client.invalidateQueries({ queryKey: ['user-posts'] });
     },
   });
 }

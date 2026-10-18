@@ -1,0 +1,104 @@
+import {
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFiles,
+  UseGuards,
+  UseInterceptors,
+  Body,
+  ValidationPipe,
+} from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { AuthUser } from 'src/common/decorators';
+import { JwtAuthGuard } from 'src/common/guards';
+import { IAuthUser } from 'src/common/interfaces';
+import {
+  successGetRes,
+  successRes,
+} from 'src/common/interceptors/response.handlers';
+import { ChatService } from './chats.service';
+import {
+  ChatMediaQueryDto,
+  CreateChatMessageDto,
+  UpdateChatMediaExpiryDto,
+} from './dto/create-chat-message.dto';
+import { ChatGateway } from './chats.gateway';
+
+@ApiTags('Chats')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Controller('chats')
+export class ChatsController {
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly chatGateway: ChatGateway,
+  ) {}
+
+  @Post('messages')
+  async createMessage(
+    @AuthUser() user: IAuthUser,
+    @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+    dto: CreateChatMessageDto,
+  ) {
+    const message = await this.chatService.createMediaMessage(user.id, dto);
+    this.chatGateway.broadcastSavedMessage(message);
+    return successRes(message, 'Message sent');
+  }
+
+  @Post('messages/:messageId/media/:mediaId/access-url')
+  async getAccessUrl(
+    @AuthUser() user: IAuthUser,
+    @Param('messageId') messageId: string,
+    @Param('mediaId') mediaId: string,
+  ) {
+    return successGetRes(
+      await this.chatService.getMediaAccessUrl(user.id, messageId, mediaId),
+    );
+  }
+
+  @Patch('messages/:messageId/media/:mediaId/revoke')
+  async revokeMedia(
+    @AuthUser() user: IAuthUser,
+    @Param('messageId') messageId: string,
+    @Param('mediaId') mediaId: string,
+  ) {
+    const message = await this.chatService.revokeMedia(
+      user.id,
+      messageId,
+      mediaId,
+    );
+    this.chatGateway.broadcastSavedMessage(message, 'messageUpdated');
+    return successRes(message, 'Media revoked');
+  }
+
+  @Patch('messages/:messageId/media/:mediaId/expiration')
+  async updateExpiration(
+    @AuthUser() user: IAuthUser,
+    @Param('messageId') messageId: string,
+    @Param('mediaId') mediaId: string,
+    @Body() dto: UpdateChatMediaExpiryDto,
+  ) {
+    const message = await this.chatService.updateMediaExpiration(
+      user.id,
+      messageId,
+      mediaId,
+      dto.expiresAt,
+    );
+    this.chatGateway.broadcastSavedMessage(message, 'messageUpdated');
+    return successRes(message, 'Media expiration updated');
+  }
+
+  @Get('media')
+  async listConversationMedia(
+    @AuthUser() user: IAuthUser,
+    @Query() query: ChatMediaQueryDto,
+  ) {
+    return successGetRes(
+      await this.chatService.listConversationMedia(user.id, query),
+    );
+  }
+}

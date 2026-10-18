@@ -1,3 +1,4 @@
+import { cleanupPickedAssets } from '@/services/api/photoUpload';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -119,14 +120,20 @@ export function ChatRoomScreen(): React.JSX.Element {
       };
       if (!allowed()) return;
       const assets = await pickMedia();
-      if (!assets.length || !allowed()) return;
+      if (!assets.length || !allowed()) {
+        await cleanupPickedAssets(assets);
+        return;
+      }
       const viewOnce =
         featureFlags.ENABLE_EPHEMERAL_CHAT &&
         conversationId.startsWith('user:') &&
         assets.length === 1
           ? await chooseViewOnce(assets[0]?.type)
           : false;
-      if (viewOnce === null || !allowed()) return;
+      if (viewOnce === null || !allowed()) {
+        await cleanupPickedAssets(assets);
+        return;
+      }
       try {
         await chatService.sendMessage({
           conversationId,
@@ -144,8 +151,11 @@ export function ChatRoomScreen(): React.JSX.Element {
               'Attachment send status is unknown. Refresh before sending again.',
             ),
           );
+      } finally {
+        await cleanupPickedAssets(assets);
       }
     },
+    onError: () => toast.error('Unable to open your photo library.'),
   });
   const listRef = useRef<FlashListRef<Row>>(null);
   const [showJump, setShowJump] = useState(false);

@@ -13,4 +13,6 @@ export const mockProfileService: ProfileService = {
   discover: () => respond(() => db.discoverable().map(view)),
   get: (userId) => respond(() => view(db.user(userId)), 300),
   updateMe: (input) => respond(() => db.updateMe(input), 600),
+  updateAvatar: (asset) =>
+    respond(() => db.updateMe({ avatarUri: asset.uri, photos: [asset.uri] }), 600),
 };
