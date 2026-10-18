@@ -10,7 +10,11 @@ if (process.argv[2] === 'start' && !process.env.EAS_BUILD_PROFILE)
   process.env.APP_VARIANT ??= 'development';
 
 const expoCli = join('node_modules', 'expo', 'bin', 'cli');
-const child = spawn(process.execPath, [expoCli, ...process.argv.slice(2)], {
+const args = process.argv.slice(2);
+// Default to Expo Go for the simpler vault; developers can still opt into --dev-client.
+if (args[0] === 'start' && !args.includes('--dev-client') && !args.includes('--go'))
+  args.push('--go');
+const child = spawn(process.execPath, [expoCli, ...args], {
   stdio: 'inherit',
   env: process.env,
 });

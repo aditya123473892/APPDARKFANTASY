@@ -11,7 +11,6 @@ import { registerLocalVaultLifecycle } from '@/features/auth/localVaultLifecycle
 import { beforeLogout } from '@/features/vault/logout';
 import { lock } from '@/features/vault/lock';
 import { localOwner, rememberOwner } from '@/features/vault/vaultService';
-import { VaultPasscodePrompt } from '@/features/vault/components/VaultPasscodePrompt';
 registerLocalVaultLifecycle({
   logout: beforeLogout,
   pause: lock,
@@ -43,10 +42,7 @@ export function AppProviders({ children }: PropsWithChildren): React.JSX.Element
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <QueryClientProvider client={queryClient}>
-            {children}
-            <VaultPasscodePrompt />
-          </QueryClientProvider>
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

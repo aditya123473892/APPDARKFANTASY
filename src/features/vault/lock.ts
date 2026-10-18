@@ -1,9 +1,7 @@
 import { AppState } from 'react-native';
 import { create } from 'zustand';
 import * as LA from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
 import { clearTemps } from './files';
-import { newKey, passcodeHash, equalHash } from './crypto';
 import { setting, setSetting } from './repository';
 
 export const useVaultLock = create<{ owner: string | null; unlocked: boolean; revision: number }>(
@@ -32,31 +30,26 @@ export function assertEpoch(owner: string, scope: number): void {
   assertUnlocked(owner);
   if (scope !== epoch) throw new Error('Vault locked');
 }
-const credentialName = (owner: string) => `darkfantasy.vault.${owner}.passcode`;
 export async function noDeviceLock(): Promise<boolean> {
   return (await LA.getEnrolledLevelAsync()) === LA.SecurityLevel.NONE;
 }
 async function waitForForeground(): Promise<void> {
   if (AppState.currentState === 'active') return;
   await new Promise<void>((resolve, reject) => {
-    const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active') { clearTimeout(deadline); subscription.remove(); resolve(); }
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        clearTimeout(deadline);
+        subscription.remove();
+        resolve();
+      }
     });
-    const deadline = setTimeout(() => { subscription.remove(); reject(new Error('Unlock cancelled.')); }, 5000);
+    const deadline = setTimeout(() => {
+      subscription.remove();
+      reject(new Error('Unlock cancelled.'));
+    }, 5000);
   });
 }
-export async function configurePasscode(owner: string, passcode: string): Promise<void> {
-  if (!(await noDeviceLock())) throw new Error('Use your device screen lock.');
-  if (await SecureStore.getItemAsync(credentialName(owner)))
-    throw new Error('An app passcode is already configured.');
-  if (!/^\d{6,12}$/.test(passcode)) throw new Error('Choose a passcode with 6–12 digits.');
-  const salt = newKey();
-  await SecureStore.setItemAsync(
-    credentialName(owner),
-    JSON.stringify({ salt, hash: await passcodeHash(passcode, salt) }),
-  );
-}
-export async function unlock(owner: string, passcode?: string): Promise<void> {
+export async function unlock(owner: string): Promise<void> {
   if (checking) throw new Error('Unlock is already in progress.');
   checking = true;
   const scope = epoch;
@@ -64,21 +57,20 @@ export async function unlock(owner: string, passcode?: string): Promise<void> {
     const until = Number((await setting(owner, 'lockout')) || 0);
     if (Date.now() < until) throw new Error('Too many attempts. Try again after one minute.');
     let success = false;
-    if (await noDeviceLock()) {
-      const raw = await SecureStore.getItemAsync(credentialName(owner));
-      if (!raw || !passcode)
-        throw new Error('No device screen lock. Set up an app passcode to continue.');
-      const credential = JSON.parse(raw) as { salt: string; hash: string };
-      success = equalHash(credential.hash, await passcodeHash(passcode, credential.salt));
-    } else {
+    if (await noDeviceLock()) throw new Error('Set up an Android screen lock to use Photo Vault.');
+    {
       devicePrompt = true;
       let result: LA.LocalAuthenticationResult;
       try {
         result = await LA.authenticateAsync({
-          promptMessage: 'Unlock Photo Vault', disableDeviceFallback: false, biometricsSecurityLevel: 'strong',
+          promptMessage: 'Unlock Photo Vault',
+          disableDeviceFallback: false,
+          biometricsSecurityLevel: 'strong',
         });
         if (result.success) await waitForForeground();
-      } finally { devicePrompt = false; }
+      } finally {
+        devicePrompt = false;
+      }
       success = result.success;
       if (!result.success && ['user_cancel', 'app_cancel', 'system_cancel'].includes(result.error))
         throw new Error('Unlock cancelled.');
@@ -115,7 +107,10 @@ AppState.addEventListener('change', (state) => {
     void clearTemps().catch(() => undefined);
     // Android device-credential fallback opens Keyguard outside the activity.
     // Keep content locked while allowing that verified native prompt to resume.
-    if (devicePrompt) { useVaultLock.setState({ unlocked: false }); return; }
+    if (devicePrompt) {
+      useVaultLock.setState({ unlocked: false });
+      return;
+    }
     if (!timeoutMs) lock();
     else timer = setTimeout(lock, timeoutMs);
   }

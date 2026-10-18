@@ -75,7 +75,7 @@ async function canonicalBytes(
     if (
       bytes.length > 5 * 1024 * 1024 ||
       bytes.length !== photo.size ||
-      hash(bytes) !== photo.sha256
+      (await hash(bytes)) !== photo.sha256
     )
       throw new Error('Photo checksum failed');
     return { bytes, photo };

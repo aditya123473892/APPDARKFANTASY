@@ -1,115 +1,70 @@
-# Android Photo Vault
+# Photo Vault — simpler Android version
 
-Android only. Requires an Expo development build; Expo Go cannot load the native crypto modules.
+The original encrypted implementation is preserved on remote branch [`encrypt`](https://github.com/aditya123473892/APPDARKFANTASY/tree/encrypt), commit `f8a3ba6`.
+The working `claude` branch uses the simpler vault requested afterwards.
 
-## Dependencies and build
+## Running
 
-Pinned native crypto: `react-native-quick-crypto@1.1.8`, `react-native-nitro-modules@0.37.1`, `react-native-quick-base64@3.0.1`. Quick Crypto resolves `@craftzdog/react-native-buffer@6.1.2`.
+Run `npm start` and scan with an **SDK 57 compatible Expo Go** on the same Wi-Fi.
+The launcher explicitly selects `--go`. Quick Crypto, Quick Base64, Nitro and expo-dev-client have been removed.
+`expo-crypto@57.0.4` provides UUIDs and SHA-256 checksums through the module already included in Expo Go. No custom native crypto is imported.
+Expo Go is a shared development host; app configuration, Android backup exclusions and package-specific permissions apply only to a standalone/development APK built from this project, not to Expo Go itself.
 
-Added Expo modules: SQLite 57.0.4, Local Authentication 57.0.3, Network 57.0.2, Media Library 57.0.5, Sharing 57.0.22, Dev Client 57.0.19. Backend: Zod 4.1.12.
+## What the simpler vault does
 
-The installed app uses Expo 57.0.27 / React Native 0.86.3 / New Architecture. Upstream dependency requirements accept this stack; the Android cloud build verifies compilation. Native runtime checks require an Android device.
+- Stores resized JPEGs in private app documents at `vault/{userId}/simple/{photoId}.jpg`; SQLite DB/WAL live in the same directory.
+- Uses ordinary JPEGs with **no additional image encryption at rest**. Android sandbox/device security protects normal access; a compromised device or extracted files can expose images. Hidden is only an in-app display preference.
+- Requires Android device authentication (biometric/device credential fallback), relocks on background and retains persistent failed-attempt lockout. There is no separate app passcode or per-user image encryption key.
+- Keeps encrypted-build files/DB outside the `simple/` directory untouched during normal use. Sync old pending images with the encrypted build before switching. Cloud copies download normally into the simpler vault. Logout warns about unsynced changes from either DB before an explicit wipe removes both versions for that account.
+- Keeps offline additions, persistent SQLite upload/edit/delete jobs, retry/backoff, tombstones, moderation rejection, hide/show/order, separate 50-photo vault limit, lazy downloads and SHA-256 checks.
+- Never writes to the gallery except after explicit export confirmation. Camera/gallery originals in the gallery are not removed. Picker/manipulator temporary copies are cleaned up.
+- Uses React Native Image with app-cache viewing copies; deletes those copies on close/background/logout. No expo-image URL/disk cache is used for vault photos.
+- Uses expo-screen-capture on vault screens; production always requests blocking. `EXPO_PUBLIC_ALLOW_SCREENSHOTS_FOR_TESTING=true` is honored only in development.
+- Retains explicit export/share, metadata removal, logout/discard guard, private backend endpoints, independent public publication copies and cleanup protections.
 
-`npm run build:android:dev` runs EAS development build with the existing emulator API URL (`http://10.0.2.2:9000/api`). Start Metro using `npm start` for device development and configure the public API address in `.env.mobile` for a physical phone. The launcher disables server `.env` loading. `.easignore` excludes server projects, environment files, signing files, and logs from the mobile archive.
+Existing Android `uploadPhoto()` callers still prepare a hidden vault copy and publish a separate approved copy through the original `/photos/upload-url` → S3 POST → `/photos/confirm` protocol. A vault key is never attached to public profile/chat/post/discovery resources. Deleting a private vault copy does not retract an already published photo.
 
-EAS project: `136eb041-ed2c-4aef-9120-b8f0f344c0d3`, account `aditya-61818`. No AWS credentials are added to the app. No IAM/bucket changes are required: existing private `temp/*` and `users/*` permissions and server-side encryption cover vault objects.
+## S3 paths and compression
 
-**Android development build succeeded:** [EAS build 8a7c9893](https://expo.dev/accounts/aditya-61818/projects/darkfantasy/builds/8a7c9893-31df-4a98-b970-6af6d57b306e). [Download APK](https://expo.dev/artifacts/eas/5hlmGUJ_-5gv8isgHsDkGKd4vjguOCFT7iZI0TlTpWc.apk). This confirms the pinned crypto/peer stack compiles on SDK 57 / RN 0.86.3 / Android New Architecture; device runtime acceptance is still pending. Backend changes are source changes and have not been deployed to a production service.
+S3 uses object-key prefixes (shown as folders here):
 
-A local APK copy is at `vault-build-preflight/photo-vault-android-development.apk` (307,724,032 bytes). SHA-256: `5e56440ab66578e56b87eed06ca8ba7fa9d2b42eb79ddc480dd00b65bbbb6804`. Inspection of the compiled APK confirmed `allowBackup=false`, both referenced backup XML files excluding `vault/` and SecureStore for cloud/device transfer, absence of broad media-read/GPS permissions, and packaged Quick Crypto/Nitro libraries for arm64-v8a, armeabi-v7a, x86 and x86_64.
+```text
+temp/{userId}/{uploadId}.jpg                  profile/post/chat staging
+temp/{userId}/{uploadId}.webp                 WebP staging when accepted
+temp/{userId}/{photoId}.jpg                   vault staging
+users/{userId}/photos/{processingUUID}.jpg    approved profile/post/chat copy
+users/{userId}/vault/{photoId}/{attemptUUID}.jpg  approved private vault copy
+temp/diagnostics/{testId}.jpg                 standalone diagnostic images only
+```
 
-## Storage and access
+Public and vault uploads share the backend `sanitizeAndModerate()` pipeline: validate real image type/size, apply orientation, fit inside **1080 × 1920** without enlarging, re-encode **JPEG quality 80**, drop EXIF/GPS, moderate and save approved bytes with `ServerSideEncryption: AES256` and `ContentType: image/jpeg`. Client vault import also fits to 1080 × 1920 and uses JPEG quality 0.8. Quality is an encoder setting; the file-size reduction varies by source.
+Temporary objects are staged until confirmation and eventual cleanup; they are not approved media. Per-attempt final UUIDs protect concurrent processing and retries. Ownership comes from verified auth. Download URLs expire in 120 seconds; POST URLs in at most 300 seconds. Vault collection/quota are separate from profile uploads.
 
-- Images: `documentDirectory/vault/{verifiedUserId}/{photoUUID}.vault`. SQLite DB/WAL live in the same directory.
-- AES-256-GCM uses a random per-user 256-bit key, independent random 96-bit nonces, 128-bit authentication tags, and user/photo IDs as authenticated additional data. Versioned binary envelopes contain no key.
-- The key exists persistently only in Android Keystore-backed SecureStore, using defaults without `requireAuthentication`. App access is separately gated by Local Authentication, including device credentials.
-- Without a screen lock, the user must opt in to a 6–12 digit app passcode. Its verifier uses PBKDF2-HMAC-SHA256, 600,000 iterations and a random salt. Five failed app unlocks cause a one-minute lockout; counters and deadline persist in SQLite. Android also applies its own biometric lockout policy.
-- Android `allowBackup=false` plus `fullBackupContent` and `dataExtractionRules` exclude the vault and SecureStore preferences from cloud backup and device transfer. No iOS native module or new iOS configuration was added.
-- New items default to hidden. Hide/show changes metadata only. Hidden is an app display preference, not publication or a separate encryption policy.
-- Vault uses React Native Image with short-lived local decrypted files, never expo-image or URL/disk caching. Files are deleted on view close, background, lock and logout. Startup removes orphaned vault, picker and manipulator cache files from fixed app-owned folders.
-- Vault screens always request FLAG_SECURE, including development builds. The general screenshot testing override requires both `__DEV__` and `EXPO_PUBLIC_ALLOW_SCREENSHOTS_FOR_TESTING=true`. FLAG_SECURE obscures Android recent-app thumbnails.
+## Read-only live audit (18 October 2026)
 
-## Sync and publication
+`node scripts/audit-photo-storage.cjs` reads object metadata/sample bytes and DB state without uploading, modifying or deleting anything. It prints no object keys, credentials or presigned URLs.
 
-The default is option (a): resized/re-encoded JPEG is encrypted locally, decrypted temporarily for HTTPS upload, sanitized and moderated on the server, and stored under S3 server-side encryption. This is **not end-to-end encryption**. The backend/AWS can process cloud photos. The per-user local key never goes to the backend.
+- Found **2 approved profile/public photo objects** (140,168 bytes total), **2 temporary upload objects** (168,238 bytes total), and **3 diagnostic objects** (215,586 bytes total).
+- The latest approved photo was an actual **1080 × 1080 JPEG**, **65,386 bytes**, with **no EXIF**, `image/jpeg` content type and **AES256 server-side encryption**. This verifies an existing saved object; an original-size baseline was unavailable, so its compression percentage is unknown.
+- MongoDB had **2 attached photo-upload records**, 11 deleting records, and **no vault photo/tombstone records**. Vault S3 saving has automated coverage but has not yet been confirmed with a real phone upload. `/api/vault/changes` is registered on the local backend and rejects unauthenticated requests with HTTP 401.
+- The current AWS identity received **AccessDenied** for bucket public-access-block, bucket-encryption configuration and lifecycle reads. Object encryption was verified, but bucket-wide privacy/lifecycle settings could not be independently confirmed. No IAM or bucket changes were made.
+- The local backend is configured with `NODE_ENV=development`, `PHOTO_MODERATION_MODE=development-bypass` and `PHOTO_VERIFY_BUCKET_SETTINGS=false`. It still compresses/strips metadata, but deliberately skips moderation and bucket-setting verification. Production must use Rekognition and enable bucket verification with the required read permissions; this audit did not change your environment settings.
 
-SQLite stores persistent upload/patch/delete jobs. Local commits serialize per process; network requests never hold the local write mutex. UUIDs survive retries, and an in-flight response cannot overwrite a newer local edit or tombstone. Work runs on unlock, foreground, network return and a 15-second foreground scheduler. Backoff is exponential with jitter, bounded to about one hour. Background/logout cancels transfers; foreground retry reissues expired POST URLs. A successful upload downloads the server's canonical sanitized bytes before marking the local copy synced. Hash and size are verified before encrypting downloads.
+## Verification and manual acceptance
 
-`rejected` is terminal for moderation/safe-image rejection: upload jobs are removed and the local photo remains available for deletion. It is not automatically retried. Transient failures use `failed` with a generic user message.
+Automated checks: mobile typecheck; auth/network/vault suites; standalone Android manifest configuration check; backend build and photo/vault/storage/logger tests. Compression coverage generates a large metadata-bearing JPEG and verifies reduced dimensions/size, JPEG output and metadata removal. Storage tests cover private-path reads, temporary-copy cleanup and logout wipe; backend tests cover excluding live vault images from unused-photo cleanup and deleting S3 objects plus live DB rows.
 
-`GET /vault/changes?since=cursor` uses an ordered, resumable metadata **sweep**, rather than timestamp deltas. Each page contains at most 100 live/tombstone records; the cursor is the last UUID. At the end, the stored cursor resets and the next sweep starts fresh. This replays unchanged metadata but avoids lost timestamp-boundary updates without requiring replica-set transactions. Files download only on request. A concurrent update behind the current cursor is picked up by the next sweep.
+Result: typecheck and targeted lint passed; **72 client tests** (59 auth, 12 vault, 1 network) and **19 backend tests** passed. Backend build and manifest verification passed.
 
-Metadata conflicts use client `updatedAt`, with server rejection of clocks more than five minutes ahead. Newer edits win; any tombstone wins over edits. Deleted UUIDs cannot be reused. Tombstones remain separate from live photo rows for offline clients.
+Manual phone checks remain:
 
-Vault records are in `VaultPhotos` and `VaultTombstones`; profile uploads stay in `PhotoUploads`. Default vault quota is 50 (`VAULT_MAX_PHOTOS`, server cap 100; current UI cap 50), independent of profile quota. Vault keys cannot bind to profile/post/chat resources and are rejected by public media presentation/access helpers.
+1. Open in SDK 57 Expo Go; authenticate, add from camera/gallery, view, hide/show, multi-select/delete and export/share.
+2. Airplane mode add/delete/hide, restart the app, reconnect, unlock and sync; kill mid-upload and verify idempotent retry.
+3. Confirm a vault upload appears only at the private vault prefix and in VaultPhotos, and never in discovery/profile/chat/public responses.
+4. Confirm no imported vault copy appears in Photos until explicit export. Deny export permission where Android requests it; verify local copy survives.
+5. Test logout with unsynced changes: cancel preserves everything; explicit discard wipes rows/files/cache. Check account switching and expired login preserve locked offline access.
+6. Test device auth cancellation/failure/lockout across restarts, picker return, foreground/background and no-screen-lock rejection.
+7. Test screenshot/recording and recent-app privacy on a standalone Android APK. Expo Go cannot validate this app's manifest/backup configuration.
+8. Test low disk, damaged/missing local files, cloud re-download and offline placeholders.
 
-New authenticated endpoints under the existing API prefix:
-
-- `POST /vault/upload-url`, `POST /vault/confirm`
-- `GET /vault/changes`, `GET /vault/:id/download-url`
-- `PATCH /vault/:id` (`hidden`, `order`, `updatedAt`), `DELETE /vault/:id`
-
-Only verified-token ownership is used. Inputs reject unknown fields. POST lifetime is 300 seconds; GET lifetime is 120 seconds with `no-store`. Every endpoint checks active account/ownership and rate limits. The existing sanitizer, Rekognition policy and private bucket enforcement are reused.
-
-Deletion creates a tombstone immediately and hides the item locally. A durable deleting row waits until outstanding POST URLs/processing leases expire, then the worker removes all object versions and the live DB row. Existing photo cleanup protects live vault references. Account purge removes vault objects and records too.
-
-Existing Android `uploadPhoto()` callers now pass through vault preparation, retaining an encrypted hidden vault copy before publication. The existing `/photos` POST/confirm and `uploadId` DTOs remain intact. Publication uploads an **independent** profile/post/chat copy, never a vault key. Hiding/deleting the private vault copy does not retract an already published copy. Previously uploaded photos are not silently bulk-imported.
-
-## Export, share and logout
-
-Export requires an explicit confirmation for the selected photo(s). JPEG pixels are re-encoded without EXIF/GPS. On Android 11+ the Expo Media Library Asset API inserts app-owned media without broad read permission, including Android 13/14. Older Android requests write-only permission only at export. Permission denial keeps the vault unchanged. Share uses a temporary file through Expo Sharing. Both flows remove temporary files in `finally`; background cleanup also applies.
-
-Voluntary logout blocks on unsynced/failed/rejected changes until the user syncs or explicitly chooses **Discard unsynced photos**. Confirmed logout removes local rows/files and the SecureStore key. Account deletion already has a destructive confirmation and also wipes locally. Session expiration/network validation failure locks and preserves the local encrypted vault, while server features still require a fresh authenticated session. The login/account-state screens provide local vault entry. Signing into a different account requires clearing the prior vault, with unsynced-discard confirmation where needed.
-
-## Security limits
-
-- Protects persisted image contents and normal app access on an uncompromised Android device; metadata is SQLite, not SQLCipher, and remains readable to someone who compromises the sandbox.
-- Does not protect against root, instrumentation, a compromised OS/keyboard, external cameras, memory inspection while unlocked, or an authorized recipient retaining exported/shared/published copies.
-- JS/native image memory and flash blocks cannot be guaranteed securely erased; deletion plus local key destruction provides cryptographic removal of encrypted copies, not certified physical media erasure.
-- Picker/manipulator import/export operations necessarily create brief plaintext cache copies. A process kill can leave these until startup cleanup. No ordinary operation saves a new gallery item. An imported original already in the gallery remains there; original deletion is deferred.
-- System camera apps receive a temporary app-cache output grant. OEM camera behavior and screenshot/recording protections must be verified on supported devices; the app does not ask the camera to save a gallery copy.
-- Sharing backgrounds the app and triggers immediate temp cleanup. Some receiver apps may fail to read after that point; verify supported share targets. The receiving app may retain anything it successfully reads.
-- There is no local key/passcode recovery. Synced photos can be downloaded and encrypted under a new key after a confirmed wipe and online login. Unsynced photos cannot be recovered after key destruction or uninstall.
-- No sync while the app is killed/backgrounded/locked. Pending jobs resume after foreground unlock with a valid server session. Previously issued GET URLs can remain usable until their short expiry; already downloaded copies cannot be revoked.
-
-## Checks and manual acceptance
-
-Verified in this session: mobile typecheck, targeted ESLint, 11 vault tests, 59 auth tests (57 regression tests plus two new lifecycle/build-profile tests), one network-proxy test, backend build and 18 backend tests, backup/permission manifest introspection, and `git diff --check`. Seven existing live-infrastructure integration tests are skipped without their configured test environment. No Android device/emulator was attached.
-
-The Windows-generated lockfile initially omitted two optional emnapi entries required by EAS npm 10; the repaired lockfile passed an isolated npm 10 clean-install dry run without changing other package versions. The existing splash plugin also referenced a missing drawable; the supplied transparent Android vector fixes that build prerequisite. EAS Doctor passes 20/21 checks and recommends patch updates for Expo, Constants, Dev Client, Linking, Router, Sharing and Splash Screen; the inspected SDK 57 versions were retained.
-
-Security acceptance checklist:
-
-- [x] Ciphertext-only persistent image writes, authenticated decryption and tampering tests.
-- [x] SecureStore key defaults, persistent app-passcode lockout, logout-discard guard tests.
-- [x] Backend vault isolation, ownership, cleanup protection and durable S3/DB deletion tests.
-- [x] Export confirmation, Android 14 permission behavior and temporary-file cleanup tests.
-- [x] Backup manifest attributes and blocked broad read/GPS permissions verified.
-- [x] Successful Android EAS development APK; compiled manifest/backup XML and native library contents inspected.
-- [ ] Real-device screenshot/recording/recent-app, biometric/PIN, gallery, share-target and backup-restore acceptance.
-- [ ] Live Mongo/S3 integration and production deployment validation.
-
-Not protected: root/OS compromise, memory inspection while unlocked, copies retained by recipients, and cloud plaintext processing under upload option (a). See the limits above.
-
-Automated: `npm run typecheck`, `npm run test:auth`, `npm run test:network`, `npm run test:vault`, `npm run verify:vault-config`. Backend: `npm run build` and Jest vault/photo/storage/logger suites. Crypto unit tests use Node's vetted crypto provider to exercise the envelope; Android native execution remains a device check. Existing integration tests require configured Mongo/S3 and are skipped without that environment.
-
-Run on the Android development build (also repeat capture tests on a release build):
-
-1. Airplane mode: add camera/gallery photos, hide/show, reorder, delete. Restart while offline, open local vault from sign-in, unlock; confirm rows and pending jobs persist.
-2. Reconnect and unlock: pending work syncs; lazy remote photos show placeholders until downloaded. Confirm profile/discovery/chat APIs never list vault records/keys.
-3. Kill mid-upload and during confirmation; reopen and retry. Confirm one UUID/live record, no duplicate quota slot, and valid canonical encrypted bytes.
-4. Trigger moderation rejection; verify `rejected`, no automatic retries, clear explanation, and working delete.
-5. Try logout with pending work: Stay signed in must retain files/key; explicit discard must wipe SQLite/WAL/files/key. Repeat account deletion and account switching.
-6. Background/close viewer and inspect `cacheDirectory/vault-temp`; it must be empty. Kill during import and verify fixed picker/manipulator caches clear on restart.
-7. Attempt screenshots, recording and recent-app preview while viewing hidden/visible photos. Verify FLAG_SECURE on real supported Android versions.
-8. Check the Photos gallery after camera import and gallery import: no new app-created gallery item. Explicit export creates exactly the selected item(s), strips EXIF/GPS, and leaves vault copies intact. Verify denied permission on older Android and no broad prompt on Android 13/14.
-9. Share to supported targets; verify successful receive where supported and no temp file remains on return. Never request deletion of gallery originals.
-10. Disable screen lock: opt-in passcode setup, wrong attempts, kill/restart during lockout; verify five attempts impose persistent lockout. Restore Android screen lock and verify device credential fallback.
-11. Simulate low disk, corrupt encrypted bytes, and interrupted download. Saving must fail clearly; corrupt local copies should offer cloud download without rendering bytes.
-12. Restore/transfer device backup: verify vault and SecureStore keys are excluded. Server deletion must remove all S3 versions and live DB row after outstanding upload leases expire; tombstone must still reach an offline second device.
-
-## File map
-
-New: `src/features/vault/` (crypto, files, SQLite repository, lock, sync, conflicts, import/publication service, export/logout, passcode prompt, grid/viewer), `app/vault/`, `src/features/auth/localVaultLifecycle.ts`, `plugins/withVaultBackup.cjs`, `scripts/test-vault.cjs`, `scripts/verify-vault-config.cjs`, `scripts/eas-vault.cjs`, `scripts/eas-build-status.cjs`, `.easignore`, this report; backend `src/vault/` module/controller/validation/service/security tests. `assets/android-splash.xml` supplies the previously missing splash drawable while preserving the plain splash background.
-
-Modified: app/package/EAS project configuration and lockfiles; root navigation/providers; auth store/session lifecycle and sign-in/account-state entry; account/settings screens; screenshot hook; shared photo upload adapter and its tests; backend app module, photo cleanup/presentation/account purge, S3 signed-GET helper, and request-log redaction. No AWS infrastructure mutation.
+No custom crypto, key-recovery claim or end-to-end encryption is provided by the simpler version. S3 encryption protects cloud storage at rest, while the backend/AWS can process cloud photos. Rooted devices, external exports, app memory and physical secure erasure are outside this vault's protection.

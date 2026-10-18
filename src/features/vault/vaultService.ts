@@ -8,7 +8,6 @@ import * as files from './files';
 import { hash, uuid } from './crypto';
 import { assertUnlocked, assertEpoch, lock, refreshVault, unlock, useVaultLock } from './lock';
 import type { VaultPhoto } from './types';
-import { requestUnlock } from './components/VaultPasscodePrompt';
 
 const OWNER_KEY = 'darkfantasy.vault.owner';
 let tail: Promise<unknown> = Promise.resolve();
@@ -40,6 +39,7 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
     cleanUri = clean.uri;
     const bytes = await files.read(clean.uri);
     if (bytes.length > 5 * 1024 * 1024) throw new Error('Choose a photo smaller than 5 MB.');
+    const checksum = await hash(bytes);
     return await serial(async () => {
       assertEpoch(owner, scope);
       if ((await repo.list(owner)).length >= 50) throw new Error('Your vault is full (50 photos).');
@@ -52,7 +52,7 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
           id,
           s3Key: null,
           localPath: path,
-          sha256: hash(bytes),
+          sha256: checksum,
           size: bytes.length,
           status: 'local',
           hidden: 1,
@@ -80,7 +80,7 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
         await FS.deleteAsync(path, { idempotent: true }).catch(() => undefined);
   }
 }
-export async function addPhotos(owner: string, camera = false, passcode?: string): Promise<void> {
+export async function addPhotos(owner: string, camera = false): Promise<void> {
   assertUnlocked(owner);
   if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted)
     throw new Error('Camera permission was denied. You can enable it in Settings.');
@@ -103,8 +103,7 @@ export async function addPhotos(owner: string, camera = false, passcode?: string
   // Picker/camera can background the app; keep the vault locked until re-authenticated.
   try {
     if (!useVaultLock.getState().unlocked) {
-      if (passcode) await unlock(owner, passcode);
-      else await requestUnlock(owner);
+      await unlock(owner);
     }
     for (const asset of result.assets) await importPhoto(owner, asset.uri);
   } finally {
@@ -146,6 +145,8 @@ export async function viewPhoto(owner: string, id: string): Promise<string> {
     throw new Error('Download this photo before viewing.');
   const bytes = await files.plaintext(owner, id, photo.localPath);
   try {
+    if (bytes.length !== photo.size || (await hash(bytes)) !== photo.sha256)
+      throw new Error('Photo is damaged. Download the cloud copy again.');
     assertEpoch(owner, scope);
     const uri = await files.temporaryFile(bytes);
     try {
@@ -190,7 +191,7 @@ export async function publishPhoto(
   if (!owner) throw new Error('Sign in before publishing a photo.');
   const session = sessionIdentity.generation;
   if (!useVaultLock.getState().unlocked || useVaultLock.getState().owner !== owner)
-    await requestUnlock(owner);
+    await unlock(owner);
   const photo = await importPhoto(owner, asset.uri);
   let temp: string | undefined;
   try {

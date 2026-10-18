@@ -6,7 +6,8 @@ const databases = new Map<string, Promise<SQLite.SQLiteDatabase>>();
 export function directory(owner: string): string {
   if (!/^[a-f0-9]{24}$/.test(owner)) throw new Error('Invalid local account');
   if (!FS.documentDirectory) throw new Error('Vault requires Android');
-  return `${FS.documentDirectory}vault/${owner}/`;
+  // Preserve encrypted-build data separately for recovery using branch encrypt.
+  return `${FS.documentDirectory}vault/${owner}/simple/`;
 }
 export function database(owner: string): Promise<SQLite.SQLiteDatabase> {
   let current = databases.get(owner);
@@ -92,7 +93,19 @@ export async function unsynced(owner: string): Promise<number> {
   ).getFirstAsync<{ count: number }>(
     "SELECT COUNT(*) AS count FROM photos WHERE syncState!='synced'",
   );
-  return row?.count ?? 0;
+  // A different build may still hold unsynced encrypted photos in its original DB.
+  // Never discard those silently when logging out of the simpler build.
+  const legacyDir = directory(owner).replace(/simple\/$/, '');
+  if (!(await FS.getInfoAsync(`${legacyDir}vault.db`)).exists) return row?.count ?? 0;
+  const legacy = await SQLite.openDatabaseAsync('vault.db', { useNewConnection: true }, legacyDir);
+  try {
+    const older = await legacy.getFirstAsync<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM photos WHERE syncState!='synced'",
+    );
+    return (row?.count ?? 0) + (older?.count ?? 0);
+  } finally {
+    await legacy.closeAsync();
+  }
 }
 export async function close(owner: string): Promise<void> {
   const db = databases.get(owner);

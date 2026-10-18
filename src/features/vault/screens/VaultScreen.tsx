@@ -1,17 +1,10 @@
 import { useEffect, useState } from 'react';
-import { AppState, Alert, FlatList, Image, Pressable, TextInput, View } from 'react-native';
+import { AppState, Alert, FlatList, Image, Pressable, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Screen, Header } from '@/components/layout';
 import { Text, Button } from '@/components/ui';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
-import {
-  useVaultLock,
-  unlock,
-  lock,
-  noDeviceLock,
-  configurePasscode,
-  setLockTimeout,
-} from '../lock';
+import { useVaultLock, unlock, lock, noDeviceLock, setLockTimeout } from '../lock';
 import { addPhotos, editPhoto, initializeVaultOwner, viewPhoto } from '../vaultService';
 import * as repo from '../repository';
 import { removeTemp } from '../files';
@@ -27,9 +20,7 @@ export function VaultScreen(): React.JSX.Element {
   const [owner, setOwner] = useState('');
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
   const [hidden, setHidden] = useState(false);
-  const [passcode, setPasscode] = useState('');
   const [fallback, setFallback] = useState(false);
-  const [setup, setSetup] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -56,7 +47,6 @@ export function VaultScreen(): React.JSX.Element {
       if (s !== 'active') {
         setPhotos([]);
         setSelected([]);
-        setPasscode('');
       }
     });
     const unsubscribe = useVaultLock.subscribe((state) => {
@@ -105,58 +95,23 @@ export function VaultScreen(): React.JSX.Element {
     <Screen edges={['top', 'bottom']}>
       <Header title="Photo Vault" back backFallback="/settings" />
       <View style={{ flex: 1, padding: 16, gap: 12 }}>
+        {network.offline && (
+          <Text accessibilityRole="alert">Offline — changes will sync when online.</Text>
+        )}
+        <Text>Photos stay outside your gallery until you export them.</Text>
         {!!error && <Text accessibilityRole="alert">{error}</Text>}
         {!unlocked || !active ? (
           <>
             <Text>🔒 Your photos are locked.</Text>
             {fallback && (
               <>
-                <Text>
-                  No device screen lock is configured. An app passcode offers less protection.
-                  Enable an Android screen lock when possible.
-                </Text>
-                <TextInput
-                  accessibilityLabel="Vault passcode"
-                  placeholder="6–12 digit app passcode"
-                  placeholderTextColor="#aaa"
-                  secureTextEntry
-                  keyboardType="number-pad"
-                  value={passcode}
-                  onChangeText={setPasscode}
-                  style={{ color: '#fff', padding: 16, borderColor: '#777', borderWidth: 1 }}
-                />
-                <Button
-                  label={setup ? 'Confirm passcode setup' : 'Set up app passcode'}
-                  disabled={busy || !owner}
-                  onPress={() => {
-                    if (!setup)
-                      Alert.alert(
-                        'Proceed without a device screen lock?',
-                        'Your vault will use only an app passcode. Remember it; there is no passcode recovery.',
-                        [{ text: 'Cancel' }, { text: 'Proceed', onPress: () => setSetup(true) }],
-                      );
-                    else
-                      void run(async () => {
-                        await configurePasscode(owner, passcode);
-                        setSetup(false);
-                        setPasscode('');
-                      });
-                  }}
-                />
+                <Text>Set up an Android screen lock to use Photo Vault.</Text>
               </>
             )}
             <Button
               label="Unlock vault"
-              disabled={busy || !owner}
-              onPress={() =>
-                void run(async () => {
-                  try {
-                    await unlock(owner, passcode);
-                  } finally {
-                    setPasscode('');
-                  }
-                })
-              }
+              disabled={busy || !owner || fallback}
+              onPress={() => void run(() => unlock(owner))}
             />
           </>
         ) : (
@@ -180,43 +135,15 @@ export function VaultScreen(): React.JSX.Element {
                 fullWidth={false}
                 label="Add photos"
                 disabled={busy}
-                onPress={() =>
-                  void run(async () => {
-                    try {
-                      await addPhotos(owner, false, passcode);
-                    } finally {
-                      setPasscode('');
-                    }
-                  })
-                }
+                onPress={() => void run(() => addPhotos(owner, false))}
               />
               <Button
                 fullWidth={false}
                 label="Camera"
                 disabled={busy}
-                onPress={() =>
-                  void run(async () => {
-                    try {
-                      await addPhotos(owner, true, passcode);
-                    } finally {
-                      setPasscode('');
-                    }
-                  })
-                }
+                onPress={() => void run(() => addPhotos(owner, true))}
               />
             </View>
-            {fallback && (
-              <TextInput
-                accessibilityLabel="App passcode for returning from photo picker"
-                placeholder="App passcode to return from picker"
-                placeholderTextColor="#aaa"
-                secureTextEntry
-                keyboardType="number-pad"
-                value={passcode}
-                onChangeText={setPasscode}
-                style={{ color: '#fff', padding: 12 }}
-              />
-            )}
             <Button
               label="Relock delay"
               onPress={() =>
