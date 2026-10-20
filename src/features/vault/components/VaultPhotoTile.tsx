@@ -1,0 +1,133 @@
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
+import { Text } from '@/components/ui';
+import { useTheme } from '@/theme/useTheme';
+import { photoUri } from '../media';
+import type { VaultPhoto } from '../types';
+
+export function VaultPhotoTile({
+  owner,
+  photo,
+  selected,
+  selecting,
+  onPress,
+  onLongPress,
+}: {
+  owner: string;
+  photo: VaultPhoto;
+  selected: boolean;
+  selecting: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+}): React.JSX.Element {
+  const { theme } = useTheme();
+  const colors = theme.colors;
+  const [uri, setUri] = useState<string>();
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const lastAttempt = useRef(0);
+  useEffect(() => {
+    let cancelled = false;
+    const repair = attempt > lastAttempt.current;
+    lastAttempt.current = attempt;
+    void photoUri(owner, photo.id, repair)
+      .then((value) => {
+        if (!cancelled) {
+          setUri(value);
+          setFailed(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUri(undefined);
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, photo.id, photo.localPath, photo.sha256, photo.s3Key, attempt]);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${photo.hidden ? 'Hidden photo' : 'Photo'}${selected ? ', selected' : ''}${failed ? ', tap to retry' : ''}${photo.status === 'rejected' ? ', backup unavailable' : ''}`}
+      accessibilityState={{ selected, busy: !uri && !failed }}
+      onLongPress={onLongPress}
+      onPress={() => {
+        if (failed && !selecting) {
+          setFailed(false);
+          setAttempt((value) => value + 1);
+        } else onPress();
+      }}
+      style={styles.cell}
+    >
+      <View
+        style={[
+          styles.photo,
+          {
+            backgroundColor: colors.surfaceMuted,
+            borderColor: selected ? colors.primary : colors.surfaceMuted,
+          },
+        ]}
+      >
+        {uri ? (
+          <Image
+            key={photo.sha256}
+            source={{ uri }}
+            accessibilityLabel="Private photo"
+            contentFit="cover"
+            cachePolicy="none"
+            recyclingKey={`${photo.id}:${photo.sha256}`}
+            transition={0}
+            style={StyleSheet.absoluteFill}
+            onError={() => {
+              setUri(undefined);
+              setFailed(true);
+            }}
+          />
+        ) : failed ? (
+          <View style={styles.placeholder}>
+            <Ionicons name="cloud-download-outline" size={24} color={colors.textMuted} />
+            <Text variant="caption" color="muted" center>
+              Tap to load
+            </Text>
+          </View>
+        ) : (
+          <ActivityIndicator color={colors.textMuted} />
+        )}
+        {Boolean(photo.hidden) && (
+          <View style={[styles.hidden, { backgroundColor: colors.overlay }]}>
+            <Ionicons name="eye-off-outline" size={15} color={colors.onImage} />
+          </View>
+        )}
+        {selected && (
+          <View style={[styles.selected, { backgroundColor: colors.primary }]}>
+            <Ionicons name="checkmark" size={18} color={colors.onPrimary} />
+          </View>
+        )}
+        {photo.status === 'rejected' && (
+          <View style={[styles.rejected, { backgroundColor: colors.overlay }]}>
+            <Ionicons name="alert-circle-outline" size={16} color={colors.onImage} />
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+const styles = StyleSheet.create({
+  cell: { width: '33.3333%', padding: 3 },
+  photo: {
+    aspectRatio: 0.85,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeholder: { alignItems: 'center', gap: 6, padding: 6 },
+  hidden: { position: 'absolute', left: 6, bottom: 6, borderRadius: 12, padding: 5 },
+  selected: { position: 'absolute', top: 6, right: 6, borderRadius: 14, padding: 3 },
+  rejected: { position: 'absolute', right: 6, bottom: 6, borderRadius: 12, padding: 5 },
+});

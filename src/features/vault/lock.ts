@@ -33,7 +33,7 @@ export function assertEpoch(owner: string, scope: number): void {
 export async function noDeviceLock(): Promise<boolean> {
   return (await LA.getEnrolledLevelAsync()) === LA.SecurityLevel.NONE;
 }
-async function waitForForeground(): Promise<void> {
+export async function waitForForeground(): Promise<void> {
   if (AppState.currentState === 'active') return;
   await new Promise<void>((resolve, reject) => {
     const subscription = AppState.addEventListener('change', (state) => {

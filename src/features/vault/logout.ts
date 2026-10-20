@@ -9,16 +9,16 @@ export async function beforeLogout(discardUnsynced = false): Promise<void> {
   if (!discardUnsynced && (await serial(hasUnsyncedPhotos))) {
     const discard = await new Promise<boolean>((resolve) =>
       Alert.alert(
-        'Unsynced vault photos',
-        'Some photos or changes are stored only on this device. Sync them before logging out, or explicitly discard them. Discarding cannot be undone.',
+        'Keep your photos',
+        'Some photos or changes are saved only on this phone. Stay signed in to keep them, or discard them and log out. Discarding cannot be undone.',
         [
           { text: 'Stay signed in', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Discard unsynced photos', style: 'destructive', onPress: () => resolve(true) },
+          { text: 'Discard and log out', style: 'destructive', onPress: () => resolve(true) },
         ],
         { cancelable: true, onDismiss: () => resolve(false) },
       ),
     );
-    if (!discard) throw new Error('Logout cancelled. Sync your vault first.');
+    if (!discard) throw new Error('Logout cancelled. Your photos are still on this phone.');
   }
   lock();
   cancelVaultTransfers();

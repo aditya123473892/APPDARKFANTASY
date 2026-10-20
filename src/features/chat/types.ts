@@ -4,6 +4,7 @@ export type MessageStatus = 'sent' | 'read';
 export type LocalMessageStatus = MessageStatus | 'sending' | 'failed-definitive' | 'uncertain';
 
 export type Message = {
+  blockedSender?: boolean;
   id: string;
   /** Idempotency key: sent with each send attempt, echoed back on the viewer's own messages. */
   clientId?: string;
@@ -57,6 +58,7 @@ export type Conversation = {
 };
 
 export type SendMessageInput = {
+  onUploadProgress?: import('@/services/api/uploadProgress').UploadProgressListener;
   conversationId: string;
   text: string;
   clientId: string;

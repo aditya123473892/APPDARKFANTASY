@@ -276,28 +276,25 @@ export function useMarkConversationRead(
     }, [conversationId]),
   );
   useEffect(() => {
-    // Direct read receipts are visible to the sender, so they follow the
-    // reciprocal preference. A group read only moves the viewer's private
-    // cursor (shared with their own devices), so it needs neither.
+    // This backend supports direct read receipts only.
+    if (!conversationId.startsWith('user:')) return;
     const history = queryClient.getQueryData<Message[]>(queryKeys.messages(conversationId));
     if (historyReady && focused && appState === 'active' && history)
       captureFirstUnread(conversationId, history, sessionIdentity.userId ?? '');
-    const group = conversationId.startsWith('group:');
     const allowed = () =>
       focus.current &&
       AppState.currentState === 'active' &&
       useChatConnection.getState().ready &&
       isSessionCurrent(scope) &&
-      (group || usePreferences.getState().readReceipts) &&
+      usePreferences.getState().readReceipts &&
       useAuthStore.getState().status === 'authenticated';
     if (
-      (group || conversationId.startsWith('user:')) &&
       historyReady &&
       latestIncomingId &&
       focused &&
       appState === 'active' &&
       ready &&
-      (group || (canSend && receipts))
+      canSend && receipts
     ) {
       void chatService.markRead(conversationId, allowed).catch(() => undefined);
     }

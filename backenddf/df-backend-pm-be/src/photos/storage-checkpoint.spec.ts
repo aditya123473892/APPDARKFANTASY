@@ -8,17 +8,30 @@ const owner = '507f1f77bcf86cd799439011';
 const resourceId = '507f1f77bcf86cd799439012';
 const context: ResourceContext = { ownerId: owner, resourceType: 'post', resourceId, requester: owner };
 function harness(row?: any) {
+  const post: any = { _id: resourceId, user: owner, visibility: 'public', status: 'approved' };
   const uploads = { findOne: jest.fn(async (_filter: any) => row), updateOne: jest.fn(async (_filter: any, _update: any) => ({ matchedCount: 1 })), insertOne: jest.fn(), find: jest.fn(() => ({ toArray: async () => row ? [row] : [] })) };
   const db: any = { db: { collection: jest.fn((name: string) => name === 'PhotoUploads' ? uploads : {
-    findOne: jest.fn(async () => name === 'Users' ? { _id: owner } : null), updateOne: jest.fn(),
+    findOne: jest.fn(async () => name === 'Users' ? { _id: owner } : name === 'Posts' ? (post.deleted ? null : post) : name === 'ChatMessages' ? { sender: owner, receiver: resourceId } : null), updateOne: jest.fn(),
   }) } };
   const storage: any = { keyFromReference: (key: string) => key, getSignedURL: jest.fn(async () => 'https://signed.test/image'), copyPrivate: jest.fn(async () => ({})) };
   const service = new PhotosService(db, storage);
   jest.spyOn(service, 'rate').mockResolvedValue(undefined);
   jest.spyOn(service, 'enqueue').mockResolvedValue(undefined);
-  return { service, storage, uploads, db };
+  return { service, storage, uploads, db, post };
 }
 describe('Checkpoint 1 resource binding', () => {
+  it('rechecks post visibility and existence before signing, including previously bookmarked images', async () => {
+    const key = `posts/${owner}/${resourceId}/server/original.jpg`;
+    const { service, storage, post } = harness({ ownerId: owner, resourceType: 'post', resourceId,
+      s3Key: key, state: 'attached' });
+    const viewer = { ...context, requester: '507f1f77bcf86cd799439013' };
+    await expect(service.accessUrl(key, 120, viewer)).resolves.toBe('https://signed.test/image');
+    post.visibility = 'private';
+    await expect(service.accessUrl(key, 120, viewer)).rejects.toBeInstanceOf(NotFoundException);
+    post.deleted = true;
+    await expect(service.accessUrl(key, 120, context)).rejects.toBeInstanceOf(NotFoundException);
+    expect(storage.getSignedURL).toHaveBeenCalledTimes(1);
+  });
   it('reads a bound chat photo without signing a reusable URL or touching vault storage', async () => {
     const key = `chat/${owner}/direct/${resourceId}/server.jpg`;
     const chatContext: ResourceContext = { ownerId: owner, resourceType: 'chat', resourceId, requester: owner, messageId: resourceId, conversationId: 'direct' };

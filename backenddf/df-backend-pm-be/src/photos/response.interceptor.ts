@@ -12,6 +12,9 @@ import { PhotosService } from './photos.service';
 export class PhotoResponseInterceptor implements NestInterceptor {
   constructor(private readonly photos: PhotosService) {}
   intercept(context: ExecutionContext, next: CallHandler) {
+    // Moderation has its own case authorization, evidence signing and streaming.
+    // Never feed case snapshots or restricted bytes through social presentation.
+    if (context.getClass()?.name === 'ModController') return next.handle();
     return next.handle().pipe(mergeMap((value) => this.photos.present(value, context.switchToHttp().getRequest().user?.id)));
   }
 }

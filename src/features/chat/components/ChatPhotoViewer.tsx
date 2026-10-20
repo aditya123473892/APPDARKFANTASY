@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
@@ -23,6 +24,7 @@ export function ChatPhotoViewer({
   onClose,
   onLoad,
   onError,
+  reportTarget,
 }: {
   visible: boolean;
   uri: string | null;
@@ -32,7 +34,9 @@ export function ChatPhotoViewer({
   onClose: () => void;
   onLoad: () => void;
   onError: () => void;
+  reportTarget?: { messageId: string; mediaId: string };
 }) {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   return (
@@ -40,6 +44,10 @@ export function ChatPhotoViewer({
       <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.header}>
           <Text style={styles.text}>{label}</Text>
+          {reportTarget ? <Pressable accessibilityRole="button" accessibilityLabel="Report image" style={styles.close}
+            onPress={() => { onClose(); router.push({ pathname: '/report' as never, params: { targetType: 'chat_media', targetId: reportTarget.mediaId, messageId: reportTarget.messageId } }); }}>
+            <Ionicons name="flag-outline" color="#fff" size={24} />
+          </Pressable> : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close photo"

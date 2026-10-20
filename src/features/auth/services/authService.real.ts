@@ -103,8 +103,17 @@ export const realAuthService: AuthService = {
       body.password = '';
     }
   },
-  async requestPasswordReset() {
-    throw new AuthError('ACCOUNT_UNAVAILABLE');
+  async requestPasswordReset(email) {
+    try {
+      const response = await apiClient.post<Envelope<{ passwordRequest: boolean }>>(
+        '/auth/forgot-password', { username: email.trim() },
+      );
+      response.config.data = undefined;
+      unwrap(response.data);
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.config) error.config.data = undefined;
+      throw translate(error);
+    }
   },
   async validateInviteCode() {
     return false;

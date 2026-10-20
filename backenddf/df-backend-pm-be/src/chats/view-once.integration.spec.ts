@@ -7,6 +7,7 @@ import {
   ChatMessageSchema,
 } from '../common/schemas/chats.schema';
 import { ChatService } from './chats.service';
+import { BlockService } from '../user-blocks/block.service';
 
 // Always use a randomly named disposable database, never application collections.
 const integration = process.env.TEST_MONGO_URI ? describe : describe.skip;
@@ -25,6 +26,7 @@ integration('Single-opening photos with real MongoDB', () => {
       { create: jest.fn() } as any,
       {} as any,
       photos,
+      new BlockService(db),
     );
   const photo = (storedReceiver: Types.ObjectId | string = receiver) =>
     model.create({

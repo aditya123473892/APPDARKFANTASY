@@ -17,6 +17,9 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { ListCommentsDto } from './dto/list-comments.dto';
 import { createHash } from 'crypto';
+import { pairBlocked } from '../user-blocks/block-context';
+import { visiblePostQuery } from '../user-blocks/visible-post';
+import { preserveMutation } from '../reports/preservation';
 import { EPostStatus, EPostVisibility } from 'src/common/enums/posts.enum';
 import { Follow, FollowStatus } from 'src/common/schemas/follow.schema';
 import {
@@ -283,16 +286,25 @@ export class PostsService {
     return await this.postsModel.findOne(payload);
   }
 
+  async findVisiblePost(id: string, viewer: string) {
+    await this.commentPost(id, viewer);
+    return visiblePostQuery(
+      this.postsModel
+        .findOne({ _id: id })
+        .populate('user', 'displayname avatar'),
+    );
+  }
+
   async remove(_id: string) {
-    return await this.postsModel.deleteOne({ _id });
+    return preserveMutation(this.postsModel.db, [`Posts:${_id}`], () => this.postsModel.deleteOne({ _id }).exec());
   }
 
   async removePrivate(_id: string, user: string, version?: number) {
-    return await this.postsModel.deleteOne({
+    return preserveMutation(this.postsModel.db, [`Posts:${_id}`], async () => await this.postsModel.deleteOne({
       _id,
       user,
       ...(version === undefined ? {} : { __v: version }),
-    });
+    }));
   }
 
   async getPostBookMark(userId: string) {
@@ -325,6 +337,12 @@ export class PostsService {
         if (!bookmark.postId) return null;
 
         const post = bookmark.postId as any;
+        try {
+          await this.commentPost(String(post._id), userId);
+        } catch (error) {
+          if (error instanceof ForbiddenException || error instanceof NotFoundException) return null;
+          throw error;
+        }
         const postUserId = post.user._id.toString();
         const followStatus = await this.getFollowStatusForUser(
           userId,
@@ -379,10 +397,7 @@ export class PostsService {
   // }
 
   async updatePostBookMarkStatus(userId: string, postId: string) {
-    const post = await this.postsModel.findOne({ _id: postId });
-    if (!post) {
-      throw new Error('Post not found');
-    }
+    await this.commentPost(postId, userId);
 
     const existingBookmark = await this.PostBookMarkModel.findOne({
       userId,
@@ -429,6 +444,8 @@ export class PostsService {
   }
 
   async sendPostRequest(requestedUserId: string, userId: string) {
+    if (await pairBlocked(this.postsModel.db, userId, requestedUserId))
+      throw new Error('User not found!');
     const isFollowing = await this.followModel.findOne({
       follower: userId,
       following: requestedUserId,
@@ -452,7 +469,15 @@ export class PostsService {
       requestedUserId,
     });
 
-    return await postRequest.save();
+    const saved = await postRequest.save();
+    if (await pairBlocked(this.postsModel.db, userId, requestedUserId)) {
+      await this.PostRequestModel.updateOne(
+        { _id: saved._id, status: 'pending' },
+        { $set: { status: 'rejected' } },
+      );
+      throw new Error('User not found!');
+    }
+    return saved;
   }
 
   async getPendingRequest(userId: string) {
@@ -473,6 +498,7 @@ export class PostsService {
     approverId: string,
     status: string,
   ): Promise<any> {
+    if (await pairBlocked(this.postsModel.db, userId, approverId)) return null;
     const startTime = new Date();
     const endTime = new Date(startTime.getTime() + 48 * 60 * 60 * 1000);
 

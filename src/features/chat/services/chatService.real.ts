@@ -23,6 +23,7 @@ import {
 import { acceptUnread, markPeerRead, mergeMessage, unreadFor } from './chatState';
 import type { ChatService } from './chatService';
 import type { Conversation, Message } from '../types';
+import { isPeerBlocked } from '@/features/safety/blockState';
 export { conversationKey, mapMessage } from './chatPayload';
 export type { BackendMessage } from './chatPayload';
 export type BackendGroup = {
@@ -76,6 +77,7 @@ const target = (key: string) => {
   const [kind, id] = key.split(':');
   if (!isObjectId(id) || !['group', 'user'].includes(kind ?? ''))
     throw new ServiceError('NOT_FOUND');
+  if (kind === 'user' && isPeerBlocked(id)) throw new ServiceError('NOT_FOUND');
   return kind === 'group' ? { groupId: id } : { receiver: id };
 };
 function ownMessage(key: string, id: string): Message {
@@ -103,7 +105,7 @@ export const realChatService: ChatService = {
       throw new ServiceError('UNKNOWN');
     const result = [
       ...direct
-        .filter((row) => row && row._id !== sessionIdentity.userId)
+        .filter((row) => row && row._id !== sessionIdentity.userId && !isPeerBlocked(row._id))
         .map((row) => directConversation(row!)),
       ...groups.map(groupConversation),
     ];
@@ -119,24 +121,29 @@ export const realChatService: ChatService = {
         });
       item.unreadCount = unreadFor(item.id);
     }
-    for (const item of current)
-      if (!result.some((row) => row.id === item.id) && item.lastMessage) result.push(item);
     void refreshUnread().catch(() => undefined);
     return result;
   },
   async getConversation(key) {
+    target(key);
     const scope = sessionIdentity.generation;
     const cached = queryClient
       .getQueryData<Conversation[]>(queryKeys.conversations)
       ?.find((row) => row.id === key);
-    if (cached) return cached;
     const [kind, id] = key.split(':');
     if (!isObjectId(id)) throw new ServiceError('NOT_FOUND');
     if (kind === 'user') {
-      const user = userCache.get(id);
+      // A cached summary cannot establish that this peer is still visible.
+      const result = await getData<{ user: unknown }>(`/users/${id}`);
+      assertSessionCurrent(scope);
+      target(key);
+      const user = parseUserSummary(result.user);
       if (!user) throw new ServiceError('NOT_FOUND');
-      return directConversation(user);
+      return cached
+        ? { ...cached, participant: directConversation(user).participant }
+        : directConversation(user);
     }
+    if (cached) return cached;
     if (kind !== 'group') throw new ServiceError('NOT_FOUND');
     const groups = await getData<BackendGroup[]>('/groups/my-groups');
     assertSessionCurrent(scope);
@@ -200,7 +207,7 @@ export const realChatService: ChatService = {
         ...(input.viewDurationSeconds ? { viewDurationSeconds: input.viewDurationSeconds } : {}),
       };
       const photoIds: string[] = [];
-      for (const asset of input.assets || []) photoIds.push(await uploadChatPhoto(asset));
+      for (const asset of input.assets || []) photoIds.push(await uploadChatPhoto(asset, input.onUploadProgress));
       assertSessionCurrent(scope);
       const response = await apiClient.post('/chats/messages', {
         ...payload,
@@ -234,15 +241,8 @@ export const realChatService: ChatService = {
     if (key.startsWith('group:')) {
       const groupId = key.slice(6);
       if (!isObjectId(groupId)) throw new ServiceError('NOT_FOUND');
-      // Moves the viewer's private read cursor; the server syncs their other devices.
-      const reply = await socketAck<{ groupId?: unknown }>(
-        'markGroupAsRead',
-        { groupId },
-        allowed,
-        true,
-      );
-      assertSessionCurrent(scope);
-      if (reply?.groupId !== groupId) throw new ServiceError('UNKNOWN');
+      // This backend has no per-member group read cursor. Do not enqueue an
+      // unsupported event: its timeout would reconnect and stall other requests.
       return;
     }
     const unread = await socketRequest(

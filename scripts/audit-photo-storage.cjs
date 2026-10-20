@@ -9,16 +9,16 @@ backendRequire('dotenv').config({
   override: true,
   quiet: true,
 });
-const AWS = backendRequire('aws-sdk');
+const { S3 } = backendRequire('@aws-sdk/client-s3');
 const sharp = backendRequire('sharp');
 const Bucket = process.env.AWS_DEFAULT_S3_BUCKET;
 const region = process.env.AWS_S3_REGION || process.env.AWS_REGION;
 const accessKeyId = process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET || process.env.AWS_SECRET_ACCESS_KEY;
-const s3 = new AWS.S3({
+const s3 = new S3({
   region,
-  httpOptions: { connectTimeout: 5000, timeout: 20000 },
-  maxRetries: 1,
+  requestHandler: { connectionTimeout: 5000, requestTimeout: 20000 },
+  maxAttempts: 2,
   ...(accessKeyId && secretAccessKey
     ? { credentials: { accessKeyId, secretAccessKey, sessionToken: process.env.AWS_SESSION_TOKEN } }
     : {}),
@@ -40,7 +40,7 @@ async function audit() {
     ['lifecycle', 'getBucketLifecycleConfiguration'],
   ]) {
     try {
-      const value = await s3[method]({ Bucket }).promise();
+      const value = await s3[method]({ Bucket });
       console.log(
         name,
         JSON.stringify(
@@ -67,8 +67,7 @@ async function audit() {
     scanned = 0;
   do {
     const page = await s3
-      .listObjectsV2({ Bucket, ContinuationToken: token, MaxKeys: 1000 })
-      .promise();
+      .listObjectsV2({ Bucket, ContinuationToken: token, MaxKeys: 1000 });
     for (const item of page.Contents || []) {
       const category = group(item.Key);
       const total = (totals[category] ||= { objects: 0, bytes: 0 });
@@ -86,8 +85,8 @@ async function audit() {
   } while (token && scanned < 10000);
   console.log('objectCounts', JSON.stringify(totals), 'truncated', Boolean(token));
   for (const [category, item] of Object.entries(samples)) {
-    const result = await s3.getObject({ Bucket, Key: item.Key }).promise();
-    const meta = await sharp(result.Body).metadata();
+    const result = await s3.getObject({ Bucket, Key: item.Key });
+    const meta = await sharp(Buffer.from(await result.Body.transformToByteArray())).metadata();
     console.log(
       'latestSample',
       JSON.stringify({

@@ -1,4 +1,5 @@
 import 'react-native-reanimated';
+import { withCrashReporting } from '@/services/monitoring/crashReporting';
 import { useEffect } from 'react';
 import { View } from 'react-native';
 import { useFonts } from 'expo-font';
@@ -124,10 +125,11 @@ function RootNavigator(): React.JSX.Element {
   );
 }
 
-export default function RootLayout(): React.JSX.Element {
+function RootLayout(): React.JSX.Element {
   return (
     <AppProviders>
       <RootNavigator />
     </AppProviders>
   );
 }
+export default withCrashReporting(RootLayout);

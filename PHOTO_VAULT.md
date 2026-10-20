@@ -18,11 +18,21 @@ Expo Go is a shared development host; app configuration, Android backup exclusio
 - Keeps encrypted-build files/DB outside the `simple/` directory untouched during normal use. Sync old pending images with the encrypted build before switching. Cloud copies download normally into the simpler vault. Logout warns about unsynced changes from either DB before an explicit wipe removes both versions for that account.
 - Keeps offline additions, persistent SQLite upload/edit/delete jobs, retry/backoff, tombstones, moderation rejection, hide/show/order, separate 50-photo vault limit, lazy downloads and SHA-256 checks.
 - Never writes to the gallery except after explicit export confirmation. Camera/gallery originals in the gallery are not removed. Picker/manipulator temporary copies are cleaned up.
-- Uses React Native Image with app-cache viewing copies; deletes those copies on close/background/logout. No expo-image URL/disk cache is used for vault photos.
+- Uses React Native Image to display private sandbox JPEGs directly. Local grid/viewer opens do not hash/read/copy full images into JavaScript. UI images are cleared on lock/background; temporary export/publication files are cleaned separately. No expo-image URL/disk cache is used for vault photos.
 - Uses expo-screen-capture on vault screens; production always requests blocking. Screenshots are allowed by default in development, including Expo Go. Set `EXPO_PUBLIC_ALLOW_SCREENSHOTS_FOR_TESTING=false` to test blocking during development.
 - Retains explicit export/share, metadata removal, logout/discard guard, private backend endpoints, independent public publication copies and cleanup protections.
 
-Existing Android `uploadPhoto()` callers still prepare a hidden vault copy and publish a separate approved copy through the original `/photos/upload-url` → S3 POST → `/photos/confirm` protocol. A vault key is never attached to public profile/chat/post/discovery resources. Deleting a private vault copy does not retract an already published photo.
+Existing Android `uploadPhoto()` callers still prepare a private vault copy and publish a separate approved copy through the original `/photos/upload-url` → S3 POST → `/photos/confirm` protocol. A vault key is never attached to public profile/chat/post/discovery resources. Deleting a private vault copy does not retract an already published photo.
+
+## Library experience (19 October 2026)
+
+The unlocked vault opens to **All photos**, including older hidden-by-default imports without changing their metadata. **Hidden** filters to hidden items; new additions are no longer automatically hidden. All photos still require vault unlock and remain private to the vault.
+
+Restored cloud photos automatically fetch missing files as thumbnails/viewer become visible. The downloader shares duplicate requests, limits concurrent downloads to two, verifies hashes on download, and checks account/lock state before displaying. Once saved, subsequent opens use local storage without waiting for the network. Local additions appear immediately, with backup work running separately. Metadata refresh runs before queued uploads, and unchanged remote rows no longer rewrite the database or refresh the grid.
+
+Routine pending/syncing/synced labels and the always-visible sync/relock controls have been removed. The grid has an All/Hidden filter, compact offline indicator, Add/Camera actions and a long-press selection toolbar. The viewer prioritizes the photo, with Share/Export and a More menu for hide/delete. Pull to refresh or the backup-failure Retry action reissues pending work; moderation rejection remains actionable in the viewer. Export confirmation and unsaved-photo logout protection remain in place.
+
+Validation for this update: mobile typecheck, vault lint and Android bundle passed; 18 vault tests and 66 auth/upload regression tests passed. Physical-device visual/offline acceptance remains a manual check. This update adds no dependencies or native modules.
 
 ## S3 paths and compression
 

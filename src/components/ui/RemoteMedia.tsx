@@ -23,9 +23,9 @@ export function RemoteMedia({
   height: number;
   privateMedia?: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
+  const [failedUri, setFailedUri] = useState<string | null>(null);
   const { theme } = useTheme();
-  if (failed || !uri)
+  if (failedUri === uri || !uri)
     return (
       <View
         style={{
@@ -43,7 +43,8 @@ export function RemoteMedia({
   return (
     <Image
       source={{ uri }}
-      onError={() => setFailed(true)}
+      onError={() => setFailedUri(uri)}
+      recyclingKey={uri}
       contentFit="contain"
       cachePolicy={privateMedia ? 'none' : 'memory'}
       style={{ width, height, backgroundColor: theme.colors.surfaceElevated }}

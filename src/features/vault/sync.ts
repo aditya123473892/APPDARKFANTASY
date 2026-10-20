@@ -15,7 +15,7 @@ import * as files from './files';
 import { assertUnlocked, assertEpoch, useVaultLock, refreshVault } from './lock';
 import { serial } from './vaultService';
 import { hash } from './crypto';
-import { retryDelay, remoteWins } from './conflicts';
+import { retryDelay, remoteWins, sameRemotePhoto } from './conflicts';
 import type { VaultPhoto, RemotePhoto, QueueJob } from './types';
 
 export const useVaultNetwork = create<{ offline: boolean; syncing: boolean }>(() => ({
@@ -302,7 +302,13 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
           status: rejected ? 'rejected' : latest.status,
           error: rejected
             ? 'Photo did not pass moderation. Delete it to remove it.'
-            : 'Sync failed. Retry when online.',
+            : status === 401
+              ? 'Sign in again to back up this photo.'
+              : status === 403
+                ? 'Backup was denied. Check your account and storage permissions.'
+                : status === 503
+                  ? 'Photo storage is unavailable. Try backup again later.'
+                  : 'Could not finish photo backup. Your local photo is saved. Tap Retry.',
         });
         if (rejected)
           await db.runAsync("DELETE FROM queue WHERE photoId=? AND operation!='delete'", photo.id);
@@ -326,11 +332,12 @@ async function pull(owner: string, valid: () => void): Promise<void> {
       apiClient.get('/vault/changes', { params: { since: cursor } }),
     );
     valid();
+    let changed = false;
     for (const remote of page.items) {
       await serial(async () => {
         valid();
         const local = await repo.get(owner, remote.id);
-        if (remoteWins(local, remote)) {
+        if (remoteWins(local, remote) && !sameRemotePhoto(local, remote)) {
           let path = local?.localPath ?? null;
           if (remote.deletedAt || (local && local.sha256 !== remote.sha256)) {
             if (path) await FS.deleteAsync(path, { idempotent: true });
@@ -348,12 +355,13 @@ async function pull(owner: string, valid: () => void): Promise<void> {
           await (
             await repo.database(owner)
           ).runAsync('DELETE FROM queue WHERE photoId=?', remote.id);
+          changed = true;
         }
       });
     }
     cursor = page.cursor ?? '';
     await repo.setSetting(owner, 'cursor', cursor);
-    refreshVault();
+    if (changed) refreshVault();
   } while (cursor);
 }
 export function syncVault(): Promise<void> {
@@ -379,6 +387,12 @@ export function syncVault(): Promise<void> {
     };
     useVaultNetwork.setState({ syncing: true });
     try {
+      // Restore the library before potentially slow queued uploads.
+      try {
+        await pull(owner, valid);
+      } catch {
+        valid();
+      } // A failed library refresh must not block saved uploads/deletes.
       await processQueue(owner, valid);
       await pull(owner, valid);
     } finally {

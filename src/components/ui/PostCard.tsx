@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { memo, useRef, useState } from 'react';
 import {
@@ -290,6 +291,7 @@ export const PostCard = memo(function PostCard({
   /** Shown for the viewer's own posts. */
   onDelete?: (post: Post) => void;
 }): React.JSX.Element {
+  const router = useRouter(), me = useCurrentUserId();
   const { theme } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [showComments, setShowComments] = useState(false);
@@ -351,6 +353,11 @@ export const PostCard = memo(function PostCard({
           <Text variant="caption" color="muted" style={styles.time}>
             {formatRelativeTime(post.createdAt)}
           </Text>
+          {post.user.id !== me ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" hitSlop={10} style={styles.more}
+            onPress={() => Alert.alert('Post options', undefined, [
+              { text: 'Report post', onPress: () => router.push({ pathname: '/report' as never, params: { targetType: 'post', targetId: post.id } }) },
+              { text: 'Cancel', style: 'cancel' },
+            ])}><Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.text} /></Pressable> : null}
           {onDelete ? (
             <Pressable
               accessibilityRole="button"

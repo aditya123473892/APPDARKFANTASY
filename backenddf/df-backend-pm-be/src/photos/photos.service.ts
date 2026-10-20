@@ -1,3 +1,4 @@
+import { blockContext, bsonIds, pairBlocked, referenceId } from '../user-blocks/block-context';
 import {
   BadRequestException,
   ConflictException,
@@ -14,6 +15,12 @@ import { Connection, Types } from 'mongoose';
 import { createHash, randomUUID } from 'crypto';
 import { allocateKey, bindingFromRef, matchesBinding, ResourceContext, storedKey } from '../s3-bucket/storage-layout';
 import { storageIndexes } from './storage-indexes';
+import { hasPreservationHold, preservationGate, preserveMutation } from '../reports/preservation';
+import { protectLastRoot } from '../users/role-policy';
+import { recordReportAccess } from '../reports/evidence-reader';
+import { restrictedResource } from '../reports/restricted-content';
+import { publicProfile } from '../users/public-profile';
+import { canReadPost } from '../posts/post-access';
 import { Subject } from 'rxjs';
 import { S3BucketService } from '../s3-bucket/s3-bucket.service';
 
@@ -51,6 +58,7 @@ export class PhotosService implements OnModuleInit {
         _id: new Types.ObjectId(owner),
         isBlocked: { $ne: true },
         deletionRequestedAt: { $exists: false },
+        $or: [{ moderationSuspendedUntil: { $exists: false } }, { moderationSuspendedUntil: null }, { moderationSuspendedUntil: { $lte: new Date() } }],
       })) ||
       (await this.purges.findOne({ _id: owner }))
     )
@@ -376,13 +384,16 @@ export class PhotosService implements OnModuleInit {
     if (!value || typeof value !== 'object') return value;
     if (value instanceof Date || value._bsontype || Buffer.isBuffer(value)) return value;
     if (Array.isArray(value)) return (await Promise.all(value.map(item => this.present(item, requester, inherited)))).filter(item => item !== null);
-    const source = value.toObject ? value.toObject() : value;
+    let source = value.toObject ? value.toObject() : value;
     if ([source.storageKey, source.filename, source.url].some(item => typeof item === 'string' && (item.includes('/vault/') || item.startsWith('vault/')))) return null;
     let context = inherited;
     // Never infer ownership or resource type from a photo key or client metadata.
     if (source._id && Types.ObjectId.isValid(String(source._id))) {
       context = await this.responseContext(String(source._id), requester) || inherited;
     }
+    if (context?.resourceType === 'profile' && context.resourceId === String(source._id) &&
+        requester !== context.ownerId && !blockContext.getStore()?.bypass)
+      source = publicProfile(source);
     const result: any = {};
     for (const [field, item] of Object.entries(source)) {
       if (['password', 'passwordResetToken', 'verifyEmailToken', 'storageKey'].includes(field)) continue;
@@ -402,7 +413,10 @@ export class PhotosService implements OnModuleInit {
       ['Users', 'profile', '_id'], ['Posts', 'post', 'user'], ['Events', 'event', 'creator'], ['Groups', 'group', 'admin'],
     ] as const) {
       const row = await this.db.db.collection(collection).findOne({ _id: new Types.ObjectId(id) });
-      if (row) return { ownerId: String(row[ownerField]?._id || row[ownerField]), resourceType, resourceId: id, requester };
+      if (row) {
+        if (requester) await recordReportAccess(this.db, requester, collection, id);
+        return { ownerId: String(row[ownerField]?._id || row[ownerField]), resourceType, resourceId: id, requester };
+      }
     }
   }
   async displayUrl(reference: string, context: ResourceContext) {
@@ -421,8 +435,11 @@ export class PhotosService implements OnModuleInit {
     if (!photo || storedKey(photo) !== key || !matchesBinding(photo, context))
       throw new NotFoundException('Photo not available');
     await this.active(context.ownerId);
+    await this.assertPairAccess(context);
     // No cross-request URL cache: every request rechecks resource and authorization state.
-    return this.storage.getSignedURL(storedKey(photo), undefined, seconds, context.resourceType === 'chat');
+    const url = await this.storage.getSignedURL(storedKey(photo), undefined, seconds, context.resourceType === 'chat');
+    await this.assertPairAccess(context);
+    return url;
   }
 
   /** Read restricted chat photos through the API; never expose a reusable S3 URL. */
@@ -434,7 +451,37 @@ export class PhotosService implements OnModuleInit {
     if (!photo || storedKey(photo) !== key || !matchesBinding(photo, context))
       throw new NotFoundException('Photo not available');
     await this.active(context.ownerId);
-    return this.storage.readVerified(key, 'image/jpeg');
+    await this.assertPairAccess(context);
+    const bytes = await this.storage.readVerified(key, 'image/jpeg');
+    await this.assertPairAccess(context);
+    return bytes;
+  }
+
+  private async assertPairAccess(context: ResourceContext) {
+    const collection = ({ profile: 'Users', post: 'Posts', event: 'Events', group: 'Groups', chat: 'ChatMessages' })[context.resourceType];
+    if (collection && await restrictedResource(this.db, collection, context.resourceId, context.ownerId))
+      throw new NotFoundException('Media not found');
+    if (blockContext.getStore()?.bypass) return;
+    if (!context.requester) throw new NotFoundException('Photo not available');
+    if (context.resourceType === 'post' &&
+        !await canReadPost(this.db, context.resourceId, context.requester))
+      throw new NotFoundException('Photo not available');
+    if (context.resourceType === 'chat') {
+      const message = await this.db.db.collection('ChatMessages').findOne({ _id: new Types.ObjectId(context.resourceId) });
+      if (!message) throw new NotFoundException('Photo not available');
+      const sender = String(message.sender), receiver = String(message.receiver);
+      if (message.groupId) {
+        if (!await this.db.db.collection('Groups').findOne({ _id: referenceId(String(message.groupId)), members: { $in: bsonIds([context.requester]) } } as any))
+          throw new NotFoundException('Photo not available');
+      } else if (![sender, receiver].includes(context.requester)) {
+        throw new NotFoundException('Photo not available');
+      }
+      if (await pairBlocked(this.db, context.requester, sender) ||
+          (!message.groupId && await pairBlocked(this.db, sender, receiver)))
+        throw new NotFoundException('Photo not available');
+    } else if (await pairBlocked(this.db, context.requester, context.ownerId)) {
+      throw new NotFoundException('Photo not available');
+    }
   }
   async reserveChatMessage(owner: string, requestId: string, target: string) {
     // Preserve retries of messages created before server-ID reservations were introduced.
@@ -473,8 +520,7 @@ export class PhotosService implements OnModuleInit {
     });
     if (existing) return key;
     const head = await this.storage.s3
-      .headObject({ Bucket: this.storage.bucket, Key: key })
-      .promise();
+      .headObject({ Bucket: this.storage.bucket, Key: key });
     const bytes = await this.storage.readVerified(key, head.ContentType);
     const requestId =
       'legacy-' +
@@ -491,8 +537,7 @@ export class PhotosService implements OnModuleInit {
           Body: bytes,
           ContentType: head.ContentType,
           ServerSideEncryption: 'AES256',
-        })
-        .promise();
+        });
       await this.confirm(owner, issued.uploadId);
     }
     const [photo] = await this.bind(owner, [issued.uploadId], ref);
@@ -500,26 +545,27 @@ export class PhotosService implements OnModuleInit {
   }
 
   async requestAccountDeletion(owner: string) {
-    await this.active(owner);
-    // Durable job first. Guard rejects this account while the worker finishes.
-    await this.purges.updateOne(
-      { _id: owner },
-      {
-        $setOnInsert: {
-          requestedAt: new Date(),
-          dueAt: new Date(Date.now() + 600000),
-        },
-      },
-      { upsert: true },
-    );
-    await this.db.db
-      .collection('Users')
-      .updateOne(
-        { _id: new Types.ObjectId(owner) },
-        { $set: { isBlocked: true, deletionRequestedAt: new Date() } },
-      );
-    await this.uploads.updateMany({ owner }, { $set: { state: 'deleting', status: 'deleting' } });
-    this.accountDeletion$.next(owner);
+    return preservationGate(this.db, async () => {
+      await this.active(owner);
+      const apply = async (session?: any) => {
+        await protectLastRoot(this.db, owner, session);
+        // Purge scheduling and account unavailability commit together. A failed
+        // write must not leave a hidden purge job counted as an available root.
+        await this.purges.updateOne({ _id: owner }, {
+          $setOnInsert: { requestedAt: new Date(), dueAt: new Date(Date.now() + 600000) },
+        }, { upsert: true, session });
+        await this.db.db.collection('Users').updateOne({ _id: new Types.ObjectId(owner) },
+          { $set: { isBlocked: true, deletionRequestedAt: new Date() } }, { session });
+        await this.uploads.updateMany({ owner }, { $set: { state: 'deleting', status: 'deleting' } }, { session });
+      };
+      if (this.db?.getClient) {
+        const session = await this.db.startSession();
+        try { await session.withTransaction(() => apply(session), {
+          readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' },
+        }); } finally { await session.endSession(); }
+      } else await apply(); // In-memory test doubles only; startup requires transactions.
+      this.accountDeletion$.next(owner);
+    });
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -615,7 +661,9 @@ export class PhotosService implements OnModuleInit {
           continue;
         }
         try {
-          await this.storage.deleteOne(job.key);
+          await preserveMutation(this.db, [`key:${job.key}`], async () => {
+            await this.storage.deleteOne(job.key);
+          });
           // A temp key must not free a quota slot while its approved object remains.
           await this.uploads.deleteMany({ state: 'deleting', key: job.key });
           await this.uploads.deleteMany({
@@ -671,6 +719,7 @@ export class PhotosService implements OnModuleInit {
   }
 
   private async inUse(key: string) {
+    if (await hasPreservationHold(this.db, [`key:${key}`])) return true;
     if (key.startsWith('temp/')) return !!(await this.uploads.findOne({ key, state: { $in: ['approved', 'attached'] } }));
     if (await this.db.db.collection('VaultPhotos').findOne({ key, state: { $in: ['approved', 'processing'] } })) return true;
     if (await this.uploads.findOne({ $or: [{ processingKey: key }, { finalKey: key }], state: 'processing', leaseUntil: { $gt: new Date() } })) return true;
@@ -737,7 +786,7 @@ export class PhotosService implements OnModuleInit {
       if (
         await this.db.db
           .collection(collection)
-          .findOne(filter, { projection: { _id: 1 } })
+          .findOne({ $and: [filter, { deletedAt: null }] }, { projection: { _id: 1 } })
       )
         return true;
     }
@@ -745,6 +794,9 @@ export class PhotosService implements OnModuleInit {
   }
 
   private async purgeAccount(owner: string) {
+    return preserveMutation(this.db, [`owner:${owner}`, `Users:${owner}`], () => this.purgeUnheldAccount(owner));
+  }
+  private async purgeUnheldAccount(owner: string) {
     const id = new Types.ObjectId(owner);
     const users = this.db.db.collection('Users');
     await users.updateOne(
@@ -797,7 +849,11 @@ export class PhotosService implements OnModuleInit {
     for (const prefix of [`users/${owner}/`, `temp/${owner}/`, `profile/${owner}/`, `posts/${owner}/`, `vault/${owner}/`])
       (await this.storage.keysUnder(prefix)).forEach(add);
     // Any failure keeps the account blocked and the durable job present.
-    for (const key of keys) await this.storage.deleteOne(key);
+    for (const key of keys) {
+      if (await hasPreservationHold(this.db, [`key:${key}`])) {
+        await this.enqueue([key]);
+      } else await this.storage.deleteOne(key);
+    }
     await this.uploads.deleteMany({ owner });
     await this.db.db.collection('VaultPhotos').deleteMany({ owner });
     await this.db.db.collection('VaultTombstones').deleteMany({ owner });
@@ -859,6 +915,17 @@ export class PhotosService implements OnModuleInit {
     await this.db.db
       .collection('PostRequest')
       .deleteMany({ $or: [{ userId: id }, { requestedUserId: id }] });
+    await this.db.db.collection('Notifications').deleteMany({ $or: [{ sender: id }, { receiver: id }] });
+    await this.db.db.collection('EventMembers').deleteMany({ $or: [{ user: id }, { event: { $in: events.map((event) => event._id) } }] });
+    await this.db.db.collection('UserBlocks').deleteMany({ $or: [{ blockerId: id }, { blockedId: id }] });
+    await this.db.db.collection('UserEdits').deleteMany({ user: id });
+    await this.db.db.collection('UserSubscriptions').deleteMany({ user: id });
+    await this.db.db.collection('Payments').deleteMany({ userId: owner });
+    await this.db.db.collection('Messages').deleteMany({ $or: [{ sender: id }, { chat: { $in: messages.map((message) => message._id) } }] });
+    await this.db.db.collection('ReportAccess').deleteMany({ $or: [{ viewerId: owner }, { resource: { $in: [
+      `Users:${owner}`, ...posts.map((post) => `Posts:${post._id}`), ...events.map((event) => `Events:${event._id}`),
+    ] } }] });
+    await this.db.db.collection('ReportMemberships').deleteMany({ $or: [{ userId: owner }, { groupId: { $in: groups.map((group) => String(group._id)) } }] });
     await users.deleteOne({ _id: id });
     await this.purges.deleteOne({ _id: owner });
   }

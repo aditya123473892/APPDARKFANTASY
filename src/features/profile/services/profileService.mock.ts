@@ -11,6 +11,16 @@ const view = (user: User): ProfileView => ({
 
 export const mockProfileService: ProfileService = {
   discover: () => respond(() => db.discoverable().map(view)),
+  discoverPage: (skip, search) =>
+    respond(() => {
+      const profiles = db.discoverable().map(view)
+        .filter((user) => user.name.toLowerCase().includes(search.toLowerCase()));
+      const next = skip + 20;
+      return {
+        profiles: profiles.slice(skip, next),
+        nextSkip: next < profiles.length ? next : undefined,
+      };
+    }),
   get: (userId) => respond(() => view(db.user(userId)), 300),
   updateMe: (input) => respond(() => db.updateMe(input), 600),
   updateAvatar: (asset) =>

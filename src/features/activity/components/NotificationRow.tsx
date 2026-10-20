@@ -13,6 +13,7 @@ const kindIcon: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
   like: 'flame',
   reply: 'chatbubble',
   message: 'mail',
+  system: 'notifications',
 };
 
 export const NotificationRow = memo(function NotificationRow({
@@ -98,6 +99,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  copy: { flex: 1, gap: spacing.xs },
+  copy: { flex: 1, minWidth: 0, gap: spacing.xs },
   unread: { width: 9, height: 9, borderRadius: radius.full },
 });

@@ -82,8 +82,16 @@ export class Users {
   @Prop({ required: false })
   blockedTime: Date;
 
+  @Prop({ required: false })
+  moderationSuspendedUntil: Date;
+
+  @Prop({ required: false })
+  deletionRequestedAt: Date;
+
   @Prop({
     required: true,
+    type: [String],
+    enum: Object.values(ERole),
   })
   roles: ERole[];
 

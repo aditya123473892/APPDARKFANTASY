@@ -27,6 +27,9 @@ import { ContactModule } from './contact/contact.module';
 import { memoryStorage } from 'multer';
 import { PhotosModule } from './photos/photos.module';
 import { VaultModule } from './vault/vault.module';
+import { UserBlocksModule } from './user-blocks/user-blocks.module';
+import { blockContext, blockQueryPlugin } from './user-blocks/block-context';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -42,6 +45,10 @@ import { VaultModule } from './vault/vault.module';
         uri: configService.get<string>('DATABASE_URL'),
         dbName: configService.get<string>('DATABASE_NAME'),
         autoIndex: false,
+        connectionFactory: (connection) => {
+          connection.plugin(blockQueryPlugin);
+          return connection;
+        },
       }),
       inject: [ConfigService],
     }),
@@ -51,6 +58,8 @@ import { VaultModule } from './vault/vault.module';
     }),
     PhotosModule,
     VaultModule,
+    UserBlocksModule,
+    ReportsModule,
     AuthModule,
     UsersModule,
     MailModule,
@@ -79,6 +88,14 @@ import { VaultModule } from './vault/vault.module';
 })
 export class AppModule {
   configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply((req, _res, next) =>
+        blockContext.run(
+          { bypass: /^\/(?:api\/)?mod(?:\/|$)/.test(req.path), authSelf: /^\/(?:api\/)?auth\/me\/?$/.test(req.path) },
+          next,
+        ),
+      )
+      .forRoutes('*');
     consumer.apply(ApiLoggerMiddleware).forRoutes('*');
   }
 }

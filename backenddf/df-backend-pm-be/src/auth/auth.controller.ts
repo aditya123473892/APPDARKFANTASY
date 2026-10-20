@@ -34,7 +34,7 @@ export class AuthController {
   ) {}
 
   @Post('login')
-  async login(@Body() credentials: LoginDto) {
+  async login(@Body() credentials: LoginDto, @Req() request?: any) {
     const foundUser = await this.userService.findByUsername(
       credentials.username,
     );
@@ -81,6 +81,8 @@ export class AuthController {
     }
 
     // Create Token
+    // The response presenter may expose self-only fields only after authentication.
+    if (request) request.user = { id: String(user._id) };
     const { accessToken, cookieToken } =
       await this.authService.createTokens(user);
 
@@ -214,12 +216,10 @@ export class AuthController {
   async forgotPassword(@Body() { username }: ForgotPasswordDto) {
     const user = await this.userService.findOne({ username });
 
-    if (!user)
-      return badRequestRes(
-        `No user exist with this '${username}' username or email!`,
-      );
-
-    if (user.isBlocked) return badRequestRes(`Account blocked!`);
+    const accepted = () => successRes(
+      { passwordRequest: true }, 'If an account exists, reset instructions have been sent.',
+    );
+    if (!user || user.isBlocked || user.deletionRequestedAt) return accepted();
 
     //TODO: Generate a token for user with expiry
     const currentDate = new Date();
@@ -255,10 +255,7 @@ export class AuthController {
 
     if (!SendEmail) return badRequestRes(`Unable to send link`);
 
-    return successRes(
-      { passwordRequest: true },
-      'Password reset link has been sent your email!',
-    );
+    return accepted();
   }
 
   @Post('reset-password')

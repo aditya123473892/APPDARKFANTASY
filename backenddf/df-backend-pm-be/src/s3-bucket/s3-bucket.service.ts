@@ -6,7 +6,11 @@ import {
   ServiceUnavailableException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
-import * as AWS from 'aws-sdk';
+import { S3, S3ClientConfig, GetObjectCommand, LifecycleRule } from '@aws-sdk/client-s3';
+import { Rekognition, DetectModerationLabelsResponse } from '@aws-sdk/client-rekognition';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Readable } from 'node:stream';
 import sharp = require('sharp');
 import { bucketForKey } from './storage-layout';
 
@@ -48,7 +52,7 @@ export class S3BucketService implements OnModuleInit {
         S3BucketService.name,
       );
   }
-  private get options(): AWS.S3.ClientConfiguration {
+  private get options(): S3ClientConfig {
     const accessKeyId =
       process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
     const secretAccessKey =
@@ -59,9 +63,8 @@ export class S3BucketService implements OnModuleInit {
       );
     return {
       region: process.env.AWS_S3_REGION || process.env.AWS_REGION,
-      signatureVersion: 'v4',
-      httpOptions: { connectTimeout: 5000, timeout: 30000 },
-      maxRetries: 2,
+      requestHandler: { connectionTimeout: 5000, requestTimeout: 30000 },
+      maxAttempts: 3,
       ...(accessKeyId
         ? {
             credentials: {
@@ -73,12 +76,12 @@ export class S3BucketService implements OnModuleInit {
         : {}),
     };
   }
-  private client?: AWS.S3;
+  private client?: S3;
   private configurations = new Map<string, { until: number; check: Promise<void> }>();
   get s3() {
-    return (this.client ||= new AWS.S3(this.options));
+    return (this.client ||= new S3(this.options));
   }
-  set s3(client: AWS.S3) {
+  set s3(client: S3) {
     this.client = client;
   }
   get bucket(): string {
@@ -92,7 +95,7 @@ export class S3BucketService implements OnModuleInit {
   async copyPrivate(sourceKey: string, destinationKey: string) {
     const source = this.bucketFor(sourceKey);
     await Promise.all([this.ensurePrivate(source), this.ensurePrivate(this.bucketFor(destinationKey))]);
-    const head = await this.s3.headObject({ Bucket: source, Key: sourceKey }).promise();
+    const head = await this.s3.headObject({ Bucket: source, Key: sourceKey });
     if (!head.ETag || head.ContentType !== 'image/jpeg') throw new BadRequestException('Invalid prepared photo');
     return this.s3.copyObject({
       Bucket: this.bucketFor(destinationKey), Key: destinationKey,
@@ -100,7 +103,20 @@ export class S3BucketService implements OnModuleInit {
       CopySourceIfMatch: head.ETag, MetadataDirective: 'REPLACE',
       ContentType: 'image/jpeg', CacheControl: /^(chat|vault)\//.test(destinationKey) ? 'private, no-store' : 'private, max-age=120',
       ContentDisposition: 'inline', ServerSideEncryption: 'AES256',
-    }).promise();
+    });
+  }
+  /** Server-only evidence writer. Never signs or returns evidence URLs. */
+  async copyReportEvidence(sourceKey: string, destinationKey: string) {
+    if (!/^reports\/[0-9a-f-]+\/[0-9a-f-]+\.jpg$/.test(destinationKey) || /^(vault|temp|reports|quarantine)\//.test(sourceKey))
+      throw new BadRequestException('Invalid evidence storage binding');
+    const sourceBucket = this.bucketFor(sourceKey), destinationBucket = this.bucketFor(destinationKey);
+    await Promise.all([this.ensurePrivate(sourceBucket), this.ensurePrivate(destinationBucket)]);
+    const head = await this.s3.headObject({ Bucket: sourceBucket, Key: sourceKey });
+    if (!head.ETag || head.ContentType !== 'image/jpeg') throw new BadRequestException('Invalid evidence image');
+    return this.s3.copyObject({ Bucket: destinationBucket, Key: destinationKey,
+      CopySource: `${sourceBucket}/${sourceKey.split('/').map(encodeURIComponent).join('/')}`,
+      CopySourceIfMatch: head.ETag, MetadataDirective: 'REPLACE', Metadata: {},
+      ContentType: 'image/jpeg', CacheControl: 'no-store', ContentDisposition: 'inline', ServerSideEncryption: 'AES256' });
   }
   async uploadFile(_file: unknown, _folder: string): Promise<any> {
     throw new BadRequestException(
@@ -117,31 +133,26 @@ export class S3BucketService implements OnModuleInit {
   }
   async presign(key: string, contentType: string, seconds = 300) {
     await this.ensurePrivate(this.bucketFor(key));
-    return new Promise<AWS.S3.PresignedPost>((resolve, reject) =>
-      this.s3.createPresignedPost(
-        {
-          Bucket: this.bucketFor(key),
-          Expires: Math.max(1, Math.min(300, seconds)),
-          Fields: {
-            key,
-            'Content-Type': contentType,
-            success_action_status: '204',
-          },
-          Conditions: [
-            ['eq', '$key', key],
-            ['eq', '$Content-Type', contentType],
-            ['eq', '$success_action_status', '204'],
-            ['content-length-range', 1, PHOTO_MAX_BYTES],
-          ],
-        },
-        (error, result) => (error ? reject(error) : resolve(result)),
-      ),
-    );
+    return createPresignedPost(this.s3, {
+      Bucket: this.bucketFor(key),
+      Key: key,
+      Expires: Math.max(1, Math.min(300, seconds)),
+      Fields: {
+        key,
+        'Content-Type': contentType,
+        success_action_status: '204',
+      },
+      Conditions: [
+        ['eq', '$key', key],
+        ['eq', '$Content-Type', contentType],
+        ['eq', '$success_action_status', '204'],
+        ['content-length-range', 1, PHOTO_MAX_BYTES],
+      ],
+    });
   }
   async readVerified(key: string, expectedType: string) {
     const head = await this.s3
-      .headObject({ Bucket: this.bucketFor(key), Key: key })
-      .promise();
+      .headObject({ Bucket: this.bucketFor(key), Key: key });
     if (
       !head.ContentLength ||
       head.ContentLength > PHOTO_MAX_BYTES ||
@@ -150,9 +161,9 @@ export class S3BucketService implements OnModuleInit {
     ) {
       throw new BadRequestException('Invalid image size or type');
     }
-    const stream = this.s3
-      .getObject({ Bucket: this.bucketFor(key), Key: key, IfMatch: head.ETag })
-      .createReadStream();
+    const result = await this.s3.getObject({ Bucket: this.bucketFor(key), Key: key, IfMatch: head.ETag });
+    const stream = result.Body as Readable;
+    if (!stream) throw new BadRequestException('Image body is missing');
     const chunks: Buffer[] = [];
     let length = 0;
     for await (const part of stream) {
@@ -229,14 +240,13 @@ export class S3BucketService implements OnModuleInit {
   }
   protected moderationResult(
     clean: Buffer,
-  ): Promise<AWS.Rekognition.DetectModerationLabelsResponse> {
-    const scanner = new AWS.Rekognition({
+  ): Promise<DetectModerationLabelsResponse> {
+    const scanner = new Rekognition({
       ...this.options,
       region: process.env.AWS_REKOGNITION_REGION || this.options.region,
     });
     return scanner
-      .detectModerationLabels({ Image: { Bytes: clean }, MinConfidence: 60 })
-      .promise();
+      .detectModerationLabels({ Image: { Bytes: clean }, MinConfidence: 60 });
   }
   async putApproved(key: string, bytes: Buffer) {
     return this.s3
@@ -248,19 +258,28 @@ export class S3BucketService implements OnModuleInit {
         ContentDisposition: 'inline',
         ServerSideEncryption: 'AES256',
         CacheControl: /^(vault|chat)\//.test(key) ? 'private, no-store' : 'private, max-age=120',
-      })
-      .promise();
+      });
   }
   async getSignedURL(Key: string, Bucket?: string, expiresInSeconds = 120, noStore = false) {
+    if (/^reports\//.test(Key || '')) throw new BadRequestException('Evidence cannot be signed by this path');
     if (!Key) return null;
     this.assertBucket(Bucket, Key);
     await this.ensurePrivate(this.bucketFor(Key));
-    return this.s3.getSignedUrlPromise('getObject', {
+    return getSignedUrl(this.s3, new GetObjectCommand({
       Bucket: this.bucketFor(Key),
       Key,
-      Expires: Math.max(30, Math.min(300, Number(expiresInSeconds) || 120)),
       ...(noStore ? { ResponseCacheControl: 'no-store, private' } : {}),
-    });
+    }), { expiresIn: Math.max(30, Math.min(300, Number(expiresInSeconds) || 120)) });
+  }
+  /** Only the case-authorized moderation service may call this signing path. */
+  async signReportEvidence(key: string) {
+    if (!/^reports\/[a-f\d-]+\/[a-f\d-]+\.jpg$/.test(key))
+      throw new BadRequestException('Invalid evidence reference');
+    await this.ensurePrivate(this.bucketFor(key));
+    return getSignedUrl(this.s3, new GetObjectCommand({
+      Bucket: this.bucketFor(key), Key: key, ResponseCacheControl: 'private, no-store',
+      ResponseContentDisposition: 'inline',
+    }), { expiresIn: 60 });
   }
   async deleteOne(Key: string, Bucket?: string) {
     if (!Key || Key.startsWith('/') || Key.includes('://'))
@@ -275,15 +294,13 @@ export class S3BucketService implements OnModuleInit {
           Prefix: Key,
           KeyMarker,
           VersionIdMarker,
-        })
-        .promise();
+        });
       const objects = [...(page.Versions || []), ...(page.DeleteMarkers || [])]
         .filter((item) => item.Key === Key)
         .map((item) => ({ Key, VersionId: item.VersionId }));
       if (objects.length) {
         const result = await this.s3
-          .deleteObjects({ Bucket: this.bucketFor(Key), Delete: { Objects: objects } })
-          .promise();
+          .deleteObjects({ Bucket: this.bucketFor(Key), Delete: { Objects: objects } });
         if (result.Errors?.length)
           throw new ServiceUnavailableException(
             'Photo deletion will be retried',
@@ -292,7 +309,7 @@ export class S3BucketService implements OnModuleInit {
       KeyMarker = page.IsTruncated ? page.NextKeyMarker : undefined;
       VersionIdMarker = page.IsTruncated ? page.NextVersionIdMarker : undefined;
     } while (KeyMarker);
-    return this.s3.deleteObject({ Bucket: this.bucketFor(Key), Key }).promise();
+    return this.s3.deleteObject({ Bucket: this.bucketFor(Key), Key });
   }
   async keysUnder(prefix: string) {
     const keys: string[] = [];
@@ -303,8 +320,7 @@ export class S3BucketService implements OnModuleInit {
           Bucket: this.bucketFor(prefix),
           Prefix: prefix,
           ContinuationToken,
-        })
-        .promise();
+        });
       keys.push(...(page.Contents || []).map((item) => item.Key));
       ContinuationToken = page.IsTruncated
         ? page.NextContinuationToken
@@ -362,15 +378,14 @@ export class S3BucketService implements OnModuleInit {
   }
   private async verifyConfiguration(Bucket = this.bucket) {
     const [access, ownership, encryption, lifecycle, cors] = await Promise.all([
-      this.s3.getPublicAccessBlock({ Bucket }).promise(),
-      this.s3.getBucketOwnershipControls({ Bucket }).promise(),
-      this.s3.getBucketEncryption({ Bucket }).promise(),
-      this.s3.getBucketLifecycleConfiguration({ Bucket }).promise(),
+      this.s3.getPublicAccessBlock({ Bucket }),
+      this.s3.getBucketOwnershipControls({ Bucket }),
+      this.s3.getBucketEncryption({ Bucket }),
+      this.s3.getBucketLifecycleConfiguration({ Bucket }),
       this.s3
         .getBucketCors({ Bucket })
-        .promise()
         .catch((error) => {
-          if (error.code === 'NoSuchCORSConfiguration')
+          if (error.name === 'NoSuchCORSConfiguration')
             return { CORSRules: [] };
           throw error;
         }),
@@ -399,7 +414,7 @@ export class S3BucketService implements OnModuleInit {
     )
       throw new Error('Encryption is required');
     const rules = lifecycle.Rules || [];
-    const prefix = (rule: AWS.S3.LifecycleRule) =>
+    const prefix = (rule: LifecycleRule) =>
       rule.Prefix ?? (rule.Filter as any)?.Prefix;
     if (
       Bucket === this.bucketFor('temp/') && !rules.some(

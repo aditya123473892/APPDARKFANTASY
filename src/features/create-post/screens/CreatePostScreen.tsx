@@ -11,6 +11,7 @@ import { useAuthStore } from '@/features/auth/store/authStore';
 import { useCreatePost } from '@/features/feed/hooks/useFeed';
 import type { PostAudience, UploadAsset } from '@/features/feed/types';
 import { cleanupPickedAssets } from '@/services/api/photoUpload';
+import { uploadProgressLabel } from '@/services/api/uploadProgress';
 import { usePhotoDraftCleanup } from '@/hooks/usePhotoDraftCleanup';
 import { createClientId } from '@/utils/clientId';
 import { pickMedia } from '../pickMedia';
@@ -35,6 +36,7 @@ export function CreatePostScreen(): React.JSX.Element {
   const [value, setValue] = useState('');
   const [audience, setAudience] = useState<PostAudience>('everyone');
   const [assets, setAssets] = useState<UploadAsset[]>([]);
+  const [uploadStatus, setUploadStatus] = useState('');
   const createPost = useCreatePost();
   const submitted = useRef(false);
   const clientId = useRef(createClientId());
@@ -66,7 +68,8 @@ export function CreatePostScreen(): React.JSX.Element {
   const submit = (): void => {
     if (!canPost) return;
     createPost.mutate(
-      { body: trimmed, audience, assets, clientId: clientId.current },
+      { body: trimmed, audience, assets, clientId: clientId.current,
+        onUploadProgress: (progress) => setUploadStatus(uploadProgressLabel(progress)) },
       {
         onSuccess: (post) => {
           submitted.current = true;
@@ -137,6 +140,9 @@ export function CreatePostScreen(): React.JSX.Element {
             </Text>
           ) : null}
           <View style={{ gap: 12, marginTop: 20 }}>
+            {createPost.isPending && uploadStatus ? (
+              <Text accessibilityLiveRegion="polite">{uploadStatus}</Text>
+            ) : null}
             <Button
               label={assets.length ? 'Change media' : 'Add photos'}
               icon="images-outline"

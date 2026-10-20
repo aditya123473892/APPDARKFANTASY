@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUnreadMessageCount } from '@/features/chat/hooks/useChat';
 import { useIncomingRequestCount } from '@/features/requests/hooks/useRequests';
+import { useUnreadNotificationCount } from '@/features/activity/hooks/useActivity';
 import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { useRoles } from '@/features/auth/hooks/useCurrentUser';
@@ -34,7 +35,7 @@ const labels: Record<string, string> = {
   discover: 'Discover',
   events: 'Events',
   chats: 'Chats',
-  activity: 'Likes',
+  activity: 'Activity',
   profile: 'Profile',
 };
 
@@ -44,7 +45,7 @@ export default function TabsLayout(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const unreadMessages = useUnreadMessageCount();
   const incomingRequests = useIncomingRequestCount();
-  const activityBadge = incomingRequests;
+  const activityBadge = incomingRequests + useUnreadNotificationCount();
   const badge = (count: number) => (count > 0 ? (count > 99 ? '99+' : count) : undefined);
 
   return (
@@ -123,7 +124,7 @@ export default function TabsLayout(): React.JSX.Element {
       <Tabs.Screen
         name="activity"
         options={{
-          title: 'Likes',
+          title: 'Activity',
           tabBarBadge: badge(activityBadge),
           tabBarAccessibilityLabel: activityBadge ? `Activity, ${activityBadge} new` : 'Activity',
         }}

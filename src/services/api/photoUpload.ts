@@ -12,6 +12,7 @@ import {
   sessionIdentity,
 } from '@/features/auth/sessionRuntime';
 import type { UploadAsset } from '@/features/feed/types';
+import type { UploadProgressListener } from './uploadProgress';
 
 type SignedUpload = {
   uploadId: string;
@@ -31,9 +32,11 @@ registerSessionTeardown(() => {
 export async function retryPhotoOperation<T>(
   operation: () => Promise<T>,
   scope: number,
+  onAttempt?: (attempt: number) => void,
 ): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     assertSessionCurrent(scope);
+    onAttempt?.(attempt + 1);
     try {
       const result = await operation();
       assertSessionCurrent(scope);
@@ -52,16 +55,16 @@ export async function retryPhotoOperation<T>(
   }
 }
 
-export function uploadPhoto(asset: UploadAsset): Promise<string> {
+export function uploadPhoto(asset: UploadAsset, onProgress?: UploadProgressListener): Promise<string> {
   const scope = sessionIdentity.generation;
   const cached = completed.get(asset);
   if (cached?.generation === scope) return cached.promise;
   const operation =
     Platform.OS === 'android'
       ? import('@/features/vault/vaultService').then(({ publishPhoto }) =>
-          publishPhoto(asset, (prepared) => performUpload(prepared, scope, true)),
+          publishPhoto(asset, (prepared) => performUpload(prepared, scope, true, onProgress)),
         )
-      : performUpload(asset, scope);
+      : performUpload(asset, scope, false, onProgress);
   const promise = operation.catch((error) => {
     completed.delete(asset);
     if (error instanceof ServiceError) throw error;
@@ -72,11 +75,11 @@ export function uploadPhoto(asset: UploadAsset): Promise<string> {
 }
 
 /** Gallery-to-chat upload: no vault import, unlock, or persistent local copy. */
-export function uploadChatPhoto(asset: UploadAsset): Promise<string> {
+export function uploadChatPhoto(asset: UploadAsset, onProgress?: UploadProgressListener): Promise<string> {
   const scope = sessionIdentity.generation;
   const cached = chatCompleted.get(asset);
   if (cached?.generation === scope) return cached.promise;
-  const promise = performUpload(asset, scope).catch((error) => {
+  const promise = performUpload(asset, scope, false, onProgress).catch((error) => {
     chatCompleted.delete(asset);
     if (error instanceof ServiceError) throw error;
     throw serviceError(error);
@@ -85,13 +88,18 @@ export function uploadChatPhoto(asset: UploadAsset): Promise<string> {
   return promise;
 }
 
-async function performUpload(asset: UploadAsset, scope: number, prepared = false): Promise<string> {
+async function performUpload(asset: UploadAsset, scope: number, prepared = false,
+  onProgress?: UploadProgressListener): Promise<string> {
   if (!asset.type.startsWith('image/'))
     throw new ServiceError('VALIDATION', 'Choose a photo. Video uploads are unavailable.');
   let temporaryUri: string | undefined;
   let stage: 'prepare' | 'request' | 'transfer' | 'confirm' = 'prepare';
+  const notify = (attempt = 1, percent?: number) => {
+    if (sessionIdentity.generation === scope) onProgress?.({ stage, attempt, percent });
+  };
   try {
     assertSessionCurrent(scope);
+    notify();
     let clean: { uri: string };
     if (prepared) clean = { uri: asset.uri };
     else {
@@ -129,6 +137,7 @@ async function performUpload(asset: UploadAsset, scope: number, prepared = false
           ).data,
         ),
       scope,
+      (attempt) => notify(attempt),
     );
     if (signed.status !== 'approved') {
       const url = new URL(signed.url!);
@@ -142,6 +151,7 @@ async function performUpload(asset: UploadAsset, scope: number, prepared = false
         throw new ServiceError('UNKNOWN');
       }
       stage = 'transfer';
+      let transferAttempt = 1;
       await retryPhotoOperation(async () => {
         const controller = new AbortController();
         controllers.add(controller);
@@ -168,6 +178,9 @@ async function performUpload(asset: UploadAsset, scope: number, prepared = false
               fieldName: 'file',
               mimeType: 'image/jpeg',
               parameters: signed.fields!,
+            }, (progress) => {
+              if (progress.totalBytesExpectedToSend > 0) notify(transferAttempt,
+                Math.min(100, Math.max(0, Math.round(progress.totalBytesSent * 100 / progress.totalBytesExpectedToSend))));
             });
             const cancel = () => {
               void task.cancelAsync().catch(() => undefined);
@@ -185,7 +198,7 @@ async function performUpload(asset: UploadAsset, scope: number, prepared = false
           clearTimeout(timer);
           controllers.delete(controller);
         }
-      }, scope);
+      }, scope, (attempt) => { transferAttempt = attempt; notify(attempt, 0); });
     }
     stage = 'confirm';
     await retryPhotoOperation(async () => {
@@ -202,7 +215,8 @@ async function performUpload(asset: UploadAsset, scope: number, prepared = false
       );
       if (result.status !== 'approved')
         throw new ServiceError('VALIDATION', 'Photo approval is pending. Try again.');
-    }, scope);
+    }, scope, (attempt) => notify(attempt));
+    onProgress?.({ stage: 'complete', percent: 100, attempt: 1 });
     return signed.uploadId;
   } catch (error) {
     if (error instanceof ServiceError) throw error;

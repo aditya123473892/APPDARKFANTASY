@@ -1,11 +1,12 @@
 import { Alert, Platform } from 'react-native';
-import * as MediaLibrary from 'expo-media-library';
-import { saveToLibraryAsync } from 'expo-media-library/legacy';
+// Use the native API available in clients that do not include ExpoMediaLibraryNext.
+import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Sharing from 'expo-sharing';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as FS from 'expo-file-system/legacy';
 import { assertUnlocked, assertEpoch } from './lock';
 import { viewPhoto } from './vaultService';
+import { photoUri } from './media';
 import { read, temporaryFile, removeTemp } from './files';
 
 function confirmExport(sharing: boolean): Promise<boolean> {
@@ -39,6 +40,7 @@ export async function exportPhotos(owner: string, ids: string[], sharing = false
     assertEpoch(owner, scope);
     let source: string | undefined, normalized: string | undefined, output: string | undefined;
     try {
+      await photoUri(owner, id);
       source = await viewPhoto(owner, id);
       const context = ImageManipulator.manipulate(source);
       const rendered = await context.renderAsync();
@@ -52,8 +54,7 @@ export async function exportPhotos(owner: string, ids: string[], sharing = false
       assertEpoch(owner, scope);
       if (sharing)
         await Sharing.shareAsync(output, { mimeType: 'image/jpeg', dialogTitle: 'Share photo' });
-      else if (Number(Platform.Version) >= 30) await MediaLibrary.Asset.create(output);
-      else await saveToLibraryAsync(output);
+      else await MediaLibrary.saveToLibraryAsync(output);
     } finally {
       if (source) await removeTemp(source);
       if (output) await removeTemp(output);

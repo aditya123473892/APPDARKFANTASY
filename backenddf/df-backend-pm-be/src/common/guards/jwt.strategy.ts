@@ -4,6 +4,7 @@ import { Strategy, ExtractJwt } from 'passport-jwt';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
+import { blockContext } from '../../user-blocks/block-context';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -31,8 +32,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const deletion = await this.db.db
       .collection<any>('AccountPurges')
       .findOne({ _id: String(payload.sub) });
-    if (!user || deletion)
+    if (!user || deletion || user.moderationSuspendedUntil > new Date())
       throw new UnauthorizedException('Account is unavailable');
-    return { id: String(user._id), user: user.username, roles: user.roles };
+    const context = blockContext.getStore();
+    if (context) context.viewerId = String(user._id);
+    return { id: String(user._id), user: user.username, roles: user.roles,
+      staffClaims: { iat: payload.iat, exp: payload.exp, amr: payload.amr, iss: payload.iss } };
   }
 }

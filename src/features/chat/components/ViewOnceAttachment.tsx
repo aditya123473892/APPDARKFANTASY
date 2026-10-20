@@ -159,6 +159,7 @@ export function ViewOnceAttachment({
         <Text style={{ color: tint }}>{label}</Text>
       </Pressable>
       <ChatPhotoViewer
+        reportTarget={mine ? undefined : { messageId, mediaId: media._id }}
         visible={visible}
         uri={uri}
         loading={loading}

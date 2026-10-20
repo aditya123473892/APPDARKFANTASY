@@ -209,7 +209,13 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   async findOne(@Param('id') _id: string, @AuthUser() user: IAuthUser) {
-    const post = await this.postsService.findOne({ user: user, _id });
+    let post;
+    try {
+      post = await this.postsService.findVisiblePost(_id, user.id);
+    } catch (error) {
+      if (error.getStatus?.() === 404) return badRequestRes('Post not found!');
+      throw error;
+    }
 
     if (!post) return badRequestRes('Post not found!');
 
@@ -255,7 +261,7 @@ export class PostsController {
           .map((item) => item.filename || item.url),
       );
     }
-    return successRes(updated);
+    return successRes(await this.postsService.findVisiblePost(id, actor.id));
   }
 
   @ApiBearerAuth()
@@ -465,7 +471,10 @@ export class PostsController {
     if (!post) {
       return { message: 'You have already liked this post.' };
     }
-    return { message: 'Post liked successfully.', post };
+    return {
+      message: 'Post liked successfully.',
+      post: await this.postsService.findVisiblePost(postId, user.id),
+    };
   }
 
   @ApiBearerAuth()
@@ -485,6 +494,9 @@ export class PostsController {
     if (!post) {
       return { message: 'You have not liked this post yet.' };
     }
-    return { message: 'Post unliked successfully.', post };
+    return {
+      message: 'Post unliked successfully.',
+      post: await this.postsService.findVisiblePost(postId, user.id),
+    };
   }
 }

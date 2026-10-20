@@ -23,6 +23,7 @@
     "@expo/vector-icons": "^15.0.3",
     "@hookform/resolvers": "^5.2.2",
     "@noble/hashes": "1.8.0",
+    "@sentry/react-native": "~7.11.0",
     "@shopify/flash-list": "2.0.2",
     "@tanstack/react-query": "^5.90.2",
     "axios": "^1.12.2",

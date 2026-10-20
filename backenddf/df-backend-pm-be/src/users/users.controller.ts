@@ -190,7 +190,7 @@ export class UsersController {
     }
 
     // Create user
-    const user = await this.usersService.create(createUserDto);
+    const user = await this.usersService.create(createUserDto, authUser.id);
 
     if (!user) badRequestRes('Failed to register new user');
 
@@ -210,8 +210,9 @@ export class UsersController {
   async updateOne(
     @Param('id') _id: string,
     @Body() updateUserDto: UpdateUserDto,
+    @AuthUser() actor: IAuthUser,
   ) {
-    const updatedUser = await this.usersService.updateOne(_id, updateUserDto);
+    const updatedUser = await this.usersService.updateOne(_id, updateUserDto, actor.id);
 
     return updatedUser
       ? successRes({ user: updatedUser }, 'User updated!')
@@ -439,11 +440,13 @@ export class UsersController {
   async approveFollowRequest(
     @Param('followId') followId: string,
     @Body() { status }: { status: FollowStatus },
+    @AuthUser() actor: IAuthUser,
   ) {
     try {
       const follow = await this.usersService.approveFollowRequest(
         followId,
         status,
+        actor.id,
       );
       return successRes({ follow }, 'Follow request processed successfully');
     } catch (error) {

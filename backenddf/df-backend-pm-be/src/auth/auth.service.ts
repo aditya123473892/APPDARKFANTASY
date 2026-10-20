@@ -14,7 +14,8 @@ export class AuthService {
   async validateUser(username: string, password: string): Promise<any> {
     const user = await this.userService.findOneWithPassword(username);
 
-    if (user && (await this.comparePassword(password, user.password))) {
+    if (user && !user.isBlocked && !user.deletionRequestedAt && !(user.moderationSuspendedUntil > new Date()) &&
+      (await this.comparePassword(password, user.password))) {
       user.password = '';
       return user;
     }
@@ -42,8 +43,10 @@ export class AuthService {
       sub: user._id,
       roles: user.roles,
     };
-    const accessToken = await this.jwtService.sign(payload);
-    const cookieToken = await this.jwtService.sign(payload);
+    const staff = user.roles?.some((role) => ['moderator', 'admin', 'root'].includes(role));
+    const options = staff ? { expiresIn: Math.min(900, Math.max(60, Number(process.env.STAFF_TOKEN_TTL_SECONDS) || 900)) } : undefined;
+    const accessToken = await this.jwtService.sign(payload, options);
+    const cookieToken = await this.jwtService.sign(payload, options);
     return { accessToken, cookieToken };
   }
 

@@ -13,6 +13,8 @@ import { useToggleLike } from '@/features/feed/hooks/useFeed';
 import { useFollowUser } from '@/features/requests/hooks/useRequests';
 import { useTheme } from '@/theme/useTheme';
 import { spacing } from '@/theme';
+import { useBlock } from '@/features/safety/useBlock';
+import { useBlockState } from '@/features/safety/blockState';
 export function UserProfileScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const myId = useCurrentUserId();
@@ -26,6 +28,8 @@ export function UserProfileScreen() {
   });
   const toggleLike = useToggleLike();
   const follow = useFollowUser(id);
+  const block = useBlock();
+  const blocked = useBlockState((state) => state.ids.includes(id));
   if (id === myId) return <Redirect href="/profile" />;
   return (
     <Screen padded={false}>
@@ -43,7 +47,10 @@ export function UserProfileScreen() {
         }
       >
         <Header title="Profile" back backFallback="/discover" />
-        {profile.isPending ? (
+        <Button label="Report user" variant="secondary" onPress={() => router.push({ pathname: '/report' as never, params: { targetType: 'user', targetId: id } })} />
+        {blocked ? (
+          <EmptyState title="User not found" message="This profile is unavailable." />
+        ) : profile.isPending ? (
           <Loader />
         ) : profile.isError || !profile.data ? (
           <ErrorState onRetry={() => void profile.refetch()} />
@@ -73,6 +80,12 @@ export function UserProfileScreen() {
               />
             </View>
             <Text variant="subheading">Posts</Text>
+            <Button
+              label="Block user"
+              variant="secondary"
+              disabled={block.isPending}
+              onPress={() => block.confirm(id)}
+            />
             {posts.isPending ? (
               <Loader />
             ) : posts.isError ? (

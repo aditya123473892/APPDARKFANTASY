@@ -4,7 +4,7 @@ import { FlashList } from '@shopify/flash-list';
 import type { ProfileView } from '@/features/profile/types';
 import { useRouter } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
-import { EmptyState, SearchField, Skeleton } from '@/components/ui';
+import { Button, EmptyState, Loader, SearchField, Skeleton } from '@/components/ui';
 import { ProfilePost } from '../components/ProfilePost';
 import { radius, spacing } from '@/theme';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
@@ -13,6 +13,7 @@ import { useAuthStore } from '@/features/auth/store/authStore';
 import { useDiscoverProfiles } from '@/features/profile/hooks/useProfiles';
 import { useTheme } from '@/theme/useTheme';
 import { describeError } from '@/services/errors';
+import { useDebounce } from '@/hooks/useDebounce';
 
 const NO_INTERESTS: string[] = [];
 
@@ -41,9 +42,9 @@ export function DiscoverScreen() {
   const showPresence = usePreferences((state) => state.showActiveStatus);
   const myInterests = useAuthStore((state) => state.user?.interests) ?? NO_INTERESTS;
   const [search, setSearch] = useState('');
-  const query = useDiscoverProfiles();
-  const needle = search.trim().toLowerCase();
-  const users = (query.data ?? []).filter((u) => u.name.toLowerCase().includes(needle));
+  const needle = useDebounce(search.trim(), 250);
+  const query = useDiscoverProfiles(needle);
+  const users = query.data ?? [];
   const onOpen = useCallback(
     (profile: ProfileView) => router.push(`/profile/${profile.id}`),
     [router],
@@ -78,9 +79,26 @@ export function DiscoverScreen() {
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
+          onEndReached={() => {
+            if (query.hasNextPage && !query.isFetching && !query.isFetchNextPageError)
+              void query.fetchNextPage();
+          }}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            query.isFetchingNextPage ? (
+              <Loader label="Loading more people" />
+            ) : query.isFetchNextPageError ? (
+              <Button
+                label="Try loading more people again"
+                onPress={() => void query.fetchNextPage()}
+              />
+            ) : query.hasNextPage ? (
+              <Button label="Load more people" onPress={() => void query.fetchNextPage()} />
+            ) : null
+          }
           refreshControl={
             <RefreshControl
-              refreshing={query.isRefetching}
+              refreshing={query.isRefetching && !query.isFetchingNextPage}
               onRefresh={() => void query.refetch()}
               tintColor={theme.colors.primary}
               colors={[theme.colors.primary]}

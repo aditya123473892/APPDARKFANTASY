@@ -169,6 +169,141 @@ test('paginated real user directory never falls back to fixtures and excludes cu
   assert.equal((await listRealUsers()).length, 0);
 });
 
+test('discovery loads one page, advances past hidden rows, and searches on the server', async () => {
+  const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
+  const me = '111111111111111111111111';
+  const other = '222222222222222222222222';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const requests = [];
+  h.apiClient.defaults.adapter = async config => {
+    requests.push(config.params);
+    return h.ok(config, requests.length === 1 ? {
+      users: Array.from({ length: 20 }, () => ({ ...h.user, _id: me })), count: 21,
+    } : { users: [{ ...h.user, _id: other, displayname: 'A.*' }], count: 21 });
+  };
+  const { realProfileService } = h.load('src/features/profile/services/profileService.real.ts');
+  const first = await realProfileService.discoverPage(0, 'A.*');
+  assert.equal(requests.length, 1, 'does not eagerly fetch the entire directory');
+  assert.equal(first.profiles.length, 0);
+  assert.equal(first.nextSkip, 20, 'hidden/self rows still advance the server offset');
+  const second = await realProfileService.discoverPage(first.nextSkip, 'A.*');
+  assert.equal(second.profiles[0].id, other);
+  assert.equal(second.nextSkip, undefined);
+  assert.equal(requests[1].skip, 20);
+  assert.equal(requests[1].displayname, 'A\\.\\*', 'search text cannot inject regex operators');
+  h.apiClient.defaults.adapter = async config => h.ok(config, { users: [], count: 21 });
+  assert.equal((await realProfileService.discoverPage(20, '')).nextSkip, undefined);
+  h.runtime.teardownSession();
+});
+
+test('password recovery uses the backend and distinguishes network failures without exposing account existence', async () => {
+  const h = harness();
+  const calls = [];
+  h.apiClient.defaults.adapter = async config => {
+    calls.push({ url: config.url, body: JSON.parse(config.data) });
+    return h.ok(config, { passwordRequest: true });
+  };
+  await h.service.requestPasswordReset(' member@example.test ');
+  assert.deepEqual(calls, [{ url: '/auth/forgot-password', body: { username: 'member@example.test' } }]);
+  h.apiClient.defaults.adapter = async config => { throw new axios.AxiosError('offline', 'ERR_NETWORK', config); };
+  await assert.rejects(h.service.requestPasswordReset('member@example.test'), error => error.code === 'NETWORK');
+  h.runtime.teardownSession();
+});
+
+test('password recovery clears loading and shows an error when the request fails', async () => {
+  const states = [];
+  let index = 0;
+  const h = harness({
+    react: {
+      useState: initial => {
+        const slot = index++;
+        states[slot] = initial;
+        return [initial, value => { states[slot] = value; }];
+      },
+      useRef: initial => ({ current: initial }),
+    },
+    'react-native': { View: 'View', StyleSheet: { create: value => value } },
+    'react-hook-form': { Controller: 'Controller', useForm: () => ({ control: {},
+      formState: { errors: {} }, handleSubmit: fn => () => fn({ email: 'member@example.test' }) }) },
+    '@hookform/resolvers/zod': { zodResolver: () => ({}) },
+    '@/components/layout': { Header: 'Header', Screen: 'Screen' },
+    '@/components/ui': { Button: 'Button', Input: 'Input', Text: 'Text' },
+    '../services': { authService: { requestPasswordReset: async () => { throw new Error('offline'); } } },
+  });
+  const { ForgotPasswordScreen } = h.load('src/features/auth/screens/ForgotPasswordScreen.tsx');
+  const find = node => {
+    if (!node || typeof node !== 'object') return null;
+    if (node.type === 'Button') return node;
+    for (const child of [node.props?.children].flat()) { const match = find(child); if (match) return match; }
+    return null;
+  };
+  // onPress deliberately does not leak a rejected promise into the UI event loop.
+  find(ForgotPasswordScreen()).props.onPress();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(states[0], false, 'does not claim the email was sent');
+  assert.equal(states[1], false, 'loading always clears');
+  assert.match(states[2], /Unable to send reset/);
+});
+
+test('remote image recovers for a replacement URL after a failed request', () => {
+  let state = null;
+  const h = harness({
+    react: { useState: () => [state, value => { state = value; }] },
+    'react-native': { View: 'View' },
+    'expo-image': { Image: 'Image' },
+    'expo-video': { useVideoPlayer: () => ({}), VideoView: 'VideoView' },
+    './Text': { Text: 'Text' },
+    '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
+  });
+  const { RemoteMedia } = h.load('src/components/ui/RemoteMedia.tsx');
+  const props = { uri: 'https://example.test/photo?old', width: 100, height: 100 };
+  const image = RemoteMedia(props);
+  image.props.onError();
+  assert.equal(RemoteMedia(props).type, 'View');
+  assert.equal(RemoteMedia({ ...props, uri: 'https://example.test/photo?new' }).type, 'Image');
+});
+
+test('crash events discard secrets, identities, messages, request data and source variables', () => {
+  const h = harness();
+  const { sanitizeCrashEvent } = h.load('src/services/monitoring/privacy.ts');
+  const clean = sanitizeCrashEvent({ event_id: 'event', release: 'app@1',
+    user: { email: 'private@example.test' }, request: { headers: { Authorization: 'secret-token' } },
+    message: 'private chat', extra: { password: 'secret-password' }, breadcrumbs: [{ message: 'private route' }],
+    exception: { values: [{ type: 'TypeError', value: 'secret-message', stacktrace: { frames: [{
+      filename: '/Users/private-name/src/app.ts?token=secret', lineno: 42, colno: 5,
+      vars: { password: 'secret-var' }, context_line: 'secret source',
+    }] } }] },
+  });
+  const json = JSON.stringify(clean);
+  for (const secret of ['private@example', 'secret-', 'private chat', 'private route', 'private-name'])
+    assert.equal(json.includes(secret), false);
+  assert.equal(clean.exception.values[0].stacktrace.frames[0].lineno, 42);
+  assert.equal(clean.release, 'app@1');
+});
+
+test('notifications use authenticated page/read contracts without trusting metadata URLs', async () => {
+  const h = harness();
+  const id = '507f1f77bcf86cd799439011';
+  const calls = [];
+  h.apiClient.defaults.adapter = async config => {
+    calls.push({ url: config.url, params: config.params, body: config.data && JSON.parse(config.data) });
+    return h.ok(config, config.method === 'get' ? {
+      notifications: [{ _id: id, message: 'Notice', createdAt: '2026-10-20T00:00:00Z', read: false,
+        sender: null, metadata: { url: 'https://untrusted.test' } }], unreadCount: 30, nextCursor: id,
+    } : { read: true });
+  };
+  const { realActivityService } = h.load('src/features/activity/services/activityService.real.ts');
+  const page = await realActivityService.list(id);
+  assert.equal(page.items[0].kind, 'system');
+  assert.equal(page.items[0].eventId, undefined);
+  assert.equal(page.unreadCount, 30);
+  assert.equal(calls[0].params.before, id);
+  await realActivityService.markRead([id]);
+  assert.equal(calls[1].url, '/notifications/read');
+  assert.deepEqual(calls[1].body, { ids: [id] });
+  h.runtime.teardownSession();
+});
+
 test('real group and message writes send confirmed DTOs with idempotency keys and no client-supplied identity', async () => {
   let unreadRefreshes = 0;
   const h = harness({
@@ -470,7 +605,7 @@ test('socket history requests serialize uncorrelated server events and logout ca
 test('each role has confirmed capabilities; unknown roles fail closed', () => {
   const h = harness();
   const { hasCapability, hasRole } = h.load('src/features/auth/permissions.ts');
-  for (const role of ['root', 'admin', 'user', 'manager']) {
+  for (const role of ['root', 'admin', 'user', 'manager', 'moderator']) {
     assert.equal(hasCapability([role], 'canSendMessages'), true);
     assert.equal(hasCapability([role], 'canShareMedia'), true);
     assert.equal(hasCapability([role], 'canModerate'), ['root', 'admin'].includes(role));
@@ -481,6 +616,7 @@ test('each role has confirmed capabilities; unknown roles fail closed', () => {
   assert.equal(hasCapability([], 'canSendMessages'), false);
   assert.equal(hasCapability(['admin', 'unknown'], 'canModerate'), false);
   const { parseUser } = h.load('src/features/auth/userModel.ts');
+  assert.equal(parseUser({ ...h.user, roles: ['moderator'] }).roles[0], 'moderator');
   assert.throws(() => parseUser({ ...h.user, roles: [] }));
   assert.throws(() => parseUser({ ...h.user, roles: ['ADMIN'] }));
 });
@@ -494,7 +630,7 @@ test('profile refresh updates roles, fails closed, recovers, and logout clears i
     userId: h.user._id,
   };
   await store.getState().setAuthenticated({ session, user: h.user });
-  const { userCache, USER_CACHE_LIMIT, senderId, isUserBlocked } = h.load(
+  const { userCache, USER_CACHE_LIMIT, senderId } = h.load(
     'src/features/auth/userCache.ts',
   );
   for (let i = 0; i < 250; i++)
@@ -502,7 +638,7 @@ test('profile refresh updates roles, fails closed, recovers, and logout clears i
   assert.equal(userCache.size(), USER_CACHE_LIMIT);
   assert.equal(userCache.get('249').passwordResetToken, undefined);
   assert.equal(senderId({ _id: h.user._id }), store.getState().currentUser._id);
-  assert.equal(isUserBlocked('249'), undefined);
+  assert.equal(h.load('src/features/safety/blockState.ts').isPeerBlocked('249'), false);
   const before = store.getState().sessionRevision;
   h.apiClient.defaults.adapter = async (config) => h.ok(config, { ...h.user, roles: ['admin'] });
   await store.getState().refreshProfile();
@@ -680,6 +816,28 @@ function backendMessage(me, other, extras = {}) {
     ...extras,
   };
 }
+
+test('anonymous visibility invalidation resets active social queries and rejects late pre-restriction responses', async () => {
+  let resets = 0;
+  const data = new Map();
+  const h = chatHarness({ '@/services/queryClient': { queryClient: {
+    setQueryData: (key, value) => { const id = JSON.stringify(key); data.set(id, typeof value === 'function' ? value(data.get(id)) : value); },
+    getQueryData: key => data.get(JSON.stringify(key)), cancelQueries: async () => {}, invalidateQueries: async () => {},
+    resetQueries: async () => { resets++; data.clear(); }, removeQueries: () => {}, clear: () => data.clear(),
+  } } });
+  await h.transport.ensureChatReady();
+  const blocks = h.load('src/features/safety/blockState.ts').useBlockState;
+  const before = blocks.getState().version;
+  let finish;
+  h.apiClient.defaults.adapter = config => new Promise(resolve => finish = () => resolve(h.ok(config, { users: [] })));
+  const late = h.apiClient.get('/users'), rejected = assert.rejects(late);
+  await until(() => Boolean(finish));
+  h.sockets[0].server('visibilityChanged');
+  await until(() => resets === 1);
+  assert.equal(blocks.getState().version, before + 1);
+  finish(); await rejected;
+  h.runtime.teardownSession();
+});
 
 test('Stage A allowlist drops private fields and rejects malformed or cross-chat payloads', () => {
   const h = chatHarness();
@@ -956,10 +1114,7 @@ test('read hook gates focus, foreground and synchronization; first unread is cap
   assert.equal(reads.length, 1); // direct receipts follow the reciprocal preference
   useMarkConversationRead('group:333333333333333333333333', 'aaaaaaaaaaaaaaaaaaaaaaaa');
   effects.splice(0).forEach((fn) => fn());
-  // A group read moves only the viewer's private cursor, so it ignores the receipt preference.
-  assert.equal(reads.length, 2);
-  assert.equal(reads[1].key, 'group:333333333333333333333333');
-  assert.equal(reads[1].allowed(), true);
+  assert.equal(reads.length, 1, 'group reads are unsupported and must not be scheduled');
   h.runtime.teardownSession();
   assert.equal(reads[0].allowed(), false);
 });
@@ -972,6 +1127,8 @@ function harness(overrides = {}) {
   const logs = [];
   const queryData = new Map();
   const stubs = {
+    '@/features/safety/blocks': { refreshBlockState: async () => [] },
+    '@/features/safety/blockCache': { invalidateSafety: async () => {}, safetyQuery: () => true },
     '@/features/vault/vaultService': {
       publishPhoto: async (asset, transport) => transport({ ...asset, uri: asset.uri.includes('picked') ? 'file:///cache/sanitized.jpg' : 'file:///cache/small.jpg' }),
     },
@@ -1595,32 +1752,18 @@ test('a socket echo carrying the idempotency key settles the outbox before the H
   h.runtime.teardownSession();
 });
 
-test('group read uses the markGroupAsRead acknowledgement; typing emits the gateway payloads', async () => {
+test('unsupported group reads send no packet; typing emits the gateway payloads', async () => {
   const h = chatHarness();
   const { realChatService } = h.load('src/features/chat/services/chatService.real.ts');
   const group = '333333333333333333333333';
   await h.transport.ensureChatReady();
   const socket = h.sockets[0];
-  const original = socket.emit.bind(socket);
-  socket.emit = (name, payload, ack) => {
-    if (name === 'markGroupAsRead') {
-      socket.packets.push({ name, payload });
-      setTimeout(() =>
-        ack({ groupId: payload.groupId, lastReadAt: new Date().toISOString(), unreadCount: 0 }),
-      );
-      return true;
-    }
-    return original(name, payload, ack);
-  };
+  const before = socket.packets.length;
   await realChatService.markRead(`group:${group}`, () => true);
-  assert.equal(
-    JSON.stringify(socket.packets.at(-1)),
-    JSON.stringify({ name: 'markGroupAsRead', payload: { groupId: group } }),
-  );
-  let allowed = false;
-  await assert.rejects(realChatService.markRead(`group:${group}`, () => allowed));
-  assert.equal(socket.packets.at(-1).name, 'markGroupAsRead', 'a disallowed read is never emitted');
-  assert.equal(socket.packets.filter((packet) => packet.name === 'markGroupAsRead').length, 1);
+  await realChatService.markRead(`group:${group}`, () => false);
+  assert.equal(socket.packets.length, before);
+  assert.equal(socket.connected, true);
+  await assert.rejects(realChatService.markRead('group:invalid'));
 
   const last = () => JSON.stringify(socket.packets.at(-1));
   realChatService.setTyping(`group:${group}`, true);
@@ -2050,10 +2193,37 @@ test('C pending send becomes uncertain on disconnect and late completion cannot 
   h.runtime.teardownSession();
 });
 
+test('blocked group messages collapse on Android and revealing text never mounts their media', () => {
+  let revealed = false;
+  const peer = '507f1f77bcf86cd799439012';
+  const h = harness({
+    react: { memo: fn => fn, useState: () => [revealed, value => { revealed = value; }], useEffect: () => {} },
+    '@/features/safety/blockState': { useBlockState: selector => selector({ ids: [peer] }) },
+    'react-native': { Platform: { OS: 'android' }, View: 'View', Pressable: 'Pressable', Alert: { alert: () => {} }, StyleSheet: { create: value => value } },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    '@/components/ui': { Text: 'Text' },
+    './ChatAttachment': { ChatAttachment: 'Attachment' },
+    './ViewOnceAttachment': { ViewOnceAttachment: 'ViewOnceAttachment' },
+    './ExpiryCountdown': { ExpiryCountdown: 'ExpiryCountdown' },
+    '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
+  });
+  const { MessageBubble } = h.load('src/features/chat/components/MessageBubble.tsx');
+  const props = { message: { id: 'message', senderId: peer, text: 'group text', media: [{ _id: 'media' }], createdAt: '2026-10-15T00:00:00Z', status: 'sent' }, mine: false, first: true, last: true, group: true, onActions: () => {} };
+  const tree = MessageBubble(props);
+  assert.equal(tree.props.accessibilityLabel, 'Blocked user, tap to show');
+  assert.equal(JSON.stringify(tree).includes('group text'), false);
+  tree.props.onPress();
+  const visible = JSON.stringify(MessageBubble(props));
+  assert.match(visible, /group text/);
+  assert.match(visible, /Media unavailable/);
+  assert.equal(visible.includes('"type":"Attachment"'), false);
+});
+
 test('C uncertain UI offers Send again only after absent resync and never offers dismissal', () => {
   const alerts = [];
   const h = harness({
-    react: { memo: (fn) => fn },
+    react: { memo: (fn) => fn, useState: initial => [initial, () => {}], useEffect: () => {} },
+    '@/features/safety/blockState': { useBlockState: selector => selector({ ids: [] }) },
     'react-native': {
       Platform: { OS: 'android' },
       View: 'View',
@@ -2380,9 +2550,10 @@ test('vault-prepared photos upload directly without API credentials, confirm onc
         deleted.push(uri);
       },
       FileSystemUploadType: { MULTIPART: 1 },
-      createUploadTask: (url, uri, options) => ({
+      createUploadTask: (url, uri, options, progress) => ({
         uploadAsync: async () => {
           uploads.push({ url, uri, options });
+          progress({ totalBytesSent: 2000, totalBytesExpectedToSend: 4000 });
           return { status: 204 };
         },
         cancelAsync: async () => {},
@@ -2413,7 +2584,11 @@ test('vault-prepared photos upload directly without API credentials, confirm onc
   };
   const { uploadPhoto } = h.load('src/services/api/photoUpload.ts');
   const asset = { uri: 'file:///cache/picked.jpg', type: 'image/jpeg', name: 'client-name.jpg' };
-  const results = await Promise.all([uploadPhoto(asset), uploadPhoto(asset)]);
+  const progress = [];
+  const results = await Promise.all([uploadPhoto(asset, value => progress.push(value)), uploadPhoto(asset)]);
+  assert.ok(progress.some(value => value.stage === 'transfer' && value.percent === 50));
+  assert.ok(progress.some(value => value.stage === 'confirm'));
+  assert.equal(progress.at(-1).stage, 'complete');
   assert.equal(results[0], results[1]);
   assert.deepEqual(
     requests.map((row) => row.url),

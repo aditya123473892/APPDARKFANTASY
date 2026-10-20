@@ -6,7 +6,15 @@ import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRu
 import * as repo from './repository';
 import * as files from './files';
 import { hash, uuid } from './crypto';
-import { assertUnlocked, assertEpoch, lock, refreshVault, unlock, useVaultLock } from './lock';
+import {
+  assertUnlocked,
+  assertEpoch,
+  lock,
+  refreshVault,
+  unlock,
+  useVaultLock,
+  waitForForeground,
+} from './lock';
 import type { VaultPhoto } from './types';
 
 const OWNER_KEY = 'darkfantasy.vault.owner';
@@ -27,14 +35,15 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
   try {
     const context = ImageManipulator.manipulate(uri);
     const image = await context.renderAsync();
+    let rendered = image;
     if (image.width > 1080 || image.height > 1920) {
       const ratio = Math.min(1080 / image.width, 1920 / image.height, 1);
       context.resize({
         width: Math.round(image.width * ratio),
         height: Math.round(image.height * ratio),
       });
+      rendered = await context.renderAsync();
     }
-    const rendered = await context.renderAsync();
     const clean = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.8 });
     cleanUri = clean.uri;
     const bytes = await files.read(clean.uri);
@@ -55,7 +64,7 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
           sha256: checksum,
           size: bytes.length,
           status: 'local',
-          hidden: 1,
+          hidden: 0,
           sortOrder: 0,
           createdAt: now,
           updatedAt: now,
@@ -102,11 +111,14 @@ export async function addPhotos(owner: string, camera = false): Promise<void> {
   if (result.canceled) return;
   // Picker/camera can background the app; keep the vault locked until re-authenticated.
   try {
+    await waitForForeground();
     if (!useVaultLock.getState().unlocked) {
       await unlock(owner);
     }
     for (const asset of result.assets) await importPhoto(owner, asset.uri);
   } finally {
+    // A batch can partly succeed. Back up every committed photo even if a later import fails.
+    void import('./sync').then(({ syncVault }) => syncVault()).catch(() => undefined);
     for (const asset of result.assets)
       if (FS.cacheDirectory && asset.uri.startsWith(FS.cacheDirectory))
         await FS.deleteAsync(asset.uri, { idempotent: true }).catch(() => undefined);
@@ -193,6 +205,7 @@ export async function publishPhoto(
   if (!useVaultLock.getState().unlocked || useVaultLock.getState().owner !== owner)
     await unlock(owner);
   const photo = await importPhoto(owner, asset.uri);
+  void import('./sync').then(({ syncVault }) => syncVault()).catch(() => undefined);
   let temp: string | undefined;
   try {
     assertSessionCurrent(session);

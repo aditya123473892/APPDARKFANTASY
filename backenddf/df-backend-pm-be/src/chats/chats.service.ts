@@ -1,3 +1,7 @@
+import { BlockService } from '../user-blocks/block.service';
+import { bsonIds, referenceId } from '../user-blocks/block-context';
+import { preserveMutation } from '../reports/preservation';
+import { restrictedResource } from '../reports/restricted-content';
 import {
   BadRequestException,
   ForbiddenException,
@@ -87,6 +91,7 @@ export class ChatService {
     private readonly auditModel: Model<ChatMediaAuditDocument>,
     private readonly s3BucketService: S3BucketService,
     private readonly photos: PhotosService = undefined,
+    private readonly blocks: BlockService,
   ) {}
 
   async updateUserStatus(userId: string, isOnline: boolean): Promise<void> {
@@ -101,7 +106,14 @@ export class ChatService {
     return ObjectId.isValid(userId) ? this.usersModel.findById(userId) : null;
   }
 
-  async assertCanSendDirect(_actorId: string, receiverId: string) {
+  async assertCanSendDirect(actorId: string, receiverId: string) {
+    if (await restrictedResource(this.chatMessageModel.db, 'Users', receiverId) || await restrictedResource(this.chatMessageModel.db, 'Users', actorId))
+      throw new NotFoundException('Conversation not found');
+    await this.blocks.assertVisible(
+      actorId,
+      receiverId,
+      'Conversation not found',
+    );
     if (
       !ObjectId.isValid(receiverId) ||
       !(await this.usersModel.exists({ _id: receiverId }))
@@ -129,6 +141,8 @@ export class ChatService {
     message?: string;
     type?: string;
   }) {
+    if (data.groupId) await this.assertGroupMember(data.sender, data.groupId);
+    else await this.assertCanSendDirect(data.sender, data.receiver);
     if (!data.message?.trim())
       throw new BadRequestException('Message cannot be empty');
     const saved = await new this.chatMessageModel({
@@ -150,20 +164,33 @@ export class ChatService {
       throw new BadRequestException('Specify one receiver or groupId');
     const ids = dto.photoIds || [];
     const restricted = dto.viewOnce === true || dto.viewDurationSeconds != null;
-    if (dto.viewDurationSeconds != null && ![3, 10, 30, 60].includes(dto.viewDurationSeconds))
+    if (
+      dto.viewDurationSeconds != null &&
+      ![3, 10, 30, 60].includes(dto.viewDurationSeconds)
+    )
       throw new BadRequestException('Invalid photo viewing timer');
-    if (dto.ttlSeconds != null && ![30, 300, 3600, 86400, 604800].includes(dto.ttlSeconds))
+    if (
+      dto.ttlSeconds != null &&
+      ![30, 300, 3600, 86400, 604800].includes(dto.ttlSeconds)
+    )
       throw new BadRequestException('Invalid message timer');
     if (restricted && (dto.groupId || ids.length !== 1))
-      throw new BadRequestException('View-once messages require one photo and a direct recipient');
+      throw new BadRequestException(
+        'View-once messages require one photo and a direct recipient',
+      );
     if (!dto.message?.trim() && !ids.length)
       throw new BadRequestException('A message or attachment is required');
     if (dto.groupId) await this.assertGroupMember(actorId, dto.groupId);
     else await this.assertCanSendDirect(actorId, dto.receiver);
     if (ids.length && !dto.clientId)
       throw new BadRequestException('clientId is required for photo messages');
-    const target = dto.groupId ? `group:${dto.groupId}` : `direct:${[actorId, dto.receiver].sort().join('-')}`;
-    const conversationId = createHash('sha256').update(target).digest('hex').slice(0, 32);
+    const target = dto.groupId
+      ? `group:${dto.groupId}`
+      : `direct:${[actorId, dto.receiver].sort().join('-')}`;
+    const conversationId = createHash('sha256')
+      .update(target)
+      .digest('hex')
+      .slice(0, 32);
     const id = dto.clientId
       ? await this.photos.reserveChatMessage(actorId, dto.clientId, target)
       : new Types.ObjectId().toString();
@@ -178,7 +205,13 @@ export class ChatService {
     let uploaded: any[];
     try {
       uploaded = ids.length
-        ? await this.photos.bind(actorId, ids, `chat:${id}`, { ownerId: actorId, resourceType: 'chat', resourceId: id, conversationId, messageId: id })
+        ? await this.photos.bind(actorId, ids, `chat:${id}`, {
+            ownerId: actorId,
+            resourceType: 'chat',
+            resourceId: id,
+            conversationId,
+            messageId: id,
+          })
         : [];
     } catch (error) {
       await this.photos.failedChatSend(actorId, ids, `chat:${id}`);
@@ -187,6 +220,8 @@ export class ChatService {
     uploaded.forEach((media) => (media.expiresAt = expiresAt));
     let saved: any;
     try {
+      if (dto.groupId) await this.assertGroupMember(actorId, dto.groupId);
+      else await this.assertCanSendDirect(actorId, dto.receiver);
       saved = await new this.chatMessageModel({
         _id: id,
         sender: actorId,
@@ -219,10 +254,12 @@ export class ChatService {
     await this.assertCanSendDirect(actorId, otherUserId);
     const messages = await this.chatMessageModel
       .find({
-        $and: [{ $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] }],
+        $and: [
+          { $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] },
+        ],
         $or: [
-          { sender: actorId, receiver: otherUserId },
-          { sender: otherUserId, receiver: actorId },
+          { sender: referenceId(actorId), receiver: referenceId(otherUserId) },
+          { sender: referenceId(otherUserId), receiver: referenceId(actorId) },
         ],
       })
       .sort({ sentAt: 1 });
@@ -232,17 +269,35 @@ export class ChatService {
   async getChatGroupHistory(actorId: string, groupId: string) {
     await this.assertGroupMember(actorId, groupId);
     const messages = await this.chatMessageModel
-      .find({ groupId, $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] })
-      .populate({
-        path: 'sender',
-        select: 'username displayname avatar firstName lastName',
+      .find({
+        groupId: referenceId(groupId),
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
       })
       .sort({ sentAt: 1 });
-    return messages.map((message) => this.toClientMessage(message));
+    const ids = new Set(await this.blocks.ids(actorId, true));
+    const senders = await this.usersModel
+      .find({
+        _id: {
+          $in: messages.map((message) => String(message.sender)),
+          $nin: [...ids],
+        },
+      })
+      .select('username displayname avatar firstName lastName');
+    return messages.map((message) => ({
+      ...this.toClientMessage(message),
+      ...(ids.has(String(message.sender)) ? { media: [] } : {}),
+      sender:
+        senders.find((user) => String(user._id) === String(message.sender)) ||
+        String(message.sender),
+      blockedSender: ids.has(String(message.sender)),
+    }));
   }
 
   async getUnreadMessageCount(actorId: string) {
-    return this.chatMessageModel.find({ receiver: actorId, isRead: false,
+    return this.chatMessageModel.find({
+      receiver: referenceId(actorId),
+      sender: { $nin: bsonIds(await this.blocks.ids(actorId, true)) },
+      isRead: false,
       $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
     });
   }
@@ -250,7 +305,11 @@ export class ChatService {
   async markMessagesAsRead(actorId: string, otherUserId: string) {
     await this.assertCanSendDirect(actorId, otherUserId);
     await this.chatMessageModel.updateMany(
-      { sender: otherUserId, receiver: actorId, isRead: false },
+      {
+        sender: referenceId(otherUserId),
+        receiver: referenceId(actorId),
+        isRead: false,
+      },
       { isRead: true },
     );
     return this.getUnreadMessageCount(actorId);
@@ -263,6 +322,9 @@ export class ChatService {
   }
 
   async deleteMessage(messageId: string, actorId: string) {
+    return preserveMutation(this.chatMessageModel.db, [`ChatMessages:${messageId}`], () => this.deleteUnheldMessage(messageId, actorId), () => this.findOwnedMessage(messageId, actorId, true));
+  }
+  private async deleteUnheldMessage(messageId: string, actorId: string) {
     const message = await this.findOwnedMessage(messageId, actorId, true);
     const deleted = this.toClientMessage(message);
     for (const media of (message as any).media || []) {
@@ -278,7 +340,9 @@ export class ChatService {
   async getMediaAccessUrl(actorId: string, messageId: string, mediaId: string) {
     const message = await this.findAuthorizedMessage(messageId, actorId, true);
     if (message.viewOnce || message.viewDurationSeconds)
-      throw new ForbiddenException('Restricted photos must use the single-opening viewer');
+      throw new ForbiddenException(
+        'Restricted photos must use the single-opening viewer',
+      );
     const media = ((message as any).media || []).find(
       (item, index) => this.mediaPublicId(message, item, index) === mediaId,
     );
@@ -301,9 +365,19 @@ export class ChatService {
     if (!storageKey) throw new NotFoundException('Media not found');
     const expiresIn = this.urlTtl;
     const url = await this.photos.accessUrl(storageKey, expiresIn, {
-      ownerId: String(message.sender), resourceType: 'chat', resourceId: String(message._id),
-      requester: actorId, messageId: String(message._id),
-      conversationId: createHash('sha256').update(message.groupId ? `group:${message.groupId}` : `direct:${[String(message.sender), String(message.receiver)].sort().join('-')}`).digest('hex').slice(0, 32),
+      ownerId: String(message.sender),
+      resourceType: 'chat',
+      resourceId: String(message._id),
+      requester: actorId,
+      messageId: String(message._id),
+      conversationId: createHash('sha256')
+        .update(
+          message.groupId
+            ? `group:${message.groupId}`
+            : `direct:${[String(message.sender), String(message.receiver)].sort().join('-')}`,
+        )
+        .digest('hex')
+        .slice(0, 32),
     });
     if (!url) throw new NotFoundException('Media not found');
     await this.audit(
@@ -313,10 +387,16 @@ export class ChatService {
       media,
       { expiresIn },
     );
+    // Audit persistence may wait on I/O; authorize again before delivering a URL.
+    await this.findAuthorizedMessage(messageId, actorId, true);
     return { url, expiresIn };
   }
 
-  async openRestrictedPhoto(actorId: string, messageId: string, mediaId: string) {
+  async openRestrictedPhoto(
+    actorId: string,
+    messageId: string,
+    mediaId: string,
+  ) {
     const message = await this.findAuthorizedMessage(messageId, actorId, true);
     if (!message.viewOnce && !message.viewDurationSeconds)
       throw new BadRequestException('This photo has unlimited views');
@@ -326,32 +406,58 @@ export class ChatService {
     const media = ((message as any).media || []).find(
       (item, index) => this.mediaPublicId(message, item, index) === mediaId,
     );
-    if (!media || (media.status && media.status !== ChatMediaStatus.ACTIVE) ||
-        (media.expiresAt && new Date(media.expiresAt) <= new Date()))
+    if (
+      !media ||
+      (media.status && media.status !== ChatMediaStatus.ACTIVE) ||
+      (media.expiresAt && new Date(media.expiresAt) <= new Date())
+    )
       throw new GoneException('Photo unavailable or expired');
-    if (media.mimetype !== 'image/jpeg') throw new BadRequestException('Only photos are supported');
+    if (media.mimetype !== 'image/jpeg')
+      throw new BadRequestException('Only photos are supported');
     const key = media.storageKey || media.filename;
     if (!key) throw new NotFoundException('Photo not found');
     const bytes = await this.photos.readChatPhoto(key, {
-      ownerId: String(message.sender), resourceType: 'chat', resourceId: String(message._id),
-      requester: actorId, messageId: String(message._id),
-      conversationId: createHash('sha256').update(`direct:${[String(message.sender), actorId].sort().join('-')}`).digest('hex').slice(0, 32),
+      ownerId: String(message.sender),
+      resourceType: 'chat',
+      resourceId: String(message._id),
+      requester: actorId,
+      messageId: String(message._id),
+      conversationId: createHash('sha256')
+        .update(`direct:${[String(message.sender), actorId].sort().join('-')}`)
+        .digest('hex')
+        .slice(0, 32),
     });
     // Bytes are already in server memory: storage failures leave the photo unopened.
     // The conditional update grants exactly one response, including concurrent devices.
     const viewedAt = new Date();
-    const expiresAt = new Date(viewedAt.getTime() + (message.viewDurationSeconds || 0) * 1000);
-    const claimed = await this.chatMessageModel.findOneAndUpdate({
-      // Preserve the stored BSON type for both legacy ObjectId and string recipients.
-      _id: message._id, receiver: message.receiver, viewedAt: null,
-      $or: [{ expiresAt: null }, { expiresAt: { $gt: viewedAt } }],
-      media: { $elemMatch: {
-        _id: media._id,
-        status: { $nin: ['revoked', 'quarantined'] },
+    const expiresAt = new Date(
+      viewedAt.getTime() + (message.viewDurationSeconds || 0) * 1000,
+    );
+    const claimed = await this.chatMessageModel.findOneAndUpdate(
+      {
+        // Preserve the stored BSON type for both legacy ObjectId and string recipients.
+        _id: message._id,
+        receiver: message.receiver,
+        viewedAt: null,
         $or: [{ expiresAt: null }, { expiresAt: { $gt: viewedAt } }],
-      } },
-    }, { $set: { viewedAt, 'media.$[].expiresAt': expiresAt } }, { new: true });
-    if (!claimed) throw new GoneException('Photo already opened or unavailable');
+        media: {
+          $elemMatch: {
+            _id: media._id,
+            status: { $nin: ['revoked', 'quarantined'] },
+            $or: [{ expiresAt: null }, { expiresAt: { $gt: viewedAt } }],
+          },
+        },
+      },
+      { $set: { viewedAt, 'media.$[].expiresAt': expiresAt } },
+      { new: true },
+    );
+    await this.blocks.assertVisible(
+      String(message.sender),
+      String(message.receiver),
+      'Message not found',
+    );
+    if (!claimed)
+      throw new GoneException('Photo already opened or unavailable');
     return {
       dataUri: `data:image/jpeg;base64,${bytes.toString('base64')}`,
       message: this.toClientMessage(claimed),
@@ -359,6 +465,9 @@ export class ChatService {
   }
 
   async revokeMedia(actorId: string, messageId: string, mediaId: string) {
+    return preserveMutation(this.chatMessageModel.db, [`ChatMessages:${messageId}`], () => this.revokeUnheldMedia(actorId, messageId, mediaId), () => this.findOwnedMessage(messageId, actorId, true));
+  }
+  private async revokeUnheldMedia(actorId: string, messageId: string, mediaId: string) {
     const message = await this.findOwnedMessage(messageId, actorId, true);
     const media = ((message as any).media || []).find(
       (item, index) => this.mediaPublicId(message, item, index) === mediaId,
@@ -378,6 +487,9 @@ export class ChatService {
     mediaId: string,
     expiresAt?: string,
   ) {
+    return preserveMutation(this.chatMessageModel.db, [`ChatMessages:${messageId}`], () => this.updateUnheldMediaExpiration(actorId, messageId, mediaId, expiresAt), () => this.findOwnedMessage(messageId, actorId, true));
+  }
+  private async updateUnheldMediaExpiration(actorId: string, messageId: string, mediaId: string, expiresAt?: string) {
     const message = await this.findOwnedMessage(messageId, actorId, true);
     const media = ((message as any).media || []).find(
       (item, index) => this.mediaPublicId(message, item, index) === mediaId,
@@ -397,13 +509,23 @@ export class ChatService {
     let filter: any;
     if (query.groupId) {
       await this.assertGroupMember(actorId, query.groupId);
-      filter = { groupId: query.groupId, 'media.0': { $exists: true } };
+      filter = {
+        groupId: referenceId(query.groupId),
+        sender: { $nin: bsonIds(await this.blocks.ids(actorId, true)) },
+        'media.0': { $exists: true },
+      };
     } else {
       await this.assertCanSendDirect(actorId, query.receiver);
       filter = {
         $or: [
-          { sender: actorId, receiver: query.receiver },
-          { sender: query.receiver, receiver: actorId },
+          {
+            sender: referenceId(actorId),
+            receiver: referenceId(query.receiver),
+          },
+          {
+            sender: referenceId(query.receiver),
+            receiver: referenceId(actorId),
+          },
         ],
         'media.0': { $exists: true },
       };
@@ -453,6 +575,18 @@ export class ChatService {
       await this.audit(actorId, ChatMediaAuditAction.ACCESS_DENIED, message);
       throw new NotFoundException('Message not found');
     }
+    if (!message.groupId)
+      await this.blocks.assertVisible(
+        String(message.sender),
+        String(message.receiver),
+        'Message not found',
+      );
+    if (includeStorageKey && message.groupId)
+      await this.blocks.assertVisible(
+        actorId,
+        String(message.sender),
+        'Media not found',
+      );
     if (message.expiresAt && message.expiresAt <= new Date())
       throw new GoneException('Message expired');
     return message;
@@ -493,6 +627,9 @@ export class ChatService {
       .slice(0, 180);
   }
 
+  async canDeliverMessage(message: any) {
+    return !await restrictedResource(this.chatMessageModel.db, 'ChatMessages', String(message._id), String(message.sender?._id || message.sender), message.groupId ? String(message.groupId) : undefined);
+  }
   private toClientMessage(message: any): any {
     const source = message?.toObject ? message.toObject() : { ...message };
     source.media = (source.media || []).map((media: any, index: number) => ({

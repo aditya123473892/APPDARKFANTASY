@@ -33,7 +33,14 @@ export function EventsScreen() {
       <View style={styles.top}>
         <Header title="Events" subtitle="Find your next gathering" align="left" />
         {admin && (
-          <Button label="Create event" icon="add" onPress={() => router.push('/events/new')} />
+          <Button
+            label="Create event"
+            icon="add"
+            size="sm"
+            fullWidth={false}
+            style={{ alignSelf: 'flex-start' }}
+            onPress={() => router.push('/events/new')}
+          />
         )}
         <SearchField
           accessibilityLabel="Search events"
@@ -107,6 +114,8 @@ export function EventsScreen() {
               <Text numberOfLines={3}>{item.description}</Text>
               <Button
                 label="View event"
+                icon="arrow-forward"
+                style={{ marginTop: spacing.sm }}
                 variant="secondary"
                 onPress={() => router.push({ pathname: '/events/[id]', params: { id: item._id } })}
               />

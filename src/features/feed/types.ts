@@ -37,6 +37,7 @@ export type CommentPage = { comments: PostComment[]; hasMore: boolean; count: nu
 
 export type UploadAsset = { uri: string; name: string; type: string; file?: File };
 export type CreatePostInput = {
+  onUploadProgress?: import('@/services/api/uploadProgress').UploadProgressListener;
   clientId?: string;
   body: string;
   audience: PostAudience;

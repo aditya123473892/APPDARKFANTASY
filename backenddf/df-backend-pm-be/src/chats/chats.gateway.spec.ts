@@ -1,5 +1,6 @@
 import { ChatGateway } from './chats.gateway';
 import { Subject } from 'rxjs';
+import { unblockedPolicy } from '../user-blocks/block.fixture';
 
 const userId = '507f1f77bcf86cd799439011';
 const receiverId = '507f1f77bcf86cd799439012';
@@ -40,7 +41,7 @@ function makeGateway() {
     assertActiveAccount: jest.fn().mockResolvedValue(undefined),
     accountDeletion$: new Subject<string>(),
   };
-  const gateway = new ChatGateway(chatService, jwt, photos);
+  const gateway = new ChatGateway(chatService, jwt, photos, unblockedPolicy());
   gateway.server = {
     to: jest.fn().mockReturnValue({ emit: jest.fn() }),
     emit: jest.fn(),

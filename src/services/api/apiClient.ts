@@ -7,8 +7,13 @@ import {
   notifyForbidden,
 } from '@/features/auth/sessionRuntime';
 import { initializePinning } from './pinning';
+import { useBlockState } from '@/features/safety/blockState';
 
-type RetryConfig = InternalAxiosRequestConfig & { _retry?: boolean; _sessionGeneration?: number };
+type RetryConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean;
+  _sessionGeneration?: number;
+  _blockVersion?: number;
+};
 function assertRequestSession(config?: RetryConfig): void {
   if (config?._sessionGeneration !== sessionIdentity.generation)
     throw new axios.CanceledError('Session ended');
@@ -27,6 +32,7 @@ export const apiClient = axios.create({
 apiClient.interceptors.request.use(async (config) => {
   const guarded = config as RetryConfig;
   guarded._sessionGeneration ??= sessionIdentity.generation;
+  guarded._blockVersion ??= useBlockState.getState().version;
   assertRequestSession(guarded);
   const scope = requests;
   await initializePinning();
@@ -51,6 +57,15 @@ apiClient.interceptors.request.use(async (config) => {
 apiClient.interceptors.response.use(
   async (response) => {
     assertRequestSession(response.config);
+    if (
+      response.config.method === 'get' &&
+      /^\/(users|posts|events|event-members|groups|chats|notifications)(\/|$)/.test(
+        response.config.url || '',
+      ) &&
+      response.config.url !== '/users/me/blocks' &&
+      (response.config as RetryConfig)._blockVersion !== useBlockState.getState().version
+    )
+      throw new axios.CanceledError('Visibility changed during request');
     if ([401, 403].includes(response.data?.statusCode)) {
       if (response.data.statusCode === 401)
         await invalidateSession(

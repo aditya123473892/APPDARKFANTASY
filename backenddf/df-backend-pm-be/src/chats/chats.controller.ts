@@ -46,7 +46,7 @@ export class ChatsController {
     dto: CreateChatMessageDto,
   ) {
     const message = await this.chatService.createMediaMessage(user.id, dto);
-    this.chatGateway.broadcastSavedMessage(message);
+    await this.chatGateway.broadcastSavedMessage(message);
     return successRes(message, 'Message sent');
   }
 
@@ -75,7 +75,10 @@ export class ChatsController {
       messageId,
       mediaId,
     );
-    this.chatGateway.broadcastSavedMessage(result.message, 'messageUpdated');
+    await this.chatGateway.broadcastSavedMessage(
+      result.message,
+      'messageUpdated',
+    );
     return successGetRes(result);
   }
 
@@ -90,7 +93,7 @@ export class ChatsController {
       messageId,
       mediaId,
     );
-    this.chatGateway.broadcastSavedMessage(message, 'messageUpdated');
+    await this.chatGateway.broadcastSavedMessage(message, 'messageUpdated');
     return successRes(message, 'Media revoked');
   }
 
@@ -107,7 +110,7 @@ export class ChatsController {
       mediaId,
       dto.expiresAt,
     );
-    this.chatGateway.broadcastSavedMessage(message, 'messageUpdated');
+    await this.chatGateway.broadcastSavedMessage(message, 'messageUpdated');
     return successRes(message, 'Media expiration updated');
   }
 

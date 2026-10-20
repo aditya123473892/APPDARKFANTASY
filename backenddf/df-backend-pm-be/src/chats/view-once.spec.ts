@@ -6,6 +6,7 @@ import {
 import { validate } from 'class-validator';
 import { ChatService } from './chats.service';
 import { CreateChatMessageDto } from './dto/create-chat-message.dto';
+import { unblockedPolicy } from '../user-blocks/block.fixture';
 
 const sender = '507f1f77bcf86cd799439011';
 const receiver = '507f1f77bcf86cd799439012';
@@ -47,6 +48,7 @@ function harness(viewOnce = true) {
     { create: jest.fn() } as any,
     {} as any,
     photos,
+    unblockedPolicy(),
   );
   return { service, model, photos, document };
 }

@@ -53,6 +53,13 @@ export async function plaintext(owner: string, id: string, path: string): Promis
   if (path !== `${directory(owner)}${id}.jpg`) throw new Error('Invalid vault path');
   return read(path);
 }
+/** The simpler vault already stores JPEGs privately. Display without a JS read/hash/copy. */
+export async function localUri(owner: string, id: string, path: string): Promise<string> {
+  if (path !== `${directory(owner)}${id}.jpg`) throw new Error('Invalid vault path');
+  const info = await FS.getInfoAsync(path);
+  if (!info.exists || info.isDirectory || !info.size) throw new Error('Photo unavailable');
+  return path;
+}
 export async function wipe(owner: string): Promise<void> {
   // Clear encrypted-build credentials too, on explicit logout/wipe only.
   await SecureStore.deleteItemAsync(keyName(owner));

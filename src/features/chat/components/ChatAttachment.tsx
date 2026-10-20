@@ -12,7 +12,7 @@ import { apiClient } from '@/services/api/apiClient';
 import { unwrap, serviceError } from '@/services/api/backend';
 import { describeError } from '@/services/errors';
 import type { ChatMedia } from '../types';
-export function ChatAttachment({ media, messageId }: { media: ChatMedia; messageId: string }) {
+export function ChatAttachment({ media, messageId, mine }: { media: ChatMedia; messageId: string; mine?: boolean }) {
   const mounted = useRef(true);
   const request = useRef(0);
   const [url, setUrl] = useState<string | null>(null);
@@ -109,6 +109,7 @@ export function ChatAttachment({ media, messageId }: { media: ChatMedia; message
         onPress={() => void open()}
       />
       <ChatPhotoViewer
+        reportTarget={mine ? undefined : { messageId, mediaId: media._id }}
         visible={visible && !Boolean(unavailable)}
         uri={url}
         mimetype={media.mimetype}

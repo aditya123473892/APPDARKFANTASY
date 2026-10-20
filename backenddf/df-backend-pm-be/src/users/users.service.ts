@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { authorizeRoleGrant, changeRoles, protectLastRoot, validateRoles } from './role-policy';
+import { preservationGate } from '../reports/preservation';
+import { BlockService } from '../user-blocks/block.service';
+import { referenceId } from '../user-blocks/block-context';
+import { visiblePostQuery } from '../user-blocks/visible-post';
 import { ObjectId } from 'mongodb';
 import { CreateUserDto, FilterUsersDto, UpdateUserDto } from './dtos';
 import { InjectModel } from '@nestjs/mongoose';
@@ -39,6 +44,7 @@ export class UsersService {
     private BookMarkModel: Model<UserBookMarkDocument>,
     @InjectModel(ChatMessage.name)
     private chatMessageModel: Model<ChatMessageDocument>,
+    private readonly blocks: BlockService,
   ) {}
 
   async findByUsername(username: string) {
@@ -47,7 +53,11 @@ export class UsersService {
     });
   }
 
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto, actorId?: string) {
+    validateRoles(createUserDto.roles);
+    if (actorId) await authorizeRoleGrant(this.usersModel.db, actorId, createUserDto.roles);
+    else if (createUserDto.roles.some((role) => role !== ERole.USER))
+      throw new BadRequestException('Staff creation requires an authorized actor');
     const createUser = new this.usersModel(createUserDto);
 
     return await createUser.save();
@@ -56,7 +66,18 @@ export class UsersService {
   async updateOne(
     _id: string,
     updateUserDto: Partial<UpdateUserDto> & Record<string, any>,
+    actorId?: string,
   ): Promise<UsersDocument | null> {
+    return preservationGate(this.usersModel.db, async () => {
+    if (Object.keys(updateUserDto).some((key) => key.startsWith('$') || key.includes('.')))
+      throw new BadRequestException('Invalid update fields');
+    if (updateUserDto.isBlocked === true || updateUserDto.deletionRequestedAt || new Date(updateUserDto.moderationSuspendedUntil) > new Date())
+      await protectLastRoot(this.usersModel.db, _id);
+    if (Object.prototype.hasOwnProperty.call(updateUserDto, 'roles')) {
+      await changeRoles(this.usersModel.db, actorId, _id, updateUserDto.roles);
+      updateUserDto = { ...updateUserDto };
+      delete updateUserDto.roles;
+    }
     const updateFields = {};
     Object.keys(updateUserDto).forEach((key) => {
       if (updateUserDto[key] !== undefined) {
@@ -65,10 +86,11 @@ export class UsersService {
     });
 
     const updatedUser = await this.usersModel
-      .findOneAndUpdate({ _id }, { $set: updateFields }, { new: true })
+      .findOneAndUpdate({ _id }, { $set: updateFields }, { new: true, runValidators: true })
       .exec();
 
     return updatedUser;
+    });
   }
 
   async findAll(params: FilterUsersDto) {
@@ -122,13 +144,13 @@ export class UsersService {
 
     const usersWithPosts = await Promise.all(
       users.map(async (user) => {
-        const userPosts = await this.postModel
-          .find({
+        const userPosts = await visiblePostQuery(
+          this.postModel.find({
             user: user._id,
             visibility: EPostVisibility.PUBLIC,
             status: EPostStatus.APPROVED,
-          })
-          .exec();
+          }),
+        ).exec();
 
         return {
           ...user.toObject(),
@@ -145,13 +167,13 @@ export class UsersService {
 
     if (!user) return null;
 
-    const userPosts = await this.postModel
-      .find({
+    const userPosts = await visiblePostQuery(
+      this.postModel.find({
         user: _id,
         visibility: EPostVisibility.PUBLIC,
         status: EPostStatus.APPROVED,
-      })
-      .exec();
+      }),
+    ).exec();
 
     return {
       ...user.toObject(),
@@ -196,7 +218,7 @@ export class UsersService {
       };
     }
 
-    const userPosts = await this.postModel.find(query).exec();
+    const userPosts = await visiblePostQuery(this.postModel.find(query)).exec();
 
     return {
       ...user.toObject(),
@@ -240,7 +262,7 @@ export class UsersService {
   async findOneWithPassword(username: string): Promise<UsersDocument | null> {
     return await this.usersModel
       .findOne({ username: username })
-      .select('password roles');
+      .select('password roles username isBlocked moderationSuspendedUntil deletionRequestedAt');
   }
 
   async updatePassword(
@@ -429,6 +451,12 @@ export class UsersService {
     followerId: string,
     followingId: string,
   ): Promise<Follow> {
+    if (
+      !ObjectId.isValid(followingId) ||
+      !(await this.usersModel.exists({ _id: followingId }))
+    )
+      throw new Error('User not found!');
+    await this.blocks.assertVisible(followerId, followingId);
     const existingFollow = await this.followModel.findOne({
       follower: followerId,
       following: followingId,
@@ -442,22 +470,42 @@ export class UsersService {
       following: followingId,
       status: FollowStatus.PENDING,
     });
-    return await follow.save();
+    const saved = await follow.save();
+    if (await this.blocks.isBlockedEitherWay(followerId, followingId)) {
+      await this.followModel.updateOne(
+        { _id: saved._id, status: FollowStatus.PENDING },
+        { $set: { status: FollowStatus.REJECTED } },
+      );
+      throw new Error('User not found!');
+    }
+    return saved;
   }
 
   async approveFollowRequest(
     followId: string,
     status: FollowStatus,
+    actorId: string,
   ): Promise<Follow> {
     const follow = await this.followModel.findById(followId);
-    if (!follow) {
+    if (
+      !follow ||
+      String(follow.following) !== actorId ||
+      follow.status !== FollowStatus.PENDING
+    ) {
       throw new Error('Follow request not found');
     }
 
-    follow.status = status;
-    await follow.save();
-
-    return follow;
+    if (![FollowStatus.ACCEPTED, FollowStatus.REJECTED].includes(status))
+      throw new Error('Invalid follow status');
+    await this.blocks.assertVisible(actorId, String(follow.follower));
+    const updated = await this.followModel.findOneAndUpdate(
+      { _id: followId, following: actorId, status: FollowStatus.PENDING },
+      { $set: { status } },
+      { new: true },
+    );
+    if (!updated) throw new Error('Follow request not found');
+    await this.blocks.assertVisible(actorId, String(follow.follower));
+    return updated;
   }
 
   async unfollowUser(followerId: string, followingId: string): Promise<Follow> {
@@ -527,11 +575,14 @@ export class UsersService {
     _id: string,
     isBlocked: boolean,
   ): Promise<UsersDocument | null> {
+    return preservationGate(this.usersModel.db, async () => {
+    if (isBlocked) await protectLastRoot(this.usersModel.db, _id);
     return await this.usersModel.findByIdAndUpdate(
       _id,
       { $set: { isBlocked } },
       { new: true },
     );
+    });
   }
 
   async findUsers() {
@@ -557,7 +608,7 @@ export class UsersService {
     const userObjectId = new ObjectId(userId);
 
     const userChatList = await this.chatMessageModel.find({
-      $or: [{ sender: userId }, { receiver: userId }],
+      $or: [{ sender: referenceId(userId) }, { receiver: referenceId(userId) }],
     });
 
     const uniqueUsers = new Set<string>();

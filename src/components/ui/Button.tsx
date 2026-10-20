@@ -93,7 +93,11 @@ export function Button({
       ) : (
         <>
           {icon ? <Ionicons name={icon} size={size === 'sm' ? 17 : 19} color={palette.fg} /> : null}
-          <Text variant="label" weight="semibold" numberOfLines={1} style={{ color: palette.fg }}>
+          <Text
+            variant="label"
+            weight="semibold"
+            style={{ color: palette.fg, flexShrink: 1, textAlign: 'center' }}
+          >
             {label}
           </Text>
         </>
@@ -104,6 +108,8 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
+    minWidth: 0,
+    flexShrink: 1,
     borderRadius: radius.input,
     borderWidth: 1,
     alignItems: 'center',
@@ -111,6 +117,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
     paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
   },
   sm: { minHeight: 40, paddingHorizontal: spacing.lg },
   md: { minHeight: 50 },

@@ -16,12 +16,9 @@ export const userCache = {
     if (users.size > USER_CACHE_LIMIT) users.delete(users.keys().next().value!);
   },
   clear: () => users.clear(),
+  remove: (id: string) => users.delete(id),
   size: () => users.size,
 };
 registerSessionTeardown(userCache.clear);
-/** No per-user blocking exists in the backend. Unknown must not be mistaken for false. */
-export function isUserBlocked(_userId: string): boolean | undefined {
-  return undefined;
-}
 export const senderId = (sender: string | UserSummary): string =>
   typeof sender === 'string' ? sender : sender._id;

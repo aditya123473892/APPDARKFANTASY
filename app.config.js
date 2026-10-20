@@ -32,6 +32,10 @@ module.exports = ({ config }) => {
     },
     plugins: [
       ...(config.plugins || []).filter((plugin) => plugin !== 'expo-secure-store'),
+      ...(process.env.EXPO_PUBLIC_SENTRY_DSN ? [['@sentry/react-native/expo', {
+        organization: process.env.SENTRY_ORG,
+        project: process.env.SENTRY_PROJECT,
+      }]] : []),
       ['expo-secure-store', { configureAndroidBackup: true }],
       './plugins/withVaultBackup.cjs',
       [

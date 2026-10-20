@@ -14,6 +14,7 @@ import { ObjectId } from 'mongodb';
 import { ChatService } from './chats.service';
 import { ERole } from 'src/common/enums';
 import { PhotosService } from '../photos/photos.service';
+import { BlockService } from '../user-blocks/block.service';
 
 function socketCorsOrigin(
   origin: string,
@@ -49,9 +50,28 @@ export class ChatGateway
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
     private readonly photos: PhotosService,
+    private readonly blocks: BlockService,
   ) {}
 
   afterInit(server: Server) {
+    this.blocks.suspensionChanges$?.subscribe((owner) => server.in(`user:${owner}`).disconnectSockets(true));
+    this.blocks.restrictedChanges$?.subscribe(() => {
+      // Every process watches MongoDB. Local broadcast avoids duplicate adapter
+      // fan-out and contains no case, content, target or reporter identifier.
+      server.local.emit('visibilityChanged');
+    });
+    this.blocks.changes$.subscribe(({ a, b }) => {
+      for (const id of [a, b]) {
+        server.to(`user:${id}`).emit('visibilityChanged');
+        server.in(`user:${id}`).disconnectSockets(true);
+      }
+    });
+    this.blocks.groupRemoval$.subscribe(({ groupId, members }) => {
+      for (const id of members) {
+        server.in(`user:${id}`).socketsLeave(`group:${groupId}`);
+        server.to(`user:${id}`).emit('groupRemoved', { groupId });
+      }
+    });
     this.photos.accountDeletion$.subscribe((owner) =>
       server.in(`user:${owner}`).disconnectSockets(true),
     );
@@ -87,7 +107,7 @@ export class ChatGateway
 
       if (user.roles?.includes(ERole.ADMIN)) {
         this.onlineAdmins.add(userId);
-        this.server.emit('adminOnline', { adminId: userId });
+        await this.broadcastPresence(userId, 'adminOnline');
       }
     } catch (_error) {
       client.emit('authError', { message: 'Unauthorized socket connection' });
@@ -108,7 +128,7 @@ export class ChatGateway
       user?.roles?.includes(ERole.ADMIN) &&
       this.onlineAdmins.delete(userId)
     ) {
-      this.server.emit('adminOffline', { adminId: userId });
+      await this.broadcastPresence(userId, 'adminOffline');
     }
   }
 
@@ -127,6 +147,12 @@ export class ChatGateway
     try {
       await this.chatService.assertGroupMember(client.data.userId, groupId);
       await client.join(`group:${groupId}`);
+      try {
+        await this.chatService.assertGroupMember(client.data.userId, groupId);
+      } catch (error) {
+        await client.leave(`group:${groupId}`);
+        throw error;
+      }
       return { groupId };
     } catch (error) {
       this.emitError(client, error);
@@ -159,9 +185,14 @@ export class ChatGateway
         message: data.message,
         type: data.type,
       });
-      this.broadcastSavedMessage(saved);
+      await this.broadcastSavedMessage(saved);
       const unreadData = await this.chatService.getUnreadMessageCount(
         data.receiver,
+      );
+      await this.blocks.assertVisible(
+        client.data.userId,
+        data.receiver,
+        'Conversation not found',
       );
       this.server.to(`user:${data.receiver}`).emit('unreadData', unreadData);
       return saved;
@@ -180,6 +211,11 @@ export class ChatGateway
         client.data.userId,
         data.user2,
       );
+      await this.blocks.assertVisible(
+        client.data.userId,
+        data.user2,
+        'Conversation not found',
+      );
       client.emit('chatHistory', history);
     } catch (error) {
       this.emitError(client, error);
@@ -197,6 +233,11 @@ export class ChatGateway
         data.user2,
       );
       client.emit('unreadMessageCount', unread);
+      await this.blocks.assertVisible(
+        client.data.userId,
+        data.user2,
+        'Conversation not found',
+      );
       this.server
         .to(`user:${data.user2}`)
         .emit('messagesRead', { userId: client.data.userId });
@@ -214,13 +255,26 @@ export class ChatGateway
   }
 
   @SubscribeMessage('typing')
-  handleTyping(
+  async handleTyping(
     @MessageBody() data: { receiver: string },
     @ConnectedSocket() client: Socket,
   ) {
-    this.server
-      .to(`user:${data.receiver}`)
-      .emit('typing', { sender: client.data.userId });
+    try {
+      await this.chatService.assertCanSendDirect(
+        client.data.userId,
+        data.receiver,
+      );
+      await this.blocks.assertVisible(
+        client.data.userId,
+        data.receiver,
+        'Conversation not found',
+      );
+      this.server
+        .to(`user:${data.receiver}`)
+        .emit('typing', { sender: client.data.userId });
+    } catch (error) {
+      this.emitError(client, error);
+    }
   }
 
   @SubscribeMessage('updateMessage')
@@ -235,7 +289,7 @@ export class ChatGateway
         client.data.userId,
         data.newMessage,
       );
-      this.broadcastSavedMessage(updated, 'messageUpdated');
+      await this.broadcastSavedMessage(updated, 'messageUpdated');
       return updated;
     } catch (error) {
       this.emitError(client, error);
@@ -252,7 +306,7 @@ export class ChatGateway
         data.messageId,
         client.data.userId,
       );
-      this.broadcastSavedMessage(
+      await this.broadcastSavedMessage(
         { ...deleted, messageId: data.messageId },
         'messageDeleted',
       );
@@ -287,7 +341,7 @@ export class ChatGateway
         message: data.message,
         type: 'group',
       });
-      this.broadcastSavedMessage(saved);
+      await this.broadcastSavedMessage(saved);
       return saved;
     } catch (error) {
       this.emitError(client, error);
@@ -304,24 +358,60 @@ export class ChatGateway
         client.data.userId,
         data.groupId,
       );
+      await this.chatService.assertGroupMember(
+        client.data.userId,
+        data.groupId,
+      );
       client.emit('groupChatHistory', history);
     } catch (error) {
       this.emitError(client, error);
     }
   }
 
-  broadcastSavedMessage(message: any, event?: string) {
+  async broadcastSavedMessage(message: any, event?: string) {
     if (!this.server) return;
+    if (this.chatService.canDeliverMessage && !await this.chatService.canDeliverMessage(message)) return;
     const senderId = String(message.sender?._id || message.sender);
     if (message.groupId) {
-      this.server
-        .to(`group:${message.groupId}`)
-        .emit(event || 'receiveGroupMessage', message);
+      // Deliver to current members, never to a stale subscription. Recheck each
+      // member immediately before emission; removals cannot keep receiving data.
+      for (const id of await this.blocks.groupMembers(
+        String(message.groupId),
+      )) {
+        try {
+          await this.chatService.assertGroupMember(id, String(message.groupId));
+        } catch {
+          this.server.in(`user:${id}`).socketsLeave(`group:${message.groupId}`);
+          continue;
+        }
+        const blockedSender = await this.blocks.isBlockedEitherWay(
+          senderId,
+          id,
+        );
+        this.server
+          .to(`user:${id}`)
+          .emit(event || 'receiveGroupMessage', {
+            ...message,
+            ...(blockedSender ? { media: [] } : {}),
+            blockedSender,
+          });
+      }
       return;
     }
     const eventName = event || 'receiveMessage';
+    if (
+      await this.blocks.isBlockedEitherWay(senderId, String(message.receiver))
+    )
+      return;
     this.server.to(`user:${senderId}`).emit(eventName, message);
     this.server.to(`user:${message.receiver}`).emit(eventName, message);
+  }
+
+  private async broadcastPresence(actor: string, event: string) {
+    for (const viewer of this.userSockets.keys()) {
+      if (!(await this.blocks.isBlockedEitherWay(actor, viewer)))
+        this.server.to(`user:${viewer}`).emit(event, { adminId: actor });
+    }
   }
 
   private emitError(client: Socket, error: any) {

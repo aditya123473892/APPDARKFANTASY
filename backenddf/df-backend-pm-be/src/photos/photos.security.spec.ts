@@ -16,6 +16,7 @@ import { SelfProfileDto } from '../users/dtos/self-profile.dto';
 import { PhotoPostDto } from '../posts/dto/photo-post.dto';
 import { Readable } from 'stream';
 import sharp = require('sharp');
+import { S3 } from '@aws-sdk/client-s3';
 
 describe('Photo security boundaries', () => {
   it('skips AWS moderation only in explicit development mode while still sanitizing', async () => {
@@ -69,8 +70,7 @@ describe('Photo security boundaries', () => {
   it('refuses to sign uploads when bucket privacy cannot be established', async () => {
     const storage = new S3BucketService();
     jest.spyOn(storage, 'bucket', 'get').mockReturnValue('test-photo-bucket');
-    const result = (value: any) => () => ({ promise: async () => value });
-    const createPresignedPost = jest.fn();
+    const result = (value: any) => async () => value;
     storage.s3 = {
       getPublicAccessBlock: result({
         PublicAccessBlockConfiguration: { BlockPublicAcls: false },
@@ -89,12 +89,10 @@ describe('Photo security boundaries', () => {
       }),
       getBucketLifecycleConfiguration: result({ Rules: [] }),
       getBucketCors: result({ CORSRules: [] }),
-      createPresignedPost,
     } as any;
     await expect(
       storage.presign('temp/owner/photo.jpg', 'image/jpeg'),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    expect(createPresignedPost).not.toHaveBeenCalled();
   });
 
   it('does not queue or delete any S3 object when a caller does not own the post', async () => {
@@ -120,6 +118,7 @@ describe('Photo security boundaries', () => {
     const posts: any = {
       findByIdPrivate: jest.fn().mockResolvedValue({ media, __v: 3 }),
       updateOnePrivate: jest.fn().mockResolvedValue({ media }),
+      findVisiblePost: jest.fn().mockResolvedValue({ media }),
     };
     const photos: any = {
       bind: jest.fn(),
@@ -138,6 +137,7 @@ describe('Photo security boundaries', () => {
     );
     expect(photos.retire).not.toHaveBeenCalled();
     expect(photos.enqueue).not.toHaveBeenCalled();
+    expect(posts.findVisiblePost).toHaveBeenCalledWith('507f1f77bcf86cd799439011', 'owner');
   });
 
   it('rejects client-written privilege, approval, key and path fields', async () => {
@@ -181,23 +181,20 @@ describe('Photo security boundaries', () => {
     jest.spyOn(storage, 'ensurePrivate').mockResolvedValue(undefined);
     process.env.AWS_DEFAULT_S3_BUCKET = 'test-photo-bucket';
     process.env.AWS_S3_REGION = 'ap-south-1';
-    const createPresignedPost = jest.fn((options, callback) =>
-      callback(null, {
-        url: 'https://test-photo-bucket.s3.amazonaws.com',
-        fields: options.Fields,
-      }),
-    );
-    storage.s3 = { createPresignedPost } as any;
-    await storage.presign('temp/owner/server-uuid.jpg', 'image/jpeg', 999);
-    expect(createPresignedPost.mock.calls[0][0]).toMatchObject({
-      Expires: 300,
-      Conditions: [
+    storage.s3 = new S3({ region: 'ap-south-1', credentials: { accessKeyId: 'test-key', secretAccessKey: 'test-secret' } });
+    const started = Date.now();
+    const signed = await storage.presign('temp/owner/server-uuid.jpg', 'image/jpeg', 999);
+    const policy = JSON.parse(Buffer.from(signed.fields.Policy, 'base64').toString());
+    expect(Date.parse(policy.expiration)).toBeLessThanOrEqual(started + 300000);
+    expect(Date.parse(policy.expiration)).toBeGreaterThan(started + 290000);
+    expect(policy.conditions).toEqual(expect.arrayContaining([
         ['eq', '$key', 'temp/owner/server-uuid.jpg'],
         ['eq', '$Content-Type', 'image/jpeg'],
         ['eq', '$success_action_status', '204'],
         ['content-length-range', 1, PHOTO_MAX_BYTES],
-      ],
-    });
+    ]));
+    expect(signed.fields).toMatchObject({ key: 'temp/owner/server-uuid.jpg', 'Content-Type': 'image/jpeg' });
+    storage.s3.destroy();
     restoreEnv('AWS_DEFAULT_S3_BUCKET', old.bucket);
     restoreEnv('AWS_S3_REGION', old.region);
   });
@@ -205,16 +202,14 @@ describe('Photo security boundaries', () => {
   it('checks HEAD, constrains GET to the same ETag and rejects fake JPEG bytes', async () => {
     const storage = new S3BucketService();
     jest.spyOn(storage, 'bucket', 'get').mockReturnValue('test-photo-bucket');
-    const getObject = jest.fn(() => ({
-      createReadStream: () => Readable.from([Buffer.alloc(12)]),
+    const getObject = jest.fn(async () => ({
+      Body: Readable.from([Buffer.alloc(12)]),
     }));
     storage.s3 = {
-      headObject: () => ({
-        promise: async () => ({
+      headObject: async () => ({
           ContentLength: 12,
           ContentType: 'image/jpeg',
           ETag: 'immutable-etag',
-        }),
       }),
       getObject,
     } as any;

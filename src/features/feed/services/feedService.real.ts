@@ -179,7 +179,7 @@ export const realFeedService: FeedService = {
       throw new ServiceError('VALIDATION', 'Choose a photo before posting.');
     try {
       const photoIds: string[] = [];
-      for (const asset of input.assets) photoIds.push(await uploadPhoto(asset));
+      for (const asset of input.assets) photoIds.push(await uploadPhoto(asset, input.onUploadProgress));
       const response = await apiClient.post('/posts', {
         caption: input.body,
         visibility:

@@ -29,6 +29,10 @@ import {
 import { senderId } from '@/features/auth/userCache';
 import { setTyping } from '../store/typingStore';
 import { disconnectSending } from '../store/outboxStore';
+import { refreshBlockState } from '@/features/safety/blocks';
+import { isPeerBlocked, useBlockState } from '@/features/safety/blockState';
+import { invalidateSafety, safetyQuery } from '@/features/safety/blockCache';
+import { queryClient } from '@/services/queryClient';
 
 let socket: Socket | undefined;
 let socketScope = -1;
@@ -174,6 +178,8 @@ function forgetGroup(groupId: string): void {
   acceptGroupRemoved({ groupId });
 }
 async function resync(current: Socket, scope: number, epoch: number): Promise<void> {
+  await refreshBlockState();
+  await invalidateSafety();
   // The server already joins every member room on connect; rejoining orders
   // the room subscription before history so no live message is missed.
   for (const groupId of [...groups]) {
@@ -262,6 +268,7 @@ export async function connectSocket(): Promise<Socket> {
       if (!valid() || !raw || typeof raw !== 'object' || !('sender' in raw)) return;
       const event = raw as { sender: unknown; groupId?: unknown; isTyping?: unknown };
       if (!isObjectId(event.sender) || event.sender === sessionIdentity.userId) return;
+      if (isPeerBlocked(event.sender)) return;
       if (event.groupId !== undefined && !isObjectId(event.groupId)) return;
       const key = event.groupId ? `group:${event.groupId}` : `user:${event.sender}`;
       setTyping(key, event.sender, event.isTyping !== false);
@@ -274,12 +281,25 @@ export async function connectSocket(): Promise<Socket> {
       if (!valid() || !raw || typeof raw !== 'object' || !('groupId' in raw)) return;
       if (isObjectId(raw.groupId)) forgetGroup(raw.groupId);
     });
-    current.on('disconnect', () => {
+    current.on('disconnect', (reason) => {
       if (!valid()) return;
       disconnectSending();
       connectionEpoch++;
       sync = undefined;
       setChatReady(false);
+      if (reason === 'io server disconnect') current.connect();
+    });
+    current.on('visibilityChanged', () => {
+      if (!valid()) return;
+      useBlockState.setState((state) => ({ version: state.version + 1 }));
+      // No peer ID or reason is sent to the other account. Discard all stale
+      // social responses and let the server return the same unavailable result.
+      void queryClient
+        .cancelQueries({ predicate: (query) => safetyQuery(query.queryKey) })
+        .then(() => {
+          if (!valid()) return;
+          return queryClient.resetQueries({ predicate: (query) => safetyQuery(query.queryKey) });
+        });
     });
     current.on('connect', () => {
       if (!valid()) return;

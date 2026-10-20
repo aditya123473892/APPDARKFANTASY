@@ -20,8 +20,8 @@ describe('S3BucketService', () => {
   it('copies private media with replaced metadata and an ETag condition, without fetching pixels', async () => {
     jest.spyOn(service, 'ensurePrivate').mockResolvedValue(undefined);
     jest.spyOn(service, 'bucketFor').mockImplementation(key => key.startsWith('temp/') ? 'source-bucket' : 'private-bucket');
-    const copyObject = jest.fn(() => ({ promise: async () => ({}) }));
-    service.s3 = { headObject: () => ({ promise: async () => ({ ETag: 'immutable-etag', ContentType: 'image/jpeg' }) }), copyObject } as any;
+    const copyObject = jest.fn(async () => ({}));
+    service.s3 = { headObject: async () => ({ ETag: 'immutable-etag', ContentType: 'image/jpeg' }), copyObject } as any;
     const sanitize = jest.spyOn(service, 'sanitizeAndModerate');
     await service.copyPrivate('temp/owner/server.jpg', 'chat/conversation/message/server.jpg');
     expect(copyObject).toHaveBeenCalledWith(expect.objectContaining({

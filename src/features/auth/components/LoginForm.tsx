@@ -3,8 +3,10 @@ import { AppState, StyleSheet, TextInput, View } from 'react-native';
 import { Button, Input, PasswordInput, Text } from '@/components/ui';
 import { loginSchema } from '../schemas/authSchemas';
 import { useLogin } from '../hooks/useLogin';
+import { useRouter } from 'expo-router';
 
 export function LoginForm(): React.JSX.Element {
+  const router = useRouter();
   const { login, error, isLoading, cooldown } = useLogin();
   const [email, setEmail] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -72,9 +74,8 @@ export function LoginForm(): React.JSX.Element {
         loading={isLoading}
         onPress={submit}
       />
-      <Text color="muted" variant="caption">
-        For password reset, use the desktop website.
-      </Text>
+      <Button label="Forgot password?" variant="ghost" disabled={isLoading}
+        onPress={() => router.push('/forgot-password')} />
     </View>
   );
 }

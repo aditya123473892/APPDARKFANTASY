@@ -25,6 +25,14 @@ backenddf/df-backend-pm-be/*
 !backenddf/df-backend-pm-be/scripts/
 backenddf/df-backend-pm-be/scripts/*
 !backenddf/df-backend-pm-be/scripts/migrate-photos.ts
+!backenddf/df-backend-pm-be/scripts/check-db.cjs
+!backenddf/df-backend-pm-be/scripts/s3-smoke-test.js
+!backenddf/df-backend-pm-be/scripts/test-with-mongo.cjs
+!backenddf/df-backend-pm-be/scripts/user-block-indexes.ts
+!backenddf/df-backend-pm-be/scripts/report-indexes.ts
+!backenddf/df-backend-pm-be/scripts/recover-report-gate.ts
+!backenddf/df-backend-pm-be/README.md
+!backenddf/df-backend-pm-be/MODERATION.md
 !backenddf/df-backend-pm-be/package.json
 !backenddf/df-backend-pm-be/package-lock.json
 !backenddf/df-backend-pm-be/tsconfig.json

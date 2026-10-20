@@ -1,3 +1,5 @@
+import { unblockedPolicy } from '../user-blocks/block.fixture';
+import { referenceId } from '../user-blocks/block-context';
 import {
   ForbiddenException,
   NotFoundException,
@@ -86,7 +88,7 @@ function makeService(document = makeDocument()) {
     failedChatSend: jest.fn().mockResolvedValue(undefined),
   };
   return {
-    service: new ChatService(chatModel, users, groups, audit, s3, photos),
+    service: new ChatService(chatModel, users, groups, audit, s3, photos, unblockedPolicy()),
     chatModel,
     users,
     groups,
@@ -281,8 +283,8 @@ describe('ChatService media authorization', () => {
     expect(chatModel.find).toHaveBeenCalledWith({
       $and: [{ $or: [{ expiresAt: null }, { expiresAt: { $gt: expect.any(Date) } }] }],
       $or: [
-        { sender: senderId, receiver: recipientId },
-        { sender: recipientId, receiver: senderId },
+        { sender: referenceId(senderId), receiver: referenceId(recipientId) },
+        { sender: referenceId(recipientId), receiver: referenceId(senderId) },
       ],
     });
   });

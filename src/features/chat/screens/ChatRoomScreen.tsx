@@ -1,4 +1,5 @@
 import { cleanupPickedAssets } from '@/services/api/photoUpload';
+import { uploadProgressLabel } from '@/services/api/uploadProgress';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,6 +27,8 @@ import { TypingDots } from '../components/TypingDots';
 import { useTheme } from '@/theme/useTheme';
 import * as Clipboard from 'expo-clipboard';
 import { messageActions } from '../utils/messageActions';
+import { useBlock } from '@/features/safety/useBlock';
+import { useBlockState } from '@/features/safety/blockState';
 import { roomState, updateRoom, useConversationState } from '../store/conversationStore';
 import type { ChatMessage } from '../hooks/useChat';
 import { ChatInput } from '../components/ChatInput';
@@ -88,12 +91,17 @@ export function ChatRoomScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboard();
   const myId = useMyId();
+  const block = useBlock();
+  const blockedDirect = useBlockState(
+    (state) => conversationId.startsWith('user:') && state.ids.includes(conversationId.slice(5)),
+  );
   const canSendMessages = useCan('canSendMessages');
   const canShareMedia = useCan('canShareMedia');
   const [ttlSeconds, setTtlSeconds] = useState<number | null>(null);
   const [timerSheet, setTimerSheet] = useState(false);
   const [shareCount, setShareCount] = useState(0);
   const [sharePreview, setSharePreview] = useState<string>();
+  const [uploadStatus, setUploadStatus] = useState('');
   const shareMounted = useRef(true);
   const shareConversation = useRef(conversationId);
   const shareChoice = useRef<((value: MediaShareChoice | null) => void) | null>(null);
@@ -153,6 +161,9 @@ export function ChatRoomScreen(): React.JSX.Element {
             text: '',
             assets: batch,
             clientId: createClientId(),
+            onUploadProgress: (progress) => {
+              if (allowed()) setUploadStatus(uploadProgressLabel(progress));
+            },
             ...choice,
           });
         }
@@ -175,7 +186,8 @@ export function ChatRoomScreen(): React.JSX.Element {
 
   const conversationQuery = useConversation(conversationId);
   const conversation = conversationQuery.data;
-  const notFound = !conversationId || isServiceError(conversationQuery.error, 'NOT_FOUND');
+  const notFound =
+    !conversationId || blockedDirect || isServiceError(conversationQuery.error, 'NOT_FOUND');
   const messagesQuery = useMessages(conversationId, !notFound);
   const { messages, allMessages } = messagesQuery;
   const { send, retry, resync } = useSendMessage(conversationId);
@@ -309,10 +321,27 @@ export function ChatRoomScreen(): React.JSX.Element {
               },
             ]
           : []),
+        ...(message.senderId !== myId
+          ? [
+              {
+                text: 'Block user',
+                style: 'destructive' as const,
+                onPress: () => {
+                  if (valid()) block.confirm(message.senderId);
+                },
+              },
+              {
+                text: 'Report message',
+                onPress: () => {
+                  if (valid()) router.push({ pathname: '/report' as never, params: { targetType: 'chat_message', targetId: message.id } });
+                },
+              },
+            ]
+          : []),
         { text: 'Cancel', style: 'cancel' },
       ]);
     },
-    [myId, canSendMessages, conversationId, renderScope],
+    [myId, canSendMessages, conversationId, renderScope, block, router],
   );
   const saveEdit = () => {
     if (!editing || !editText.trim() || !isSessionCurrent(renderScope)) return;
@@ -443,6 +472,13 @@ export function ChatRoomScreen(): React.JSX.Element {
       style={[styles.root, { backgroundColor: theme.colors.background }]}
     >
       <View style={[styles.header, { borderBottomColor: theme.colors.divider }]}>
+        {!isGroup && participant && (
+          <IconButton
+            icon="ban-outline"
+            label="Block user"
+            onPress={() => block.confirm(participant.id)}
+          />
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Back to messages"
@@ -654,6 +690,11 @@ export function ChatRoomScreen(): React.JSX.Element {
           ) : null}
         </View>
         {typingLabel ? <TypingDots /> : null}
+          {attach.isPending && uploadStatus ? (
+            <Text accessibilityLiveRegion="polite" style={{ paddingHorizontal: spacing.screen }}>
+              {uploadStatus}
+            </Text>
+          ) : null}
         <ChatInput
           timerLabel={timerShortLabel(ttlSeconds)}
           onTimerPress={featureFlags.ENABLE_EPHEMERAL_CHAT ? () => setTimerSheet(true) : undefined}

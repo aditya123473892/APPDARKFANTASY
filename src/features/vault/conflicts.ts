@@ -10,3 +10,20 @@ export function remoteWins(local: VaultPhoto | null, remote: RemotePhoto): boole
     (remote.updatedAt === local.updatedAt && local.syncState === 'synced')
   );
 }
+export function sameRemotePhoto(local: VaultPhoto | null, remote: RemotePhoto): boolean {
+  if (!local) return false;
+  return (
+    [
+      'id',
+      's3Key',
+      'sha256',
+      'size',
+      'status',
+      'hidden',
+      'sortOrder',
+      'createdAt',
+      'updatedAt',
+      'deletedAt',
+    ] as const
+  ).every((field) => local[field] === remote[field]);
+}

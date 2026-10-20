@@ -1,12 +1,23 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { queryKeys } from '@/services/queryKeys';
 import { profileService } from '../services';
 import type { UpdateProfileInput } from '../types';
 import type { UploadAsset } from '@/features/feed/types';
 
-export function useDiscoverProfiles() {
-  return useQuery({ queryKey: queryKeys.discover, queryFn: () => profileService.discover() });
+export function useDiscoverProfiles(search = '') {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.discover, search],
+    queryFn: ({ pageParam }) => profileService.discoverPage(pageParam, search),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.nextSkip,
+    select: (data) => {
+      const seen = new Set<string>();
+      return data.pages.flatMap((page) =>
+        page.profiles.filter((profile) => !seen.has(profile.id) && seen.add(profile.id)),
+      );
+    },
+  });
 }
 
 export function useProfile(userId: string) {

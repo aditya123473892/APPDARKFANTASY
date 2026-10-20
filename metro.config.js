@@ -1,8 +1,8 @@
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
-const { getDefaultConfig } = require('expo/metro-config');
-const config = getDefaultConfig(__dirname);
+const { getSentryExpoConfig } = require('@sentry/react-native/metro');
+const config = getSentryExpoConfig(__dirname);
 // File-map snapshots use V8 serialization, which can differ between Node runtimes.
 // Keep separate caches when starting Expo with system or portable Node installs.
 config.fileMapCacheDirectory = path.join(

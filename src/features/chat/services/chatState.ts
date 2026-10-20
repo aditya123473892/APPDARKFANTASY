@@ -1,4 +1,5 @@
 import { messagePreview } from './inbox';
+import { isPeerBlocked } from '@/features/safety/blockState';
 import { useOutbox } from '../store/outboxStore';
 import { create } from 'zustand';
 import { sessionIdentity, registerSessionTeardown } from '@/features/auth/sessionRuntime';
@@ -74,6 +75,7 @@ function updatePreview(key: string, rows: Message[], complete = false): void {
 /** REST responses and socket messages use the same server-ID merge. */
 export function mergeMessage(message: Message, deleted = false): void {
   const key = message.conversationId;
+  if (key.startsWith('user:') && isPeerBlocked(key.slice(5))) return;
   const next = preserveRead(message);
   if (!deleted && message.senderId === sessionIdentity.userId) {
     const state = useOutbox.getState();
@@ -124,6 +126,7 @@ export function acceptMessage(value: unknown, deleted = false, _received = false
   if (!raw) return false;
   const key = conversationKey(raw);
   if (!key) return false;
+  if (key.startsWith('user:') && isPeerBlocked(key.slice(5))) return false;
   const previous = queryClient
     .getQueryData<Message[]>(queryKeys.messages(key))
     ?.find((message) => message.id === raw._id);
@@ -166,6 +169,7 @@ export function acceptMessage(value: unknown, deleted = false, _received = false
 }
 /** Full-history snapshot; realtime edits/deletions received during loading win. */
 export function reconcileHistory(key: string, rows: Message[], started: number): Message[] {
+  if (key.startsWith('user:') && isPeerBlocked(key.slice(5))) return [];
   const result = new Map(rows.map((message) => [message.id, preserveRead(message)]));
   for (const [id, entry] of overlays.get(key) ?? []) {
     if (entry.version <= started) continue;

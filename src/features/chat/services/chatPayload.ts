@@ -7,6 +7,7 @@ import { isClientId } from '@/utils/clientId';
 import type { ChatMedia, Message } from '../types';
 
 export type BackendMessage = {
+  blockedSender?: boolean;
   _id: string;
   sender: string | UserSummary;
   receiver?: string | UserSummary;
@@ -56,6 +57,7 @@ export function parseMessage(value: unknown): BackendMessage | null {
   if (raw.message != null && (typeof raw.message !== 'string' || raw.message.length > 10000))
     return null;
   if (raw.isRead !== undefined && typeof raw.isRead !== 'boolean') return null;
+  if (raw.blockedSender !== undefined && typeof raw.blockedSender !== 'boolean') return null;
   if (raw.media != null && !Array.isArray(raw.media)) return null;
   if (raw.expiresAt != null && !date(raw.expiresAt)) return null;
   if (raw.viewedAt != null && !date(raw.viewedAt)) return null;
@@ -91,6 +93,7 @@ export function parseMessage(value: unknown): BackendMessage | null {
   }
   return {
     _id: raw._id,
+    blockedSender: raw.blockedSender === true,
     sender,
     receiver: receiver ?? undefined,
     groupId: groupId as string | undefined,
@@ -136,6 +139,7 @@ export function mapMessage(value: unknown, key: string): Message {
   const user = userCache.get(senderId(raw.sender));
   return {
     id: raw._id,
+    blockedSender: raw.blockedSender,
     conversationId: key,
     senderId: senderId(raw.sender),
     senderName: user ? displayName(user) : undefined,

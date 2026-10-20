@@ -275,6 +275,18 @@ test('Android device-credential activity can return successfully, and normal bac
   app.currentState = 'background';
   for (const fn of listeners) fn('background');
   assert.equal(state.unlocked, false);
+  // The picker promise may resolve before React Native receives the resume event.
+  let resumed = false;
+  const foreground = lock.waitForForeground().then(() => {
+    resumed = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(resumed, false);
+  app.currentState = 'active';
+  for (const fn of listeners) fn('active');
+  await foreground;
+  assert.equal(resumed, true);
+  assert.equal(state.unlocked, false, 'returning from picker must still require authentication');
 });
 test('network sync never holds local write mutex and an in-flight patch preserves a newer offline edit', async () => {
   const { serial } = load('src/features/vault/vaultService.ts', {
@@ -352,23 +364,28 @@ test('network sync never holds local write mutex and an in-flight patch preserve
 test('Android 14 exports only after confirmation, without photo-read permission, and cleans temp files', async () => {
   let confirmed = false,
     viewed = 0;
+  let prepared = 0;
   const gallery = [],
     deleted = [];
   const exporting = load('src/features/vault/export.ts', {
+    './media': {
+      photoUri: async () => {
+        prepared++;
+        return 'file:///private/photo.jpg';
+      },
+    },
     'react-native': {
       Platform: { OS: 'android', Version: 34 },
       Alert: { alert: (title, message, buttons) => buttons[confirmed ? 1 : 0].onPress() },
     },
-    'expo-media-library': {
+    get 'expo-media-library'() {
+      throw Error('ExpoMediaLibraryNext is not available in this client');
+    },
+    'expo-media-library/legacy': {
       requestPermissionsAsync: async () => {
         throw Error('Must not request broad access');
       },
-      Asset: { create: async (uri) => gallery.push(uri) },
-    },
-    'expo-media-library/legacy': {
-      saveToLibraryAsync: async () => {
-        throw Error('Unexpected legacy export');
-      },
+      saveToLibraryAsync: async (uri) => gallery.push(uri),
     },
     'expo-sharing': {},
     'expo-image-manipulator': {
@@ -400,9 +417,11 @@ test('Android 14 exports only after confirmation, without photo-read permission,
   });
   await exporting.exportPhotos('owner', ['photo']);
   assert.equal(viewed, 0);
+  assert.equal(prepared, 0);
   assert.equal(gallery.length, 0);
   confirmed = true;
   await exporting.exportPhotos('owner', ['photo']);
+  assert.equal(prepared, 1);
   assert.deepEqual(gallery, ['file:///cache/vault-temp/export.jpg']);
   assert.equal(deleted.length, 3);
 });
@@ -495,4 +514,247 @@ test('retry backoff is bounded and jittered; tombstones override edits', () => {
   assert.equal(remoteWins({ ...local, deletedAt: 1 }, { updatedAt: 100, deletedAt: null }), false);
   assert.equal(remoteWins(local, { updatedAt: 19, deletedAt: null }), false);
   assert.equal(remoteWins(local, { updatedAt: 21, deletedAt: null }), true);
+});
+
+test('unlocked All photos includes earlier hidden imports while Hidden keeps the explicit filter', () => {
+  const { visiblePhotos } = load('src/features/vault/presentation.ts');
+  const photos = [
+    { id: 'visible', hidden: 0, deletedAt: null },
+    { id: 'hidden-import', hidden: 1, deletedAt: null },
+    { id: 'deleted', hidden: 0, deletedAt: 1 },
+  ];
+  assert.deepEqual(
+    Array.from(visiblePhotos(photos, false), (p) => p.id),
+    ['visible', 'hidden-import'],
+  );
+  assert.deepEqual(
+    Array.from(visiblePhotos(photos, true), (p) => p.id),
+    ['hidden-import'],
+  );
+  assert.equal(photos[1].hidden, 1);
+});
+
+test('opening a local photo uses its sandbox URI without network, hashing or temporary copies', async () => {
+  let reads = 0;
+  const media = load('src/features/vault/media.ts', {
+    './repository': { get: async () => ({ localPath: 'sandbox.jpg', deletedAt: null }) },
+    './files': {
+      localUri: async (owner, id, path) => {
+        reads++;
+        return path;
+      },
+    },
+    './lock': { assertUnlocked: () => 1, assertEpoch() {} },
+    './sync': {
+      downloadPhoto: async () => {
+        throw Error('Local viewing must not download');
+      },
+    },
+    '@/features/auth/sessionRuntime': { sessionIdentity: { generation: 1 } },
+  });
+  assert.equal(await media.photoUri('owner', 'photo'), 'sandbox.jpg');
+  assert.equal(reads, 1);
+});
+
+test('restored cloud photos download automatically, share requests and limit parallel work', async () => {
+  const rows = new Map(
+    ['one', 'two', 'three'].map((id) => [
+      id,
+      { id, localPath: null, s3Key: 'private', status: 'approved', deletedAt: null },
+    ]),
+  );
+  const releases = new Map();
+  const started = [];
+  let active = 0;
+  const media = load('src/features/vault/media.ts', {
+    './repository': { get: async (o, id) => rows.get(id) },
+    './files': { localUri: async (o, id, path) => path },
+    './lock': { assertUnlocked: () => 1, assertEpoch() {} },
+    './sync': {
+      downloadPhoto: async (o, id) => {
+        started.push(id);
+        active++;
+        assert.ok(active <= 2);
+        await new Promise((resolve) => releases.set(id, resolve));
+        rows.get(id).localPath = `${id}.jpg`;
+        active--;
+      },
+    },
+    '@/features/auth/sessionRuntime': { sessionIdentity: { generation: 1 } },
+  });
+  const work = ['one', 'one', 'two', 'three'].map((id) => media.photoUri('owner', id));
+  await new Promise(setImmediate);
+  assert.deepEqual(started, ['one', 'two']);
+  releases.get('one')();
+  await new Promise(setImmediate);
+  assert.deepEqual(started, ['one', 'two', 'three']);
+  releases.get('two')();
+  releases.get('three')();
+  assert.deepEqual(await Promise.all(work), ['one.jpg', 'one.jpg', 'two.jpg', 'three.jpg']);
+  assert.equal(await media.photoUri('owner', 'one'), 'one.jpg');
+  assert.equal(started.length, 3);
+});
+
+test('a locked vault cancels queued cloud loads and a download never displays a deleted photo', async () => {
+  let locked = false,
+    count = 0;
+  const releases = [],
+    rows = new Map(
+      ['one', 'two', 'three'].map((id) => [
+        id,
+        { id, localPath: null, s3Key: 'private', status: 'approved', deletedAt: null },
+      ]),
+    );
+  const media = load('src/features/vault/media.ts', {
+    './repository': { get: async (o, id) => rows.get(id) },
+    './files': {
+      localUri: async () => {
+        throw Error('Must not display');
+      },
+    },
+    './lock': {
+      assertUnlocked: () => 1,
+      assertEpoch() {
+        if (locked) throw Error('Vault locked');
+      },
+    },
+    './sync': {
+      downloadPhoto: async (o, id) => {
+        count++;
+        await new Promise((resolve) => releases.push(resolve));
+        rows.get(id).deletedAt = 1;
+      },
+    },
+    '@/features/auth/sessionRuntime': { sessionIdentity: { generation: 1 } },
+  });
+  const work = Promise.allSettled(['one', 'two', 'three'].map((id) => media.photoUri('owner', id)));
+  await new Promise(setImmediate);
+  locked = true;
+  releases.forEach((resolve) => resolve());
+  const results = await work;
+  assert.ok(results.every((result) => result.status === 'rejected'));
+  assert.equal(count, 2);
+  locked = false;
+  await assert.rejects(media.photoUri('owner', 'one'), /unavailable/);
+});
+
+test('a newly added photo is visible and committed locally before any network operation', async () => {
+  let saved;
+  let renders = 0;
+  const image = { width: 100, height: 100, saveAsync: async () => ({ uri: 'cache/clean.jpg' }) };
+  const service = load('src/features/vault/vaultService.ts', {
+    'expo-file-system/legacy': { cacheDirectory: 'cache/', deleteAsync: async () => {} },
+    'expo-secure-store': { setItemAsync: async () => {} },
+    'expo-image-picker': {},
+    'expo-image-manipulator': {
+      ImageManipulator: {
+        manipulate: () => ({
+          renderAsync: async () => {
+            renders++;
+            return image;
+          },
+        }),
+      },
+      SaveFormat: { JPEG: 'jpeg' },
+    },
+    '@/features/auth/sessionRuntime': {},
+    './repository': {
+      list: async () => [],
+      directory: () => 'private/',
+      save: async (o, row, operation) => {
+        saved = row;
+        assert.equal(operation, 'upload');
+      },
+    },
+    './files': { read: async () => Buffer.from('photo'), store: async () => 'private/photo.jpg' },
+    './crypto': crypto,
+    './lock': { assertUnlocked: () => 1, assertEpoch() {}, refreshVault() {} },
+  });
+  const photo = await service.importPhoto('owner', 'cache/picked.jpg');
+  assert.equal(photo, saved);
+  assert.equal(photo.hidden, 0);
+  assert.equal(photo.localPath, 'private/photo.jpg');
+  assert.equal(photo.syncState, 'pending_upload');
+  assert.equal(renders, 1);
+});
+
+test('library refresh runs before queued work and identical server rows do not rewrite the local library', async () => {
+  const remote = {
+    id: 'photo',
+    s3Key: 'private',
+    sha256: 'abc',
+    size: 100,
+    status: 'approved',
+    hidden: 1,
+    sortOrder: 0,
+    createdAt: 1,
+    updatedAt: 2,
+    deletedAt: null,
+  };
+  let local = null,
+    writes = 0,
+    refreshes = 0;
+  const operations = [];
+  const sync = load('src/features/vault/sync.ts', {
+    'react-native': { AppState: { currentState: 'active', addEventListener() {} } },
+    'expo-network': {
+      getNetworkStateAsync: async () => ({ isConnected: true, isInternetReachable: true }),
+    },
+    'expo-file-system/legacy': {},
+    axios: { isAxiosError: () => false },
+    zustand: { create: () => ({ setState() {} }) },
+    '@/services/api/apiClient': {
+      apiClient: {
+        get: async () => {
+          operations.push('metadata');
+          return { data: { data: { items: [remote], cursor: null } } };
+        },
+      },
+    },
+    '@/services/api/backend': { unwrap: (body) => body.data },
+    '@/features/auth/sessionRuntime': {
+      sessionIdentity: { userId: 'owner', generation: 1 },
+      assertSessionCurrent() {},
+      registerSessionTeardown() {},
+    },
+    './repository': {
+      get: async () => local,
+      save: async (owner, row) => {
+        local = row;
+        writes++;
+      },
+      setting: async () => '',
+      setSetting: async () => {},
+      database: async () => ({
+        runAsync: async () => {},
+        getAllAsync: async () => {
+          operations.push('queue');
+          return [];
+        },
+      }),
+    },
+    './files': {},
+    './lock': {
+      useVaultLock: { getState: () => ({ owner: 'owner', unlocked: true }) },
+      assertUnlocked: () => 1,
+      assertEpoch() {},
+      refreshVault() {
+        refreshes++;
+      },
+    },
+    './vaultService': { serial: (fn) => fn() },
+    './crypto': crypto,
+    './conflicts': load('src/features/vault/conflicts.ts'),
+  });
+  await sync.syncVault();
+  await sync.syncVault();
+  assert.equal(operations[0], 'metadata');
+  assert.equal(operations[1], 'queue');
+  assert.equal(writes, 1);
+  assert.equal(refreshes, 1);
+  remote.hidden = 0;
+  remote.updatedAt = 3;
+  await sync.syncVault();
+  assert.equal(writes, 2);
+  assert.equal(local.hidden, 0);
 });

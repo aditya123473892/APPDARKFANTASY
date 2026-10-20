@@ -1,6 +1,6 @@
 import type { UserView } from './types';
 
-export const ROLES = ['root', 'admin', 'user', 'manager'] as const;
+export const ROLES = ['root', 'admin', 'user', 'manager', 'moderator'] as const;
 export type Role = (typeof ROLES)[number];
 /** JSON fields returned by Users schema. Dates are serialized ISO strings. */
 export type User = {
@@ -53,10 +53,10 @@ export const initials = (user: UserSummary): string =>
     .toUpperCase();
 export const avatarUrl = (user: UserSummary): string => user.avatar ?? '';
 /** Compatibility presentation model for the existing fixture-based screens. */
-export function toUserView(user: User): UserView {
+export function toUserView(user: Pick<User, '_id'> & Partial<User>): UserView {
   return {
     id: user._id,
-    email: user.username,
+    email: user.username ?? '',
     name: displayName(user),
     age: user.age ?? 0,
     bio: user.bio ?? '',

@@ -61,7 +61,18 @@ export function SettingsScreen(): React.JSX.Element {
           />
         </SettingsGroup>
         <SettingsGroup title="Account">
-          <SettingsRow icon="lock-closed-outline" title="Photo Vault" subtitle="Private photos, available offline" onPress={() => router.push('/vault' as Href)} />
+          <SettingsRow icon="flag-outline" title="My reports" onPress={() => router.push('/settings/my-reports' as Href)} />
+          <SettingsRow
+            icon="ban-outline"
+            title="Blocked users"
+            onPress={() => router.push('/settings/blocked-users' as Href)}
+          />
+          <SettingsRow
+            icon="lock-closed-outline"
+            title="Photo Vault"
+            subtitle="Private photos, available offline"
+            onPress={() => router.push('/vault' as Href)}
+          />
           <SettingsRow
             icon="person-outline"
             title="Account"
