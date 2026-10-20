@@ -2,6 +2,7 @@ import { createConnection, Connection, Types } from 'mongoose';
 import { randomUUID } from 'crypto';
 import { PhotosService } from './photos.service';
 import { storageIndexes } from './storage-indexes';
+import sharp = require('sharp');
 
 // A real MongoDB is necessary to verify unique-index races, not a mocked counter.
 // Tests always use their own randomly named database; never the application's DB.
@@ -30,7 +31,8 @@ integration('Photo upload concurrency with MongoDB', () => {
       readVerified: jest.fn().mockResolvedValue(Buffer.from('original')),
       sanitizeAndModerate: jest
         .fn()
-        .mockResolvedValue(Buffer.from('sanitized')),
+        .mockResolvedValue(await sharp({ create: { width: 32, height: 32, channels: 3, background: 'blue' } }).jpeg().toBuffer()),
+      putPreview: jest.fn().mockResolvedValue({}),
       putApproved: jest.fn().mockResolvedValue({}),
       copyPrivate: jest.fn().mockResolvedValue({}),
       deleteOne: jest.fn().mockResolvedValue({}),

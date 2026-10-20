@@ -49,7 +49,7 @@ export function storedKey(row: any): string | undefined {
   return layoutReadMode() === 'legacy' ? row.key || row.s3Key : row.s3Key || row.key;
 }
 export function bucketForKey(key: string, fallback: string) {
-  return (/^(profile|posts|events|groups)\//.test(key)
+  return (/^(previews|profile|posts|events|groups)\//.test(key)
     ? process.env.PHOTO_MEDIA_BUCKET : /^(temp|vault|chat|quarantine|reports)\//.test(key)
       ? process.env.PHOTO_PRIVATE_BUCKET : undefined) || fallback;
 }

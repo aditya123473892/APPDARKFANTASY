@@ -23,6 +23,7 @@ import { publicProfile } from '../users/public-profile';
 import { canReadPost } from '../posts/post-access';
 import { Subject } from 'rxjs';
 import { S3BucketService } from '../s3-bucket/s3-bucket.service';
+import { MediaService } from './media.service';
 
 @Injectable()
 export class PhotosService implements OnModuleInit {
@@ -187,15 +188,17 @@ export class PhotosService implements OnModuleInit {
       if (!claim.modifiedCount)
         throw new ConflictException('Upload is processing or expired');
       const key = initial.processingKey || allocateKey({ ownerId: owner, resourceType: 'temp', resourceId: id }).key;
-      await this.uploads.updateOne({ _id: id, token }, { $set: { processingKey: key } });
+      const previewKey = initial.previewProcessingKey || `previews/${owner}/${randomUUID()}.jpg`;
+      await this.uploads.updateOne({ _id: id, token }, { $set: { processingKey: key, previewProcessingKey: previewKey } });
       // A durable cleanup job exists before writing any output. A crash cannot orphan it.
-      await this.enqueue([key], new Date(Date.now() + 600000), true);
+      await this.enqueue([key, previewKey], new Date(Date.now() + 600000), true);
       try {
         const bytes = await this.storage.readVerified(
           initial.tempKey,
           initial.uploadContentType || initial.contentType,
         );
         const clean = await this.storage.sanitizeAndModerate(bytes);
+        const preview = await new MediaService(this.storage).buildPreview(clean, previewKey);
         await this.active(owner);
         await this.storage.putApproved(key, clean);
         const committed = await this.uploads.updateOne(
@@ -206,6 +209,7 @@ export class PhotosService implements OnModuleInit {
               key, s3Key: key, contentType: 'image/jpeg',
               size: clean.length,
               checksum: createHash('sha256').update(clean).digest('hex'),
+              ...preview,
               approvedAt: new Date(),
             },
             $unset: { token: '', leaseUntil: '' },
@@ -288,6 +292,8 @@ export class PhotosService implements OnModuleInit {
       if (!update.matchedCount)
         throw new ConflictException('Photo is already in use');
       media.push({
+        photoId: id, previewKey: photo.previewKey, blurhash: photo.blurhash,
+        width: photo.width, height: photo.height,
         storageKey: destination,
         filename: destination,
         s3Key: destination, storageLayoutVersion: 1, contentType: 'image/jpeg', ownerId: owner, resourceType: context.resourceType, resourceId: context.resourceId,
@@ -307,13 +313,15 @@ export class PhotosService implements OnModuleInit {
       .find({ owner, ref, state: 'attached', key: { $nin: keep } })
       .toArray();
     // Persist jobs before marking records. Retries are idempotent.
-    await this.enqueue(old.map((item) => item.key));
+    await this.enqueue(old.flatMap((item) => [item.key, item.previewKey]));
     await this.uploads.updateMany(
       { owner, ref, state: 'attached', key: { $nin: keep } },
       { $set: { state: 'deleting', status: 'deleting' } },
     );
   }
   async retire(ref: string, keys: string[]) {
+    const photos = await this.uploads.find({ ref, key: { $in: keys } }).toArray();
+    await this.enqueue(photos.map((photo) => photo.previewKey));
     await this.enqueue(keys);
     await this.uploads.updateMany(
       { ref, key: { $in: keys } },
@@ -358,7 +366,7 @@ export class PhotosService implements OnModuleInit {
     if (!changed.matchedCount)
       throw new ConflictException('Photo is already in use');
     await this.enqueue(
-      [photo.key, photo.tempKey],
+      [photo.key, photo.tempKey, photo.previewKey, photo.previewProcessingKey],
       new Date(Math.max(Date.now(), photo.expiresAt.getTime()) + 60000),
     );
   }
@@ -589,7 +597,7 @@ export class PhotosService implements OnModuleInit {
         .toArray();
       for (const photo of abandoned) {
         await this.enqueue(
-          [photo.tempKey, photo.key, photo.processingKey, photo.finalKey],
+          [photo.tempKey, photo.key, photo.processingKey, photo.finalKey, photo.previewKey, photo.previewProcessingKey],
           new Date(Math.max(Date.now(), photo.expiresAt.getTime() + 60000)),
           true,
         );
@@ -607,7 +615,7 @@ export class PhotosService implements OnModuleInit {
         .limit(100)
         .toArray()) {
         if (!(await this.inUse(photo.key))) {
-          await this.enqueue([photo.key, photo.tempKey]);
+          await this.enqueue([photo.key, photo.tempKey, photo.previewKey]);
           await this.uploads.updateOne(
             { _id: photo._id, state: 'attached', ref: photo.ref },
             { $set: { state: 'deleting', status: 'deleting' } },
@@ -646,7 +654,7 @@ export class PhotosService implements OnModuleInit {
         if (
           job.onlyIfUnused &&
           (await this.uploads.findOne({
-            key: job.key,
+            $or: [{ key: job.key }, { previewKey: job.key }],
             state: { $in: ['approved', 'attached'] },
           }))
         ) {
@@ -720,9 +728,10 @@ export class PhotosService implements OnModuleInit {
 
   private async inUse(key: string) {
     if (await hasPreservationHold(this.db, [`key:${key}`])) return true;
+    if (key.startsWith('previews/') && await this.uploads.findOne({ previewKey: key, state: { $in: ['approved', 'attached'] } })) return true;
     if (key.startsWith('temp/')) return !!(await this.uploads.findOne({ key, state: { $in: ['approved', 'attached'] } }));
     if (await this.db.db.collection('VaultPhotos').findOne({ key, state: { $in: ['approved', 'processing'] } })) return true;
-    if (await this.uploads.findOne({ $or: [{ processingKey: key }, { finalKey: key }], state: 'processing', leaseUntil: { $gt: new Date() } })) return true;
+    if (await this.uploads.findOne({ $or: [{ processingKey: key }, { previewProcessingKey: key }, { finalKey: key }], state: 'processing', leaseUntil: { $gt: new Date() } })) return true;
     // Deletion and image replacement can race. An object referenced by a live
     // record must survive, even if an older mutation already enqueued it.
     const urlPattern = new RegExp(
@@ -739,6 +748,7 @@ export class PhotosService implements OnModuleInit {
             $elemMatch: {
               $or: [
                 { filename: key },
+                { previewKey: key },
                 { storageKey: key },
                 { url: urlPattern },
               ],
@@ -844,9 +854,11 @@ export class PhotosService implements OnModuleInit {
       add(photo.key);
       add(photo.tempKey);
       add(photo.processingKey);
+      add(photo.previewKey);
+      add(photo.previewProcessingKey);
       add(photo.finalKey);
     }
-    for (const prefix of [`users/${owner}/`, `temp/${owner}/`, `profile/${owner}/`, `posts/${owner}/`, `vault/${owner}/`])
+    for (const prefix of [`previews/${owner}/`, `users/${owner}/`, `temp/${owner}/`, `profile/${owner}/`, `posts/${owner}/`, `vault/${owner}/`])
       (await this.storage.keysUnder(prefix)).forEach(add);
     // Any failure keeps the account blocked and the durable job present.
     for (const key of keys) {

@@ -260,6 +260,14 @@ export class S3BucketService implements OnModuleInit {
         CacheControl: /^(vault|chat)\//.test(key) ? 'private, no-store' : 'private, max-age=120',
       });
   }
+  async putPreview(key: string, bytes: Buffer) {
+    await this.ensurePrivate(this.bucketFor(key));
+    return this.s3.putObject({
+      Bucket: this.bucketFor(key), Key: key, Body: bytes,
+      ContentType: 'image/jpeg', ContentDisposition: 'inline',
+      ServerSideEncryption: 'AES256', CacheControl: 'public, max-age=86400, immutable',
+    });
+  }
   async getSignedURL(Key: string, Bucket?: string, expiresInSeconds = 120, noStore = false) {
     if (/^reports\//.test(Key || '')) throw new BadRequestException('Evidence cannot be signed by this path');
     if (!Key) return null;
@@ -269,7 +277,7 @@ export class S3BucketService implements OnModuleInit {
       Bucket: this.bucketFor(Key),
       Key,
       ...(noStore ? { ResponseCacheControl: 'no-store, private' } : {}),
-    }), { expiresIn: Math.max(30, Math.min(300, Number(expiresInSeconds) || 120)) });
+    }), { expiresIn: Math.max(30, Math.min(3600, Number(expiresInSeconds) || 120)) });
   }
   /** Only the case-authorized moderation service may call this signing path. */
   async signReportEvidence(key: string) {
@@ -331,7 +339,7 @@ export class S3BucketService implements OnModuleInit {
   keyFromReference(value?: string): string | undefined {
     if (!value || value.includes('\\') || value.split('/').some(part => part === '..' || part === '.')) return undefined;
     if (
-      /^(users|temp|profile|posts|avatars|groupIcon|events|groups|vault|chat|quarantine|reports|chat-media)\//.test(value) &&
+      /^(previews|users|temp|profile|posts|avatars|groupIcon|events|groups|vault|chat|quarantine|reports|chat-media)\//.test(value) &&
       !value.includes('://')
     )
       return value;
