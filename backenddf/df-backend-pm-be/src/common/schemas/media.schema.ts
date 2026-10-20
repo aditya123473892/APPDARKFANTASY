@@ -8,6 +8,12 @@ export enum ChatMediaStatus {
 
 @Schema({ _id: true })
 export class Media {
+  @Prop({ select: false }) previewKey?: string;
+  @Prop() photoId?: string;
+  @Prop() blurhash?: string;
+  @Prop() width?: number;
+  @Prop() height?: number;
+
   @Prop() ownerId?: string;
   @Prop() resourceType?: string;
   @Prop() resourceId?: string;

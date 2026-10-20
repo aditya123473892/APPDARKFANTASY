@@ -4,8 +4,9 @@ import { AppModule } from './app.module';
 import * as dotenv from 'dotenv';
 import { ResponseInterceptor } from './common/interceptors';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { applicationValidationPipe } from './common/validation';
 
 async function bootstrap() {
   dotenv.config(); // Load environment variables from .env file
@@ -60,7 +61,7 @@ async function bootstrap() {
   );
 
   // Using global validation pips for dtos
-  app.useGlobalPipes(new ValidationPipe());
+  app.useGlobalPipes(applicationValidationPipe());
 
   await app.listen(configService.get<string>('PORT'));
   Logger.log(`Services running at PORT ${configService.get<string>('PORT')}`);

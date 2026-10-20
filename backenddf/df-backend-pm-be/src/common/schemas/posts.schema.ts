@@ -1,6 +1,6 @@
 import { Schema, SchemaFactory, Prop } from '@nestjs/mongoose';
 import mongoose, { Document } from 'mongoose';
-import { EPostStatus, EPostVisibility } from '../enums/posts.enum';
+import { EContentVisibility, EPostStatus, EPostVisibility } from '../enums/posts.enum';
 import { UsersDocument } from './users.schema';
 import { Media } from './media.schema';
 import { Like } from './like.schema';
@@ -10,6 +10,9 @@ export type PostsDocument = Posts & Document;
 
 @Schema({ timestamps: true, collection: 'Posts' })
 export class Posts {
+  @Prop({ type: String, enum: EContentVisibility, default: EContentVisibility.NORMAL })
+  contentVisibility: EContentVisibility;
+
   @Prop({ required: false })
   caption: string;
 

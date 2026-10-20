@@ -11,8 +11,9 @@ import {
   MaxLength,
 } from 'class-validator';
 import { PartialType, OmitType } from '@nestjs/mapped-types';
-import { EPostVisibility } from '../../common/enums/posts.enum';
+import { EContentVisibility, EPostVisibility } from '../../common/enums/posts.enum';
 export class PhotoPostDto {
+  @IsOptional() @IsEnum(EContentVisibility) contentVisibility?: EContentVisibility;
   @IsString() @Matches(/^[A-Za-z0-9_-]{8,64}$/) clientId: string;
   @IsOptional() @IsString() @MaxLength(500) caption?: string;
   @IsOptional() @IsString() @MaxLength(200) location?: string;

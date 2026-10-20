@@ -54,6 +54,7 @@ export class UsersService {
   }
 
   async create(createUserDto: CreateUserDto, actorId?: string) {
+    if ('premiumUntil' in createUserDto) throw new BadRequestException('Entitlements are server managed');
     validateRoles(createUserDto.roles);
     if (actorId) await authorizeRoleGrant(this.usersModel.db, actorId, createUserDto.roles);
     else if (createUserDto.roles.some((role) => role !== ERole.USER))
@@ -69,6 +70,7 @@ export class UsersService {
     actorId?: string,
   ): Promise<UsersDocument | null> {
     return preservationGate(this.usersModel.db, async () => {
+    if ('premiumUntil' in updateUserDto) throw new BadRequestException('Entitlements are server managed');
     if (Object.keys(updateUserDto).some((key) => key.startsWith('$') || key.includes('.')))
       throw new BadRequestException('Invalid update fields');
     if (updateUserDto.isBlocked === true || updateUserDto.deletionRequestedAt || new Date(updateUserDto.moderationSuspendedUntil) > new Date())
@@ -296,6 +298,7 @@ export class UsersService {
     _id: string,
     updateUserDto: UpdateUserProfileDto,
   ): Promise<UsersDocument | null> {
+    if ('premiumUntil' in updateUserDto) throw new BadRequestException('Entitlements are server managed');
     const updateFields: Record<string, any> = {};
 
     Object.entries(updateUserDto).forEach(([key, value]) => {

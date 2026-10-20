@@ -1,12 +1,16 @@
 import { Schema, SchemaFactory, Prop } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
-import { EBlockedByEnum, ERole } from 'src/common/enums';
+import { EBlockedByEnum, ERole } from '../enums';
 import { genSalt, hash } from 'bcrypt';
-import { EJotFormStatus, EUserAccountStatus } from '../enums/users.enum';
+import { EUserAccountStatus } from '../enums/users.enum';
 
 export type UsersDocument = Users & Document;
 @Schema({ timestamps: true, collection: 'Users' })
 export class Users {
+  // Written exclusively by verified server entitlement processing (never a user DTO).
+  @Prop({ type: Date, default: null, select: false })
+  premiumUntil?: Date;
+
   @Prop({ required: true, unique: true })
   username: string;
 
