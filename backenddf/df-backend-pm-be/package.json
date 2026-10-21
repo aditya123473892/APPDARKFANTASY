@@ -26,6 +26,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prebuild": "node -e \"console.log('Building backend with local toolchain')\"",
     "photos:migrate": "ts-node -r tsconfig-paths/register scripts/migrate-photos.ts",
+    "premium:backfill": "ts-node -r tsconfig-paths/register scripts/backfill-premium.ts",
+    "premium:test-user": "ts-node -r tsconfig-paths/register scripts/set-test-premium.ts",
     "s3:test": "node scripts/s3-smoke-test.js --sample"
   },
   "dependencies": {

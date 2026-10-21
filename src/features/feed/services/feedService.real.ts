@@ -6,7 +6,7 @@ import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
 import { displayName, type UserSummary } from '@/features/auth/userModel';
 import { ServiceError } from '@/services/errors';
-import type { CommentPage, Post, PostAuthor, PostComment } from '../types';
+import type { CommentPage, ContentVisibility, Post, PostAuthor, PostComment, PostImageResponse } from '../types';
 import type { FeedService } from './feedService';
 export type BackendPost = {
   _id: string;
@@ -14,6 +14,9 @@ export type BackendPost = {
   user: string | UserSummary;
   createdAt: string;
   visibility?: string;
+  contentVisibility?: ContentVisibility;
+  locked?: boolean;
+  images?: PostImageResponse[];
   status?: string;
   media?: { url?: string; mimetype?: string }[];
   likes?: (string | { user?: string | UserSummary })[];
@@ -56,14 +59,24 @@ export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
   if (!raw?._id || !raw.createdAt) throw new ServiceError('UNKNOWN');
   const likes = raw.likes ?? [];
   const serverState = typeof raw.likedByMe === 'boolean';
+  const locked = raw.contentVisibility === 'premium' && raw.locked !== false;
+  const images = raw.images ?? (raw.contentVisibility === 'premium' ? [] : raw.media ?? []);
   return {
+    contentVisibility: raw.contentVisibility ?? 'normal',
+    locked,
     id: raw._id,
     body: raw.caption ?? '',
     createdAt: raw.createdAt,
     user: author(raw.user, fallbackAuthor),
-    media: (raw.media ?? [])
-      .filter((m) => mediaUrl(m.url))
-      .map((m) => ({ uri: mediaUrl(m.url), width: 16, height: 12, mimetype: m.mimetype })),
+    media: images
+      .filter((image) => locked || mediaUrl(image.url))
+      .map((image, index) => ({
+        id: 'id' in image ? image.id : `${raw._id}:${index}`,
+        uri: mediaUrl(image.url),
+        blurhash: 'blurhash' in image ? image.blurhash : null,
+        width: ('width' in image && image.width) || 16,
+        height: ('height' in image && image.height) || 12,
+      })),
     likes: raw.likeCount ?? likes.length,
     replies: raw.commentCount ?? raw.comments?.length ?? 0,
     liked: serverState
@@ -182,6 +195,7 @@ export const realFeedService: FeedService = {
       for (const asset of input.assets) photoIds.push(await uploadPhoto(asset, input.onUploadProgress));
       const response = await apiClient.post('/posts', {
         caption: input.body,
+        contentVisibility: input.contentVisibility ?? 'normal',
         visibility:
           input.audience === 'everyone'
             ? 'public'

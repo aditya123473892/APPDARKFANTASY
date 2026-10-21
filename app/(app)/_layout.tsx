@@ -1,7 +1,9 @@
 import { Stack, usePathname } from 'expo-router';
 import { useTheme } from '@/theme/useTheme';
 import { ProtectedRoute } from '@/features/auth/components/Access';
+import { useEntitlementSync } from '@/features/subscriptions/entitlements';
 export default function AppLayout(): React.JSX.Element {
+  useEntitlementSync();
   const { theme } = useTheme();
   const path = usePathname();
   const capability =

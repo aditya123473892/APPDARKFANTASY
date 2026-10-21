@@ -9,7 +9,7 @@ import { Avatar, Button, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useCreatePost } from '@/features/feed/hooks/useFeed';
-import type { PostAudience, UploadAsset } from '@/features/feed/types';
+import type { ContentVisibility, PostAudience, UploadAsset } from '@/features/feed/types';
 import { cleanupPickedAssets } from '@/services/api/photoUpload';
 import { uploadProgressLabel } from '@/services/api/uploadProgress';
 import { usePhotoDraftCleanup } from '@/hooks/usePhotoDraftCleanup';
@@ -35,6 +35,7 @@ export function CreatePostScreen(): React.JSX.Element {
   const me = useAuthStore((state) => state.user);
   const [value, setValue] = useState('');
   const [audience, setAudience] = useState<PostAudience>('everyone');
+  const [contentVisibility, setContentVisibility] = useState<ContentVisibility>('normal');
   const [assets, setAssets] = useState<UploadAsset[]>([]);
   const [uploadStatus, setUploadStatus] = useState('');
   const createPost = useCreatePost();
@@ -68,7 +69,7 @@ export function CreatePostScreen(): React.JSX.Element {
   const submit = (): void => {
     if (!canPost) return;
     createPost.mutate(
-      { body: trimmed, audience, assets, clientId: clientId.current,
+      { body: trimmed, audience, contentVisibility, assets, clientId: clientId.current,
         onUploadProgress: (progress) => setUploadStatus(uploadProgressLabel(progress)) },
       {
         onSuccess: (post) => {
@@ -140,6 +141,24 @@ export function CreatePostScreen(): React.JSX.Element {
             </Text>
           ) : null}
           <View style={{ gap: 12, marginTop: 20 }}>
+            <Text variant="label">Image access</Text>
+            <View accessibilityRole="radiogroup" accessibilityLabel="Image access" style={{ flexDirection: 'row', gap: 12 }}>
+              {(['normal', 'premium'] as const).map((tier) => (
+                <Pressable key={tier} accessibilityRole="radio"
+                  accessibilityState={{ checked: contentVisibility === tier, disabled: createPost.isPending }}
+                  disabled={createPost.isPending} onPress={() => setContentVisibility(tier)}
+                  style={[styles.audience, { borderColor: contentVisibility === tier ? theme.colors.primary : theme.colors.border }]}>
+                  <Text color={contentVisibility === tier ? 'primary' : 'secondary'}>
+                    {tier === 'normal' ? 'Normal' : 'Premium'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text variant="caption" color="secondary">
+              {contentVisibility === 'premium'
+                ? 'Only active subscribers and you can see full images. Your audience setting still applies.'
+                : 'Anyone in your chosen audience can see full images.'}
+            </Text>
             {createPost.isPending && uploadStatus ? (
               <Text accessibilityLiveRegion="polite">{uploadStatus}</Text>
             ) : null}

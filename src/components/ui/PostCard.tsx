@@ -25,7 +25,7 @@ import { useTheme } from '@/theme/useTheme';
 import { formatRelativeTime } from '@/utils/formatters';
 import { Avatar } from './Avatar';
 import { Text } from './Text';
-import { RemoteMedia } from './RemoteMedia';
+import { PostImage } from './PostImage';
 import { useAddComment, useComments, useDeleteComment } from '@/features/feed/hooks/useFeed';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { createClientId } from '@/utils/clientId';
@@ -56,7 +56,7 @@ function RichText({ body }: { body: string }): React.JSX.Element {
 const clampAspect = (media: PostMedia): number =>
   Math.min(1.8, Math.max(0.8, media.width / media.height));
 
-function MediaGallery({ media }: { media: PostMedia[] }): React.JSX.Element {
+function MediaGallery({ media, locked, postId }: { media: PostMedia[]; locked: boolean; postId: string }): React.JSX.Element {
   const { theme } = useTheme();
   const [width, setWidth] = useState(0);
   const [active, setActive] = useState(0);
@@ -77,10 +77,10 @@ function MediaGallery({ media }: { media: PostMedia[] }): React.JSX.Element {
           style={[styles.mediaScroller, { backgroundColor: theme.colors.surfaceMuted }]}
         >
           {media.map((item, index) => (
-            <RemoteMedia
-              key={`${item.uri}-${index}`}
-              uri={item.uri}
-              mimetype={item.mimetype}
+            <PostImage
+              key={item.id || `${postId}:${index}`}
+              image={{ ...item, id: item.id || `${postId}:${index}` }}
+              locked={locked}
               width={width}
               height={width / aspect}
             />
@@ -317,6 +317,7 @@ export const PostCard = memo(function PostCard({
     onToggleLike(post);
   };
   const share = (): void => {
+    if (post.locked) return;
     void Share.share({ message: `${post.user.name} on DARKFANTASY: “${post.body}”` });
   };
   const openAuthor = onOpenAuthor ? () => onOpenAuthor(post) : undefined;
@@ -399,7 +400,12 @@ export const PostCard = memo(function PostCard({
           </Pressable>
         ) : null}
 
-        {post.media?.length ? <MediaGallery media={post.media} /> : null}
+        {post.contentVisibility === 'premium' && post.user.id === me ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Badge variant="premium" /><Text variant="caption">Premium</Text>
+          </View>
+        ) : null}
+        {post.media?.length ? <MediaGallery media={post.media} locked={post.locked === true} postId={post.id} /> : null}
 
         <View style={styles.actions}>
           <Animated.View style={likeStyle}>
@@ -424,6 +430,7 @@ export const PostCard = memo(function PostCard({
             icon="paper-plane-outline"
             color={theme.colors.textSecondary}
             label="Share post"
+            disabled={post.locked === true}
             onPress={share}
           />
         </View>

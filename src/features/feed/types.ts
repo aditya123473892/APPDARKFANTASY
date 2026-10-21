@@ -5,7 +5,12 @@ export type PostAuthor = {
   avatarUri: string;
   verified?: boolean;
 };
-export type PostMedia = { uri: string; width: number; height: number; mimetype?: string };
+export type ContentVisibility = 'normal' | 'premium';
+/** Allowlisted wire image response shared by feed, profiles and post mutations. */
+export type PostImageResponse = {
+  id: string; url: string; blurhash: string | null; width: number | null; height: number | null;
+};
+export type PostMedia = { id?: string; uri: string; blurhash?: string | null; width: number; height: number; mimetype?: string };
 export type PostAudience = 'everyone' | 'connections' | 'private';
 export type PostComment = {
   id: string;
@@ -17,6 +22,8 @@ export type PostComment = {
 };
 
 export type Post = {
+  contentVisibility?: ContentVisibility;
+  locked?: boolean;
   id: string;
   user: PostAuthor;
   body: string;
@@ -37,6 +44,7 @@ export type CommentPage = { comments: PostComment[]; hasMore: boolean; count: nu
 
 export type UploadAsset = { uri: string; name: string; type: string; file?: File };
 export type CreatePostInput = {
+  contentVisibility?: ContentVisibility;
   onUploadProgress?: import('@/services/api/uploadProgress').UploadProgressListener;
   clientId?: string;
   body: string;

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test:auth": "node --test scripts/test-auth.cjs",
     "test:network": "node --test scripts/test-dev-api-proxy.cjs",
+    "test:premium": "node --test scripts/test-premium.cjs",
     "test:vault": "node --test scripts/test-vault.cjs",
     "verify:vault-config": "node scripts/verify-vault-config.cjs",
     "lint": "eslint app src",

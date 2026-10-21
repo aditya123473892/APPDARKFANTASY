@@ -7,7 +7,9 @@ export const mockFeedService: FeedService = {
       const posts = db.posts();
       return { posts, count: posts.length };
     }),
-  create: ({ body, audience }) => respond(() => db.createPost(body, audience), 500),
+  create: ({ body, audience, contentVisibility }) => respond(() => ({
+    ...db.createPost(body, audience), contentVisibility: contentVisibility ?? 'normal', locked: false,
+  }), 500),
   setLiked: (postId, liked) =>
     respond(() => {
       const post = db.setLiked(postId, liked);
