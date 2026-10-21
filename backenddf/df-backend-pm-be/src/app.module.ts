@@ -30,6 +30,7 @@ import { VaultModule } from './vault/vault.module';
 import { UserBlocksModule } from './user-blocks/user-blocks.module';
 import { blockContext, blockQueryPlugin } from './user-blocks/block-context';
 import { ReportsModule } from './reports/reports.module';
+import { EntitlementsModule } from './entitlements/entitlements.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { ReportsModule } from './reports/reports.module';
       limits: { fileSize: 5 * 1024 * 1024, files: 5, fields: 30, parts: 35 },
     }),
     PhotosModule,
+    EntitlementsModule,
     VaultModule,
     UserBlocksModule,
     ReportsModule,

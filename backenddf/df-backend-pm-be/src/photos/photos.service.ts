@@ -431,7 +431,8 @@ export class PhotosService implements OnModuleInit {
       source = publicProfile(source);
     const result: any = {};
     for (const [field, item] of Object.entries(source)) {
-      if (['password', 'passwordResetToken', 'verifyEmailToken', 'storageKey', 'previewKey', 'previewProcessingKey', 'premiumUntil'].includes(field)) continue;
+      if (['password', 'passwordResetToken', 'verifyEmailToken', 'storageKey', 'previewKey', 'previewProcessingKey'].includes(field)) continue;
+      if (field === 'premiumUntil' && context?.resourceType === 'profile') continue;
       if (field === 's3Key' && source.filename) continue;
       if (['avatar', 'groupIcon'].includes(field)) {
         const expected = field === 'avatar' ? 'profile' : 'group';
