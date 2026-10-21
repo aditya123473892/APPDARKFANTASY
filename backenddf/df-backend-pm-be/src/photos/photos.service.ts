@@ -484,7 +484,7 @@ export class PhotosService implements OnModuleInit {
     const post = await this.db.db.collection('Posts').findOne({ _id: new Types.ObjectId(context.resourceId) });
     if (!post) throw new NotFoundException('Photo not available');
     if (post.contentVisibility !== 'premium') return;
-    const viewer = context.requester && await this.db.db.collection('Users').findOne({ _id: new Types.ObjectId(context.requester) });
+    const viewer = context.requester && await this.db.db.collection<any>('Users').findOne({ _id: new Types.ObjectId(context.requester) });
     if (!isPremium(viewer)) throw new NotFoundException('Photo not available');
   }
 
