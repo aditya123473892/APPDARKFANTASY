@@ -137,6 +137,7 @@ export class PostsController {
         caption: dto.caption,
         location: dto.location,
         visibility: dto.visibility || EPostVisibility.PRIVATE,
+        contentVisibility: dto.contentVisibility || 'normal',
         user: actor.id,
         media,
         status: EPostStatus.APPROVED,
@@ -237,7 +238,7 @@ export class PostsController {
       ? await this.photos.bind(actor.id, dto.photoIds, `post:${id}`)
       : post.media;
     const patch: any = { media };
-    for (const field of ['caption', 'location', 'visibility'])
+    for (const field of ['caption', 'location', 'visibility', 'contentVisibility'])
       if (dto[field] !== undefined) patch[field] = dto[field];
     if (dto.photoIds) patch.status = EPostStatus.APPROVED;
     const updated = await this.postsService.updateOnePrivate(

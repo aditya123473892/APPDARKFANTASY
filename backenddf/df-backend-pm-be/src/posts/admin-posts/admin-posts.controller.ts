@@ -64,7 +64,7 @@ export class AdminPostsController {
     const author = String((post.user as any)?._id || post.user);
     const media = payload.photoIds ? await this.photos.bind(author, payload.photoIds, `post:${_id}`) : post.media;
     const patch: any = { media };
-    for (const field of ['caption', 'location', 'visibility', 'status'])
+    for (const field of ['caption', 'location', 'visibility', 'contentVisibility', 'status'])
       if (payload[field] !== undefined) patch[field] = payload[field];
     const updatePost = await this.postsService.updateOne(_id, patch);
 
@@ -82,7 +82,7 @@ export class AdminPostsController {
     const id = new Types.ObjectId().toString();
     const media = await this.photos.bind(payload.user, payload.photoIds || [], `post:${id}`);
     const patch: any = { _id: id, user: payload.user, media };
-    for (const field of ['caption', 'location', 'visibility', 'status'])
+    for (const field of ['caption', 'location', 'visibility', 'contentVisibility', 'status'])
       if (payload[field] !== undefined) patch[field] = payload[field];
     return successRes(await this.postsService.create(patch));
   }

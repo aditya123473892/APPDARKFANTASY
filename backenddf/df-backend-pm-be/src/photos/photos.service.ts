@@ -23,7 +23,8 @@ import { publicProfile } from '../users/public-profile';
 import { canReadPost } from '../posts/post-access';
 import { Subject } from 'rxjs';
 import { S3BucketService } from '../s3-bucket/s3-bucket.service';
-import { MediaService } from './media.service';
+import { MediaService, originalUrlSeconds } from './media.service';
+import { PostMapper, isMappedPostImage, isPremium } from '../posts/post.mapper';
 
 @Injectable()
 export class PhotosService implements OnModuleInit {
@@ -388,10 +389,11 @@ export class PhotosService implements OnModuleInit {
   }
 
   /** Context is obtained from the authorized response's resource ID, then verified against DB. */
-  async present(value: any, requester?: string, inherited?: ResourceContext): Promise<any> {
+  async present(value: any, requester?: string, inherited?: ResourceContext, adminPosts = false): Promise<any> {
     if (!value || typeof value !== 'object') return value;
+    if (isMappedPostImage(value)) return value;
     if (value instanceof Date || value._bsontype || Buffer.isBuffer(value)) return value;
-    if (Array.isArray(value)) return (await Promise.all(value.map(item => this.present(item, requester, inherited)))).filter(item => item !== null);
+    if (Array.isArray(value)) return (await Promise.all(value.map(item => this.present(item, requester, inherited, adminPosts)))).filter(item => item !== null);
     let source = value.toObject ? value.toObject() : value;
     if ([source.storageKey, source.filename, source.url].some(item => typeof item === 'string' && (item.includes('/vault/') || item.startsWith('vault/')))) return null;
     let context = inherited;
@@ -399,17 +401,42 @@ export class PhotosService implements OnModuleInit {
     if (source._id && Types.ObjectId.isValid(String(source._id))) {
       context = await this.responseContext(String(source._id), requester) || inherited;
     }
+    if (context?.resourceType === 'post' && context.resourceId === String(source._id)) {
+      const persisted = await this.db.db.collection('Posts').findOne({ _id: new Types.ObjectId(context.resourceId) });
+      if (!persisted) return null;
+      try {
+        await this.assertPairAccess(context, adminPosts);
+        if (!adminPosts) await this.active(context.ownerId);
+      } catch (error) {
+        if (error instanceof NotFoundException || error instanceof ForbiddenException) return null;
+        throw error;
+      }
+      // Entitlement is freshly read from DB, never from JWT or client flags.
+      const viewer = requester && Types.ObjectId.isValid(requester)
+        ? await this.db.db.collection('Users').findOne({ _id: new Types.ObjectId(requester) }, { projection: { premiumUntil: 1 } }) : null;
+      source = await new PostMapper().toResponse({ ...source, media: persisted.media || [],
+        contentVisibility: persisted.contentVisibility || 'normal', user: source.user || persisted.user },
+        { id: requester, premiumUntil: viewer?.premiumUntil, admin: adminPosts }, {
+          canRead: async () => {
+            try { await this.assertPairAccess(context, adminPosts); return true; }
+            catch (error) { if (error instanceof NotFoundException || error instanceof ForbiddenException) return false; throw error; }
+          },
+          original: image => this.accessUrl(image.storageKey || image.s3Key || image.filename, originalUrlSeconds(), context, adminPosts),
+          preview: key => new MediaService(this.storage).previewUrl(key),
+        });
+      if (!source) return null;
+    }
     if (context?.resourceType === 'profile' && context.resourceId === String(source._id) &&
         requester !== context.ownerId && !blockContext.getStore()?.bypass)
       source = publicProfile(source);
     const result: any = {};
     for (const [field, item] of Object.entries(source)) {
-      if (['password', 'passwordResetToken', 'verifyEmailToken', 'storageKey'].includes(field)) continue;
+      if (['password', 'passwordResetToken', 'verifyEmailToken', 'storageKey', 'previewKey', 'previewProcessingKey', 'premiumUntil'].includes(field)) continue;
       if (field === 's3Key' && source.filename) continue;
       if (['avatar', 'groupIcon'].includes(field)) {
         const expected = field === 'avatar' ? 'profile' : 'group';
         result[field] = context?.resourceType === expected ? await this.displayUrl(String(item || ''), context) : '';
-      } else result[field] = await this.present(item, requester, context);
+      } else result[field] = await this.present(item, requester, context, adminPosts);
     }
     const key = source.storageKey || source.filename;
     if (key || (source.url && source.mimetype))
@@ -434,7 +461,7 @@ export class PhotosService implements OnModuleInit {
     try { return await this.accessUrl(key, 120, context); }
     catch (error) { if (error instanceof NotFoundException || error instanceof ForbiddenException) return ''; throw error; }
   }
-  async accessUrl(key: string, seconds: number, context: ResourceContext) {
+  async accessUrl(key: string, seconds: number, context: ResourceContext, adminPost = false) {
     if (!context || context.resourceType === 'vault' || context.resourceType === 'temp' || key.includes('/vault/') || key.startsWith('vault/'))
       throw new NotFoundException('Photo not available');
     const photo = await this.uploads.findOne({
@@ -442,12 +469,23 @@ export class PhotosService implements OnModuleInit {
     });
     if (!photo || storedKey(photo) !== key || !matchesBinding(photo, context))
       throw new NotFoundException('Photo not available');
-    await this.active(context.ownerId);
-    await this.assertPairAccess(context);
+    if (!adminPost) await this.active(context.ownerId);
+    await this.assertPairAccess(context, adminPost);
+    await this.assertPremiumAccess(context, adminPost);
     // No cross-request URL cache: every request rechecks resource and authorization state.
-    const url = await this.storage.getSignedURL(storedKey(photo), undefined, seconds, context.resourceType === 'chat');
-    await this.assertPairAccess(context);
+    const url = await this.storage.getSignedURL(storedKey(photo), undefined, seconds, ['post', 'chat'].includes(context.resourceType));
+    await this.assertPairAccess(context, adminPost);
+    await this.assertPremiumAccess(context, adminPost);
     return url;
+  }
+
+  private async assertPremiumAccess(context: ResourceContext, adminPost: boolean) {
+    if (context.resourceType !== 'post' || adminPost || context.requester === context.ownerId) return;
+    const post = await this.db.db.collection('Posts').findOne({ _id: new Types.ObjectId(context.resourceId) });
+    if (!post) throw new NotFoundException('Photo not available');
+    if (post.contentVisibility !== 'premium') return;
+    const viewer = context.requester && await this.db.db.collection('Users').findOne({ _id: new Types.ObjectId(context.requester) });
+    if (!isPremium(viewer)) throw new NotFoundException('Photo not available');
   }
 
   /** Read restricted chat photos through the API; never expose a reusable S3 URL. */
@@ -465,7 +503,8 @@ export class PhotosService implements OnModuleInit {
     return bytes;
   }
 
-  private async assertPairAccess(context: ResourceContext) {
+  private async assertPairAccess(context: ResourceContext, adminPost = false) {
+    if (adminPost && context.resourceType === 'post') return;
     const collection = ({ profile: 'Users', post: 'Posts', event: 'Events', group: 'Groups', chat: 'ChatMessages' })[context.resourceType];
     if (collection && await restrictedResource(this.db, collection, context.resourceId, context.ownerId))
       throw new NotFoundException('Media not found');
