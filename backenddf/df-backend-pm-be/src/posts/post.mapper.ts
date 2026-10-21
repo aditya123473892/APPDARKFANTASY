@@ -26,10 +26,10 @@ export class PostMapper {
     const owner = String(post.user?._id || post.user);
     const contentVisibility = post.contentVisibility || 'normal';
     const locked = contentVisibility === 'premium' && !viewer.admin && viewer.id !== owner && !isPremium(viewer);
-    const images = await Promise.all((post.media || []).map(async (image: any) => {
+    const images = await Promise.all((post.media || []).map(async (image: any, index: number) => {
       // Never spread image documents: even authorized viewers get only these fields.
       const result = {
-        id: String(image.photoId || image._id || ''),
+        id: String(image.photoId || image._id || `${post._id}:${index}`),
         url: locked ? delivery.preview(image.previewKey) : await delivery.original(image),
         blurhash: image.blurhash || null,
         width: image.width || null,

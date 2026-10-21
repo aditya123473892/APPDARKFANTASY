@@ -421,7 +421,15 @@ export class PhotosService implements OnModuleInit {
             try { await this.assertPairAccess(context, adminPosts); return true; }
             catch (error) { if (error instanceof NotFoundException || error instanceof ForbiddenException) return false; throw error; }
           },
-          original: image => this.accessUrl(image.storageKey || image.s3Key || image.filename, originalUrlSeconds(), context, adminPosts),
+          original: async image => {
+            const key = this.storage.keyFromReference(image.storageKey || image.s3Key || image.filename || image.url);
+            if (!key) return '';
+            try { return await this.accessUrl(key, originalUrlSeconds(), context, adminPosts); }
+            catch (error) {
+              if (error instanceof NotFoundException || error instanceof ForbiddenException) return '';
+              throw error;
+            }
+          },
           preview: key => new MediaService(this.storage).previewUrl(key),
         });
       if (!source) return null;

@@ -237,7 +237,8 @@ export class PostsController {
     const media = dto.photoIds
       ? await this.photos.bind(actor.id, dto.photoIds, `post:${id}`)
       : post.media;
-    const patch: any = { media };
+    const patch: any = {};
+    if (dto.photoIds) patch.media = media;
     for (const field of ['caption', 'location', 'visibility', 'contentVisibility'])
       if (dto[field] !== undefined) patch[field] = dto[field];
     if (dto.photoIds) patch.status = EPostStatus.APPROVED;

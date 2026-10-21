@@ -1,6 +1,5 @@
-import { Controller, Get, Post, Put, Delete, Param, UseGuards, Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, UseGuards, Injectable, CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
 import request = require('supertest');
 import { Types } from 'mongoose';
 import { PhotoResponseInterceptor } from '../photos/response.interceptor';
@@ -120,6 +119,14 @@ describe('Premium HTTP response pipeline', () => {
     expect((await request(app.getHttpServer()).get('/posts/one')).body.locked).toBe(false);
     post.contentVisibility = 'premium';
     expect((await request(app.getHttpServer()).get('/posts/one')).body.locked).toBe(true);
+  });
+  it('fails closed if a stored preview reference points at an original', async () => {
+    post.media[0].previewKey = key;
+    const response = await request(app.getHttpServer()).get('/posts/one').expect(200);
+    expect(response.body.locked).toBe(true);
+    expect(response.body.images[0].url).toBe('');
+    expect(JSON.stringify(response.body)).not.toContain(key);
+    expect(storage.getSignedURL).not.toHaveBeenCalled();
   });
   it('rejects non-admin access and unlocks guarded admin responses without granting social bypass', async () => {
     await request(app.getHttpServer()).get('/admin/posts').expect(403);

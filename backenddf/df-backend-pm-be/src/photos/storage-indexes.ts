@@ -10,7 +10,10 @@ export async function storageIndexes(db: Connection, apply = false, report = con
       { $match: { count: { $gt: 1 } } },
     ]).toArray();
   }
-  report(JSON.stringify({ duplicateS3Keys: duplicates, apply }));
+  // Operational reports must never log original storage keys.
+  report(JSON.stringify({ duplicateGroups: Object.fromEntries(
+    Object.entries(duplicates).map(([name, rows]) => [name, rows.length]),
+  ), apply }));
   if (!apply) return duplicates;
   for (const name of ['PhotoUploads', 'VaultPhotos']) {
     const collection = db.db.collection(name);

@@ -76,6 +76,7 @@ export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
         blurhash: 'blurhash' in image ? image.blurhash : null,
         width: ('width' in image && image.width) || 16,
         height: ('height' in image && image.height) || 12,
+        mimetype: 'mimetype' in image ? image.mimetype : 'image/jpeg',
       })),
     likes: raw.likeCount ?? likes.length,
     replies: raw.commentCount ?? raw.comments?.length ?? 0,

@@ -26,6 +26,7 @@ import { formatRelativeTime } from '@/utils/formatters';
 import { Avatar } from './Avatar';
 import { Text } from './Text';
 import { PostImage } from './PostImage';
+import { RemoteMedia } from './RemoteMedia';
 import { useAddComment, useComments, useDeleteComment } from '@/features/feed/hooks/useFeed';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { createClientId } from '@/utils/clientId';
@@ -77,7 +78,10 @@ function MediaGallery({ media, locked, postId }: { media: PostMedia[]; locked: b
           style={[styles.mediaScroller, { backgroundColor: theme.colors.surfaceMuted }]}
         >
           {media.map((item, index) => (
-            <PostImage
+            item.mimetype?.startsWith('video/') && !locked ? (
+              <RemoteMedia key={item.id || `${postId}:${index}`} uri={item.uri}
+                mimetype={item.mimetype} width={width} height={width / aspect} />
+            ) : <PostImage
               key={item.id || `${postId}:${index}`}
               image={{ ...item, id: item.id || `${postId}:${index}` }}
               locked={locked}

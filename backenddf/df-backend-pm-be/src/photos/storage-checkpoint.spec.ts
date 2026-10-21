@@ -119,10 +119,12 @@ describe('Checkpoint 1 resource binding', () => {
   it('reports duplicates before writes; dry-run writes nothing; apply uses partial uniqueness', async () => {
     const calls: string[] = [];
     const createIndex = jest.fn(async () => { calls.push('index'); });
-    const db: any = { db: { collection: () => ({ aggregate: () => ({ toArray: async () => [{ _id: 'duplicate', count: 2 }] }), createIndex }) } };
-    const report = () => { calls.push('report'); };
+    const db: any = { db: { collection: () => ({ aggregate: () => ({ toArray: async () => [{ _id: 'posts/private-original-test-key', count: 2 }] }), createIndex }) } };
+    const report = jest.fn((_message: string) => { calls.push('report'); });
     await storageIndexes(db, false, report);
     expect(createIndex).not.toHaveBeenCalled();
+    expect(report.mock.calls[0][0]).not.toContain('posts/private-original-test-key');
+    expect(JSON.parse(report.mock.calls[0][0])).toMatchObject({ duplicateGroups: { PhotoUploads: 1, VaultPhotos: 1 } });
     calls.length = 0;
     await storageIndexes(db, true, report);
     expect(calls[0]).toBe('report');

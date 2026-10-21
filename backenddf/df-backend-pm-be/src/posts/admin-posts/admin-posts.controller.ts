@@ -63,7 +63,8 @@ export class AdminPostsController {
 
     const author = String((post.user as any)?._id || post.user);
     const media = payload.photoIds ? await this.photos.bind(author, payload.photoIds, `post:${_id}`) : post.media;
-    const patch: any = { media };
+    const patch: any = {};
+    if (payload.photoIds) patch.media = media;
     for (const field of ['caption', 'location', 'visibility', 'contentVisibility', 'status'])
       if (payload[field] !== undefined) patch[field] = payload[field];
     const updatePost = await this.postsService.updateOne(_id, patch);
