@@ -1,4 +1,4 @@
-import { blockIndexes } from './block-indexes';
+import { blockIndexes, warnMissingBlockIndexes } from './block-indexes';
 describe('Opt-in UserBlocks indexes', () => {
   const fixture = (duplicates: any[] = []) => {
     const rows = {
@@ -30,5 +30,24 @@ describe('Opt-in UserBlocks indexes', () => {
       { blockedId: 1 },
       expect.any(Object),
     );
+  });
+  it('warns at startup about missing operator-managed indexes without creating them', async () => {
+    const rows = {
+      listIndexes: () => ({ toArray: async () => [{ name: '_id_' }, { name: 'blocked_user' }] }),
+      createIndex: jest.fn(),
+    };
+    const warn = jest.fn();
+    await warnMissingBlockIndexes({ db: { collection: () => rows } } as any, warn);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('block_pair_unique, block_page'));
+    expect(rows.createIndex).not.toHaveBeenCalled();
+    const complete = {
+      listIndexes: () => ({
+        toArray: async () =>
+          ['block_pair_unique', 'blocked_user', 'block_page'].map((name) => ({ name })),
+      }),
+    };
+    const quiet = jest.fn();
+    await warnMissingBlockIndexes({ db: { collection: () => complete } } as any, quiet);
+    expect(quiet).not.toHaveBeenCalled();
   });
 });

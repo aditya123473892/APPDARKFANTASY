@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { memo } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { Avatar, Chip, Text } from '@/components/ui';
+import { Avatar, Chip, FitImage, Text } from '@/components/ui';
 import type { ProfileView } from '@/features/profile/types';
 import { useFollowUser } from '@/features/requests/hooks/useRequests';
 import { mediaUrl } from '@/services/api/backend';
@@ -164,13 +163,9 @@ export const ProfilePost = memo(function ProfilePost({
             onPress={open}
             style={[styles.photo, { backgroundColor: theme.colors.surfaceMuted }]}
           >
-            <Image
-              source={{ uri: mediaUrl(photo) }}
-              contentFit="cover"
-              transition={180}
-              cachePolicy="memory-disk"
+            <FitImage
+              uri={mediaUrl(photo)}
               recyclingKey={`${profile.id}-${photo}`}
-              accessibilityIgnoresInvertColors
               style={StyleSheet.absoluteFill}
             />
           </Pressable>

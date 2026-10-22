@@ -1,9 +1,8 @@
-import { Image } from 'expo-image';
 import { StyleSheet, View } from 'react-native';
+import { FitImage } from '@/components/ui/FitImage';
 import { radius, spacing } from '@/theme';
-import { useTheme } from '@/theme/useTheme';
 
-/** First photo is featured full width; the rest tile in two columns. */
+/** First photo is featured full width; the rest tile in two columns. Photos are never cropped. */
 export function PhotoGrid({
   photos,
   name,
@@ -11,23 +10,15 @@ export function PhotoGrid({
   photos: string[];
   name: string;
 }): React.JSX.Element | null {
-  const { theme } = useTheme();
   if (!photos.length) return null;
   return (
     <View style={styles.grid}>
       {photos.slice(0, 5).map((uri, index) => (
-        <Image
+        <FitImage
           key={`${uri}-${index}`}
-          source={{ uri }}
-          contentFit="cover"
-          transition={150}
-          cachePolicy="memory-disk"
+          uri={uri}
           accessibilityLabel={`${name}'s photo ${index + 1}`}
-          style={[
-            styles.photo,
-            { backgroundColor: theme.colors.surfaceElevated },
-            index === 0 && styles.large,
-          ]}
+          style={[styles.photo, index === 0 && styles.large]}
         />
       ))}
     </View>
@@ -36,5 +27,6 @@ export function PhotoGrid({
 const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   photo: { flexGrow: 1, flexBasis: '45%', aspectRatio: 0.8, borderRadius: radius.lg },
-  large: { flexBasis: '100%', aspectRatio: 1.3 },
+  // Profile photos are square, so the featured slot is square: shown whole, no bars.
+  large: { flexBasis: '100%', aspectRatio: 1 },
 });

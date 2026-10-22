@@ -34,8 +34,8 @@ export function BlockedUsersScreen() {
                 <Text>{user.name}</Text>
                 <Button
                   label="Unblock"
-                  loading={block.isPending}
-                  disabled={block.isPending}
+                  loading={pending.includes(user.id)}
+                  disabled={pending.includes(user.id)}
                   onPress={() => block.mutate({ id: user.id, blocked: false })}
                 />
               </View>

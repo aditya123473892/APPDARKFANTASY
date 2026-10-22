@@ -16,6 +16,7 @@ export const reportInput = z
     targetType: z.enum([
       'user',
       'post',
+      'comment',
       'chat_message',
       'chat_media',
       'group',

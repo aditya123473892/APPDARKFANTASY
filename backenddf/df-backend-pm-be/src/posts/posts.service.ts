@@ -624,6 +624,8 @@ export class PostsService {
       _id: commentId,
       user: userId,
     });
+    // Hidden by the block filter or deleted: a missing comment, not a 500.
+    if (!findComment) throw new NotFoundException('Comment not found');
 
     if (updateCommentDto.content) {
       findComment.content = updateCommentDto.content;

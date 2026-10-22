@@ -28,6 +28,7 @@ import { Text } from './Text';
 import { RemoteMedia } from './RemoteMedia';
 import { useAddComment, useComments, useDeleteComment } from '@/features/feed/hooks/useFeed';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
+import { useBlock } from '@/features/safety/useBlock';
 import { createClientId } from '@/utils/clientId';
 import { Button } from './Button';
 import { Loader } from './Loader';
@@ -52,15 +53,22 @@ function RichText({ body }: { body: string }): React.JSX.Element {
   );
 }
 
-/** Keeps any image size readable: aspect ratio is clamped between tall portrait and wide landscape. */
-const clampAspect = (media: PostMedia): number =>
-  Math.min(1.8, Math.max(0.8, media.width / media.height));
+/**
+ * The frame follows the first photo's shape, clamped between 4:5 portrait and
+ * 1.91:1 landscape. Photos are drawn with `contain`, so nothing is ever cropped;
+ * anything outside that range is letterboxed instead.
+ */
+const clampAspect = (ratio: number): number => Math.min(1.91, Math.max(0.8, ratio));
+const knownRatio = (media: PostMedia): number | undefined =>
+  media.width > 0 && media.height > 0 ? media.width / media.height : undefined;
 
 function MediaGallery({ media }: { media: PostMedia[] }): React.JSX.Element {
   const { theme } = useTheme();
   const [width, setWidth] = useState(0);
   const [active, setActive] = useState(0);
-  const aspect = clampAspect(media[0]!);
+  // Legacy posts carry no size: measure the first image once it has loaded.
+  const [measured, setMeasured] = useState<number>();
+  const aspect = clampAspect(knownRatio(media[0]!) ?? measured ?? 1);
   const onLayout = (event: LayoutChangeEvent) =>
     setWidth(Math.round(event.nativeEvent.layout.width));
   return (
@@ -83,6 +91,11 @@ function MediaGallery({ media }: { media: PostMedia[] }): React.JSX.Element {
               mimetype={item.mimetype}
               width={width}
               height={width / aspect}
+              onSize={
+                index === 0 && !knownRatio(item)
+                  ? (w, h) => setMeasured(w / h)
+                  : undefined
+              }
             />
           ))}
         </ScrollView>
@@ -111,6 +124,7 @@ const COMMENT_MAX = 2000;
 
 function Comments({ post }: { post: Post }): React.JSX.Element {
   const { theme } = useTheme();
+  const router = useRouter();
   const me = useCurrentUserId();
   const [draft, setDraft] = useState('');
   // Reused if the same draft is resubmitted after a failure, so it is stored once.
@@ -216,6 +230,21 @@ function Comments({ post }: { post: Post }): React.JSX.Element {
                   <Ionicons name="trash-outline" size={16} color={theme.colors.textMuted} />
                 </Pressable>
               ) : null}
+              {!item.pending && item.author.id !== me ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Report ${item.author.name}'s comment`}
+                  hitSlop={10}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/report' as never,
+                      params: { targetType: 'comment', targetId: item.id },
+                    })
+                  }
+                >
+                  <Ionicons name="flag-outline" size={16} color={theme.colors.textMuted} />
+                </Pressable>
+              ) : null}
             </View>
           );
         })
@@ -292,6 +321,7 @@ export const PostCard = memo(function PostCard({
   onDelete?: (post: Post) => void;
 }): React.JSX.Element {
   const router = useRouter(), me = useCurrentUserId();
+  const block = useBlock();
   const { theme } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [showComments, setShowComments] = useState(false);
@@ -356,6 +386,7 @@ export const PostCard = memo(function PostCard({
           {post.user.id !== me ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" hitSlop={10} style={styles.more}
             onPress={() => Alert.alert('Post options', undefined, [
               { text: 'Report post', onPress: () => router.push({ pathname: '/report' as never, params: { targetType: 'post', targetId: post.id } }) },
+              { text: `Block ${post.user.name}`, style: 'destructive', onPress: () => block.confirm(post.user.id) },
               { text: 'Cancel', style: 'cancel' },
             ])}><Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.text} /></Pressable> : null}
           {onDelete ? (

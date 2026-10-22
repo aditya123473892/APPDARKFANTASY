@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
-import { Avatar, Button, Text } from '@/components/ui';
+import { Avatar, Button, FitImage, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useCreatePost } from '@/features/feed/hooks/useFeed';
@@ -164,28 +164,39 @@ export function CreatePostScreen(): React.JSX.Element {
               Choose at least one photo. Posts may require approval before appearing in the public
               feed.
             </Text>
-            {assets.map((asset, index) => (
-              <View
-                key={`${asset.uri}-${index}`}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            {assets.length ? (
+              // The whole photo is previewed exactly as it will be posted: nothing is cropped.
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.previews}
               >
-                <Text numberOfLines={1} style={{ flex: 1 }}>
-                  {asset.name}
-                </Text>
-                <Button
-                  label="Remove"
-                  size="sm"
-                  variant="ghost"
-                  fullWidth={false}
-                  disabled={createPost.isPending}
-                  onPress={() => {
-                    void cleanupPickedAssets([asset]);
-                    setAssets((items) => items.filter((_, i) => i !== index));
-                    clientId.current = createClientId();
-                  }}
-                />
-              </View>
-            ))}
+                {assets.map((asset, index) => (
+                  <View key={`${asset.uri}-${index}`}>
+                    <FitImage
+                      uri={asset.uri}
+                      cachePolicy="none"
+                      accessibilityLabel={`Selected photo ${index + 1} of ${assets.length}`}
+                      style={styles.preview}
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove photo ${index + 1}`}
+                      hitSlop={8}
+                      disabled={createPost.isPending}
+                      onPress={() => {
+                        void cleanupPickedAssets([asset]);
+                        setAssets((items) => items.filter((_, i) => i !== index));
+                        clientId.current = createClientId();
+                      }}
+                      style={[styles.remove, { backgroundColor: theme.colors.overlayStrong }]}
+                    >
+                      <Ionicons name="close" size={16} color={theme.colors.onPrimary} />
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
           </View>
         </ScrollView>
         <View
@@ -277,6 +288,18 @@ const styles = StyleSheet.create({
     padding: 0,
   },
   error: { marginTop: spacing.sm },
+  previews: { gap: spacing.sm },
+  preview: { width: 132, aspectRatio: 0.8, borderRadius: radius.md },
+  remove: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    width: 26,
+    height: 26,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',

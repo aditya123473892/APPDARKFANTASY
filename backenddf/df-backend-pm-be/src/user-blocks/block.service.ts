@@ -11,7 +11,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Types } from 'mongoose';
 import { Subject } from 'rxjs';
 import { blockContext, blockedIds, pairBlocked } from './block-context';
-import { blockIndexes } from './block-indexes';
+import { blockIndexes, warnMissingBlockIndexes } from './block-indexes';
 import { verifyBlockDatabase } from './block-startup';
 import { recordReportAccess } from '../reports/evidence-reader';
 
@@ -34,6 +34,7 @@ export class BlockService implements OnModuleInit, OnModuleDestroy {
     if (!['off', 'report', 'apply'].includes(mode))
       throw new Error('Invalid USER_BLOCK_INDEXES');
     if (mode !== 'off') await blockIndexes(this.db, mode === 'apply');
+    else await warnMissingBlockIndexes(this.db);
     // Replicate invalidation across backend processes. Authorization still reads
     // MongoDB at every delivery/sign even while a change stream reconnects.
     this.stream = this.db.db

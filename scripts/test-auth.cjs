@@ -1860,6 +1860,32 @@ test('comment submission survives an unloaded cache and a refetch replacing the 
   assert.equal(cache.pages[0].comments[0].id, 'server-id');
 });
 
+test('post images come from the current images[] shape with real sizes, falling back to legacy media', () => {
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    '@/components/ui/Toast': { toast: { error: () => {}, success: () => {} } },
+  });
+  const { mapPost } = h.load('src/features/feed/services/feedService.real.ts');
+  const base = { _id: 'p1', user: '222222222222222222222222', createdAt: '2026-10-14T00:00:00Z' };
+  const current = mapPost({
+    ...base,
+    images: [
+      { id: 'i1', url: 'https://cdn.example.com/a.jpg', width: 1080, height: 1350, blurhash: null },
+      { id: 'i2', url: 'https://cdn.example.com/b.jpg', width: null, height: null },
+      { id: 'i3', url: '' },
+    ],
+  });
+  assert.deepEqual(
+    current.media.map(({ width, height }) => [width, height]),
+    [[1080, 1350], [0, 0]],
+  );
+  assert.match(current.media[0].uri, /a.jpg$/);
+  const legacy = mapPost({ ...base, media: [{ url: 'https://cdn.example.com/c.jpg', mimetype: 'image/png' }] });
+  assert.equal(legacy.media.length, 1);
+  assert.equal(legacy.media[0].width, 0);
+  assert.equal(legacy.media[0].mimetype, 'image/png');
+});
+
 test('posts use the server like state and cached posts update in every list', () => {
   const h = harness({
     'react-native': { Platform: { OS: 'android' } },
@@ -2193,11 +2219,10 @@ test('C pending send becomes uncertain on disconnect and late completion cannot 
   h.runtime.teardownSession();
 });
 
-test('blocked group messages collapse on Android and revealing text never mounts their media', () => {
-  let revealed = false;
+test('blocked group messages render only a placeholder: no text, media or reveal action', () => {
   const peer = '507f1f77bcf86cd799439012';
   const h = harness({
-    react: { memo: fn => fn, useState: () => [revealed, value => { revealed = value; }], useEffect: () => {} },
+    react: { memo: fn => fn },
     '@/features/safety/blockState': { useBlockState: selector => selector({ ids: [peer] }) },
     'react-native': { Platform: { OS: 'android' }, View: 'View', Pressable: 'Pressable', Alert: { alert: () => {} }, StyleSheet: { create: value => value } },
     '@expo/vector-icons': { Ionicons: 'Icon' },
@@ -2210,13 +2235,11 @@ test('blocked group messages collapse on Android and revealing text never mounts
   const { MessageBubble } = h.load('src/features/chat/components/MessageBubble.tsx');
   const props = { message: { id: 'message', senderId: peer, text: 'group text', media: [{ _id: 'media' }], createdAt: '2026-10-15T00:00:00Z', status: 'sent' }, mine: false, first: true, last: true, group: true, onActions: () => {} };
   const tree = MessageBubble(props);
-  assert.equal(tree.props.accessibilityLabel, 'Blocked user, tap to show');
-  assert.equal(JSON.stringify(tree).includes('group text'), false);
-  tree.props.onPress();
-  const visible = JSON.stringify(MessageBubble(props));
-  assert.match(visible, /group text/);
-  assert.match(visible, /Media unavailable/);
-  assert.equal(visible.includes('"type":"Attachment"'), false);
+  assert.equal(tree.props.accessibilityLabel, 'Message from a blocked user');
+  assert.equal(tree.props.onPress, undefined);
+  const rendered = JSON.stringify(tree);
+  assert.equal(rendered.includes('group text'), false);
+  assert.equal(rendered.includes('"type":"Attachment"'), false);
 });
 
 test('C uncertain UI offers Send again only after absent resync and never offers dismissal', () => {

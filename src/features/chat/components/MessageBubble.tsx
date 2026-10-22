@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { memo, useEffect, useState } from 'react';
+import { memo } from 'react';
 import { useBlockState } from '@/features/safety/blockState';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui';
@@ -47,8 +47,6 @@ export const MessageBubble = memo(function MessageBubble({
   const { theme } = useTheme();
   const locallyBlocked = useBlockState((state) => state.ids.includes(message.senderId));
   const blocked = group && !mine && (locallyBlocked || message.blockedSender);
-  const [revealed, setRevealed] = useState(false);
-  useEffect(() => setRevealed(false), [blocked]);
   const failed = message.status === 'failed-definitive' || message.status === 'uncertain';
   const time = formatMessageTime(message.createdAt);
 
@@ -110,16 +108,16 @@ export const MessageBubble = memo(function MessageBubble({
   const metaColor = mine ? theme.colors.onPrimary : theme.colors.textMuted;
   const hasMedia = Boolean(message.media?.length);
 
-  if (blocked && !revealed)
+  // The server withholds blocked senders' content, so there is nothing to reveal.
+  if (blocked)
     return (
       <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Blocked user, tap to show"
-        onPress={() => setRevealed(true)}
+        accessibilityRole="text"
+        accessibilityLabel="Message from a blocked user"
         onLongPress={() => onActions(message)}
         style={[styles.bubble, { backgroundColor: theme.colors.bubbleIn, marginBottom: 8 }]}
       >
-        <Text>Blocked user, tap to show</Text>
+        <Text color="muted">Message from a blocked user</Text>
       </Pressable>
     );
 
@@ -157,17 +155,13 @@ export const MessageBubble = memo(function MessageBubble({
           failed && { borderWidth: 1, borderColor: theme.colors.danger },
         ]}
       >
-        {replyPreview && !blocked ? <ReplyPreview {...replyPreview} mine={mine} /> : null}
+        {replyPreview ? <ReplyPreview {...replyPreview} mine={mine} /> : null}
         {!mine && first && message.senderName ? (
           <Text variant="label" color="primary" numberOfLines={1} style={styles.sender}>
-            {blocked ? 'Blocked user' : message.senderName}
+            {message.senderName}
           </Text>
         ) : null}
-        {blocked ? (
-          message.media?.length ? (
-            <Text>Media unavailable</Text>
-          ) : null
-        ) : message.viewOnce && message.media?.[0] ? (
+        {message.viewOnce && message.media?.[0] ? (
           <ViewOnceAttachment
             key={`${message.id}:${message.media[0]._id}`}
             media={message.media[0]}

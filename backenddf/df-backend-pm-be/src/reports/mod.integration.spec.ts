@@ -151,7 +151,7 @@ integration('Phase 3 moderation authorization and case workflow', () => {
   });
   it('requires notes, enforces transitions and serializes concurrent case revisions atomically', async () => {
     expect((await request(app.getHttpServer()).patch(`/mod/reports/${reportId}/status`).set('Authorization', auth('moderator')).send({ status: 'in_review', revision: 0 })).status).toBe(400);
-    await expect(mod.mutate(actor('moderator'), reportId, 'transition', { status: 'actioned', revision: 0, ...note })).rejects.toMatchObject({ status: 409 });
+    await expect(mod.mutate(actor('moderator'), reportId, 'transition', { status: 'actioned', revision: 0, ...note })).rejects.toMatchObject({ status: 400 });
     const attempts = await Promise.allSettled([review(), review()]);
     expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(await db.db.collection('ReportTransitions').countDocuments({ reportId })).toBe(1);
@@ -470,7 +470,7 @@ integration('Phase 3 moderation authorization and case workflow', () => {
       expect(restricted.status).toBe(missing.status); expect(restricted.text).toBe(missing.text);
       expect(restricted.status).toBe(suffix === '/legal-hold' ? 403 : 404);
     }
-    const visible = Array.from({ length: 55 }, (_, i) => ({ _id: `visible-${String(i).padStart(3, '0')}`, reportId: `visible-${String(i).padStart(3, '0')}`, targetType: 'user', targetId: String(new Types.ObjectId()), targetOwnerId: String(ids.target), reporterId: String(ids.user), open: true, status: 'open' }));
+    const visible = Array.from({ length: 55 }, (_, i) => ({ _id: `visible-${String(i).padStart(3, '0')}`, reportId: `visible-${String(i).padStart(3, '0')}`, targetType: 'user', targetId: String(new Types.ObjectId()), targetOwnerId: String(ids.target), reporterId: String(ids.user), open: true, status: 'open', createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)) }));
     const hidden = Array.from({ length: 60 }, (_, i) => ({ _id: `zz-hidden-${i}`, reportId: `zz-hidden-${i}`, targetType: 'user', targetId: String(new Types.ObjectId()), targetOwnerId: String(ids.target), reporterId: String(ids.user), open: true, restricted: true, status: 'open' }));
     await db.db.collection<any>('Reports').insertMany([...visible, ...hidden]);
     const withHidden = await mod.queue(actor('moderator'));

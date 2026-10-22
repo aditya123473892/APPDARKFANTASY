@@ -6,7 +6,7 @@ import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
 import { displayName, type UserSummary } from '@/features/auth/userModel';
 import { ServiceError } from '@/services/errors';
-import type { CommentPage, Post, PostAuthor, PostComment } from '../types';
+import type { CommentPage, Post, PostAuthor, PostComment, PostMedia } from '../types';
 import type { FeedService } from './feedService';
 export type BackendPost = {
   _id: string;
@@ -15,6 +15,9 @@ export type BackendPost = {
   createdAt: string;
   visibility?: string;
   status?: string;
+  /** Current API: per-image signed URL plus the stored pixel size (null for legacy uploads). */
+  images?: { url?: string; width?: number | null; height?: number | null }[];
+  /** Legacy API shape, kept for older servers. */
   media?: { url?: string; mimetype?: string }[];
   likes?: (string | { user?: string | UserSummary })[];
   comments?: (string | BackendComment)[];
@@ -52,6 +55,23 @@ export function mapComment(comment: BackendComment): PostComment | null {
     createdAt: comment.createdAt,
   };
 }
+/** 0 width/height means "unknown"; the gallery then measures the loaded image. */
+export function mapPostMedia(raw: Pick<BackendPost, 'images' | 'media'>): PostMedia[] {
+  const size = (value?: number | null) =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+  if (raw.images)
+    return raw.images
+      .filter((image) => mediaUrl(image.url))
+      .map((image) => ({
+        uri: mediaUrl(image.url),
+        width: size(image.width),
+        height: size(image.height),
+        mimetype: 'image/jpeg',
+      }));
+  return (raw.media ?? [])
+    .filter((m) => mediaUrl(m.url))
+    .map((m) => ({ uri: mediaUrl(m.url), width: 0, height: 0, mimetype: m.mimetype }));
+}
 export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
   if (!raw?._id || !raw.createdAt) throw new ServiceError('UNKNOWN');
   const likes = raw.likes ?? [];
@@ -61,9 +81,7 @@ export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
     body: raw.caption ?? '',
     createdAt: raw.createdAt,
     user: author(raw.user, fallbackAuthor),
-    media: (raw.media ?? [])
-      .filter((m) => mediaUrl(m.url))
-      .map((m) => ({ uri: mediaUrl(m.url), width: 16, height: 12, mimetype: m.mimetype })),
+    media: mapPostMedia(raw),
     likes: raw.likeCount ?? likes.length,
     replies: raw.commentCount ?? raw.comments?.length ?? 0,
     liked: serverState

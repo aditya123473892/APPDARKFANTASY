@@ -285,7 +285,7 @@ export class ChatService {
       .select('username displayname avatar firstName lastName');
     return messages.map((message) => ({
       ...this.toClientMessage(message),
-      ...(ids.has(String(message.sender)) ? { media: [] } : {}),
+      ...(ids.has(String(message.sender)) ? { message: '', media: [] } : {}),
       sender:
         senders.find((user) => String(user._id) === String(message.sender)) ||
         String(message.sender),

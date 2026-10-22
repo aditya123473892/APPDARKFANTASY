@@ -15,6 +15,7 @@ import { useTheme } from '@/theme/useTheme';
 import { spacing } from '@/theme';
 import { useBlock } from '@/features/safety/useBlock';
 import { useBlockState } from '@/features/safety/blockState';
+import { isServiceError } from '@/services/errors';
 export function UserProfileScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const myId = useCurrentUserId();
@@ -30,6 +31,7 @@ export function UserProfileScreen() {
   const follow = useFollowUser(id);
   const block = useBlock();
   const blocked = useBlockState((state) => state.ids.includes(id));
+  const unblocking = useBlockState((state) => state.pending.includes(id));
   if (id === myId) return <Redirect href="/profile" />;
   return (
     <Screen padded={false}>
@@ -49,9 +51,20 @@ export function UserProfileScreen() {
         <Header title="Profile" back backFallback="/discover" />
         <Button label="Report user" variant="secondary" onPress={() => router.push({ pathname: '/report' as never, params: { targetType: 'user', targetId: id } })} />
         {blocked ? (
-          <EmptyState title="User not found" message="This profile is unavailable." />
+          <>
+            <EmptyState title="You blocked this user" message="Unblock to see their profile again." />
+            <Button
+              label="Unblock"
+              variant="secondary"
+              loading={unblocking}
+              disabled={unblocking}
+              onPress={() => block.mutate({ id, blocked: false })}
+            />
+          </>
         ) : profile.isPending ? (
           <Loader />
+        ) : isServiceError(profile.error, 'NOT_FOUND') ? (
+          <EmptyState title="User not found" message="This profile is unavailable." />
         ) : profile.isError || !profile.data ? (
           <ErrorState onRetry={() => void profile.refetch()} />
         ) : (

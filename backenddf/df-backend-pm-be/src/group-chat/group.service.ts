@@ -38,7 +38,20 @@ export class GroupService {
       admin: actorId,
       members: uniqueMembers,
     });
-    return newGroup.save();
+    const saved = await newGroup.save();
+    // A block committed between the check and the save must still win.
+    try {
+      await this.assertStillVisible(actorId, members);
+    } catch (error) {
+      await this.groupModel.deleteOne({ _id: saved._id });
+      throw error;
+    }
+    return saved;
+  }
+
+  private async assertStillVisible(actorId: string, members: string[]) {
+    for (const member of members)
+      await this.blocks.assertVisible(actorId, member);
   }
 
   async addMembers(
@@ -56,6 +69,7 @@ export class GroupService {
     for (const member of members)
       await this.blocks.assertVisible(actorId, member);
     const memberObjectIds = members.map((member) => new Types.ObjectId(member));
+    const previous = new Set(group.members.map(String));
 
     group.members = Array.from(
       new Set([
@@ -64,7 +78,18 @@ export class GroupService {
       ]),
     ).map((id) => new Types.ObjectId(id));
 
-    return group.save();
+    const saved = await group.save();
+    try {
+      await this.assertStillVisible(actorId, members);
+    } catch (error) {
+      const added = memberObjectIds.filter((id) => !previous.has(String(id)));
+      await this.groupModel.updateOne(
+        { _id: group._id },
+        { $pull: { members: { $in: added } } },
+      );
+      throw error;
+    }
+    return saved;
   }
 
   async removeMembers(

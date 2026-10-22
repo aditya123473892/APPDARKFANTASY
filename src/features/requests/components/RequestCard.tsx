@@ -5,6 +5,7 @@ import { Avatar, Button, Chip, Text } from '@/components/ui';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { formatTimeAgo } from '@/utils/formatters';
+import { useBlock } from '@/features/safety/useBlock';
 import type { ConnectionRequest } from '../types';
 
 export const RequestCard = memo(function RequestCard({
@@ -27,6 +28,7 @@ export const RequestCard = memo(function RequestCard({
   onCancel: (request: ConnectionRequest) => void;
 }): React.JSX.Element {
   const { theme } = useTheme();
+  const block = useBlock();
   const { user } = request;
   const incoming = request.direction === 'incoming';
   return (
@@ -106,6 +108,14 @@ export const RequestCard = memo(function RequestCard({
               onPress={() => onAccept(request)}
               style={styles.action}
               accessibilityLabel={`Accept ${user.name}'s request`}
+            />
+            <Button
+              label="Block"
+              variant="ghost"
+              size="sm"
+              disabled={disabled || busy}
+              onPress={() => block.confirm(user.id)}
+              accessibilityLabel={`Block ${user.name}`}
             />
           </>
         ) : (

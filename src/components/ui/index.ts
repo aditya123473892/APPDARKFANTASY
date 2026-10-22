@@ -13,6 +13,7 @@ export * from './OTPInput';
 export * from './PasswordInput';
 export * from './Skeleton';
 export * from './EmptyState';
+export * from './FitImage';
 export * from './PostCard';
 export * from './Tabs';
 export * from './Text';
