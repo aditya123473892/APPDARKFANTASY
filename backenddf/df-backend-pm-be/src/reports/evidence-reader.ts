@@ -38,6 +38,7 @@ export async function readReportSource(
   const collection = {
     user: 'Users',
     post: 'Posts',
+    comment: 'Comments',
     event: 'Events',
     group: 'Groups',
     chat_message: 'ChatMessages',
@@ -130,40 +131,56 @@ export async function readReportSource(
     if (!source.members?.some((id) => String(id) === reporter) && !former)
       throw new ForbiddenException('Prior group membership required');
   } else {
+    // A comment is reportable exactly when its parent post is visible to the
+    // reporter, and the comment itself is not hidden from them.
+    const comment = collection === 'Comments';
+    const parent = comment
+      ? await one('Posts', { _id: oid(String(source.post)) })
+      : source;
+    if (!parent) throw new NotFoundException('Reported content is unavailable');
+    const parentCollection = comment ? 'Posts' : collection;
+    const parentOwner = comment ? String(parent.user) : owner;
+    const owners = [...new Set([owner, parentOwner])];
     const receipt = await one('ReportAccess', {
       viewerId: reporter,
-      resource: `${collection}:${sourceId}`,
+      resource: `${parentCollection}:${parent._id}`,
     });
-    if (!receipt) {
+    if (!receipt || comment) {
       const pair = await one('UserBlocks', {
-        $or: [
-          { blockerId: oid(reporter), blockedId: oid(owner) },
-          { blockerId: oid(owner), blockedId: oid(reporter) },
-        ],
+        $or: owners.flatMap((id) => [
+          { blockerId: oid(reporter), blockedId: oid(id) },
+          { blockerId: oid(id), blockedId: oid(reporter) },
+        ]),
       });
       const restricted = await one('RestrictedContent', {
-        $or: [{ _id: `${collection}:${sourceId}` }, { _id: `Users:${owner}` }],
+        $or: [
+          { _id: `${collection}:${sourceId}` },
+          { _id: `${parentCollection}:${parent._id}` },
+          ...owners.map((id) => ({ _id: `Users:${id}` })),
+        ],
       });
-      let visible = !pair && !source.deletedAt && !restricted;
+      let visible =
+        !pair && !source.deletedAt && !parent.deletedAt && !restricted;
       if (collection === 'Users')
         visible &&= !source.isBlocked && !source.deletionRequestedAt;
-      if (collection === 'Posts') {
-        visible &&= source.status === 'approved';
-        if (source.visibility === 'friends')
+      // A prior-access receipt on the parent post stands in for these checks.
+      if (parentCollection === 'Posts' && !receipt) {
+        visible &&= parent.status === 'approved';
+        if (parent.visibility === 'friends')
           visible &&= !!(await one('follows', {
             follower: oid(reporter),
-            following: oid(owner),
+            following: oid(parentOwner),
             status: 'accepted',
           }));
-        else if (source.visibility === 'private')
+        else if (parent.visibility === 'private')
           visible &&= !!(await one('PostRequest', {
-            userId: { $in: [owner, oid(owner)] },
+            userId: { $in: [parentOwner, oid(parentOwner)] },
             requestedUserId: { $in: [reporter, oid(reporter)] },
             status: 'accepted',
             startTime: { $lte: new Date() },
             endTime: { $gte: new Date() },
           }));
-        else visible &&= source.visibility === 'public';
+        else visible &&= parent.visibility === 'public';
       }
       if (!visible)
         throw new ForbiddenException('Verified prior access required');
@@ -207,6 +224,7 @@ export async function readReportSource(
     senderId: row.sender ? String(row.sender) : undefined,
     timestamp: row.sentAt || row.createdAt,
     message: row.message,
+    content: row.content,
     caption: row.caption,
     displayname: row.displayname,
     bio: row.bio,

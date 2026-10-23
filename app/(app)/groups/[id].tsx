@@ -233,7 +233,21 @@ export default function GroupInfo(): React.JSX.Element {
                     setEditing(true);
                   }}
                 />
-              ) : null}
+              ) : (
+                <Button
+                  label="Report group"
+                  icon="flag-outline"
+                  variant="ghost"
+                  size="sm"
+                  fullWidth={false}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/report' as never,
+                      params: { targetType: 'group', targetId: id },
+                    })
+                  }
+                />
+              )}
             </>
           )}
         </View>

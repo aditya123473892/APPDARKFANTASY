@@ -852,7 +852,25 @@ integration('Phase 2 report preservation', () => {
       spy.mockRestore();
     }
   });
+  it('releases holds of expired resolved cases when evidence copying is off, deleting no evidence bytes', async () => {
+    const saved = await reports.intake(String(b), body());
+    await db.db
+      .collection<any>('Reports')
+      .updateOne(
+        { _id: saved.reportId },
+        { $set: { status: 'dismissed', open: false, resolvedAt: new Date(0) } },
+      );
+    await reports.retainEvidence();
+    expect(storage.deleteOne).not.toHaveBeenCalled();
+    expect(
+      await db.db.collection('ReportEvidence').countDocuments({ reportId: saved.reportId }),
+    ).toBe(0);
+    expect(
+      (await db.db.collection('ReportHolds').findOne({ reportId: saved.reportId })).active,
+    ).toBe(false);
+  });
   it('retains unresolved, legal-held, restricted and pending-copy evidence; purges eligible evidence after ninety days', async () => {
+    process.env.REPORT_EVIDENCE_COPY = 'on';
     const saved = await reports.intake(String(b), body());
     await reports.retainEvidence();
     expect(storage.deleteOne).not.toHaveBeenCalled();
@@ -864,7 +882,6 @@ integration('Phase 2 report preservation', () => {
       );
     await reports.retainEvidence();
     expect(storage.deleteOne).not.toHaveBeenCalled();
-    process.env.REPORT_EVIDENCE_COPY = 'on';
     await reports.processEvidence();
     await db.db
       .collection<any>('Reports')
@@ -950,8 +967,11 @@ integration('Phase 2 report preservation', () => {
     ).toBe(true);
   });
   it.each(['post', 'event', 'media'])('returns byte-identical HTTP success for %s deletion with or without a hold', async (type) => {
+    // Keep the frozen clock near MongoDB's real heartbeat time. Restoring a clock
+    // frozen months in the past makes Mongoose treat a healthy connection as stale.
+    const now = new Date();
     jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'hrtime'] });
-    jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    jest.setSystemTime(now);
     try {
       const collection = type === 'post' ? 'Posts' : type === 'event' ? 'Events' : 'ChatMessages';
       const id = type === 'post' ? post : type === 'event' ? event : message;
@@ -1113,5 +1133,98 @@ integration('Phase 2 report preservation', () => {
     expect(storage.deleteOne).not.toHaveBeenCalledWith(key);
     expect(await db.db.collection('PhotoDeletionJobs').findOne({ key })).not.toBeNull();
     expect((await db.db.collection<any>('ReportHolds').findOne({ _id: saved.reportId })).active).toBe(true);
+  });
+  it('reports a comment only when its parent post is visible to the reporter', async () => {
+    const comment = new Types.ObjectId(),
+      hidden = new Types.ObjectId(),
+      privatePost = new Types.ObjectId();
+    await db.db.collection('Posts').insertOne({
+      _id: privatePost,
+      user: a,
+      status: 'approved',
+      visibility: 'private',
+      media: [],
+    });
+    await db.db.collection('Comments').insertMany([
+      { _id: comment, user: a, post, content: 'Original comment' },
+      { _id: hidden, user: a, post: privatePost, content: 'Hidden comment' },
+    ]);
+    const saved = await reports.intake(String(b), body('comment', String(comment)));
+    expect(saved.targetOwnerId).toBe(String(a));
+    const evidence = await db.db
+      .collection<any>('ReportEvidence')
+      .findOne({ reportId: saved.reportId });
+    expect(evidence.snapshot.content).toBe('Original comment');
+    await expect(
+      reports.intake(String(b), body('comment', String(hidden))),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      reports.intake(String(a), body('comment', String(comment))),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      reports.intake(String(b), body('comment', String(new Types.ObjectId()))),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+  it('hides child-safety targets instantly only for eligible reporters; every such report is queued', async () => {
+    await db.db
+      .collection('Users')
+      .updateOne({ _id: b }, { $set: { isEmailVerified: false } });
+    const unverified = await reports.intake(String(b), {
+      targetType: 'user',
+      targetId: String(a),
+      category: 'underage',
+    });
+    expect(await db.db.collection('RestrictedContent').countDocuments({})).toBe(0);
+    expect(
+      await db.db.collection<any>('Reports').findOne({ _id: unverified.reportId }),
+    ).toMatchObject({ restricted: true, priority: 'highest', eligible: false });
+    expect(
+      await db.db.collection<any>('ReportReviewQueue').findOne({ _id: String(a) }),
+    ).toMatchObject({ restricted: true, priority: 'highest' });
+    await reports.intake(String(c), {
+      targetType: 'user',
+      targetId: String(a),
+      category: 'underage',
+    });
+    expect(
+      await db.db.collection<any>('RestrictedContent').countDocuments({ _id: `Users:${a}` }),
+    ).toBe(1);
+  });
+  it('rate-limits rejected intakes so private content IDs cannot be enumerated', async () => {
+    process.env.REPORT_FAILED_HOURLY_LIMIT = '2';
+    try {
+      for (let i = 0; i < 2; i++)
+        await expect(
+          reports.intake(String(b), body('post', String(new Types.ObjectId()))),
+        ).rejects.toMatchObject({ status: 404 });
+      expect(await db.db.collection('Reports').countDocuments({})).toBe(0);
+      // Even a valid target is refused until the window passes.
+      await expect(reports.intake(String(b), body())).rejects.toMatchObject({
+        status: 429,
+      });
+      expect(await db.db.collection('Reports').countDocuments({})).toBe(0);
+      expect((await reports.intake(String(c), body('post', String(post)))).status).toBe('open');
+    } finally {
+      delete process.env.REPORT_FAILED_HOURLY_LIMIT;
+    }
+  });
+  it('lists My reports newest first across pages although report IDs are random', async () => {
+    const rows = [3, 1, 4, 2, 5].map((minute) => ({
+      _id: randomUUID(),
+      reportId: '',
+      reporterId: String(b),
+      status: 'open',
+      createdAt: new Date(Date.UTC(2026, 0, 1, 0, minute)),
+    }));
+    rows.forEach((row) => (row.reportId = row._id));
+    await db.db.collection<any>('Reports').insertMany(rows);
+    const first = await reports.mine(String(b), undefined, 2);
+    const second = await reports.mine(String(b), first.nextCursor!, 2);
+    const third = await reports.mine(String(b), second.nextCursor!, 2);
+    const minutes = [...first.reports, ...second.reports, ...third.reports].map(
+      (row: any) => new Date(row.createdAt).getUTCMinutes(),
+    );
+    expect(minutes).toEqual([5, 4, 3, 2, 1]);
+    expect(third.nextCursor).toBeNull();
   });
 });

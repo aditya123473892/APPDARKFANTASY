@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Connection } from 'mongoose';
 export async function blockIndexes(
   db: Connection,
@@ -29,4 +30,29 @@ export async function blockIndexes(
   await rows.createIndex({ blockedId: 1 }, { name: 'blocked_user' });
   await rows.createIndex({ blockerId: 1, _id: -1 }, { name: 'block_page' });
   return duplicates;
+}
+
+export const BLOCK_INDEX_NAMES = ['block_pair_unique', 'blocked_user', 'block_page'];
+
+/** Startup check when indexes are operator-managed: never creates, only warns. */
+export async function warnMissingBlockIndexes(
+  db: Connection,
+  warn = (message: string) => Logger.warn(message, 'BlockService'),
+) {
+  try {
+    const names = new Set(
+      (await db.db.collection('UserBlocks').listIndexes().toArray()).map(
+        (index) => index.name,
+      ),
+    );
+    const missing = BLOCK_INDEX_NAMES.filter((name) => !names.has(name));
+    if (missing.length)
+      warn(
+        `UserBlocks indexes missing (${missing.join(', ')}); every request scans the collection. Run scripts/user-block-indexes.ts --apply.`,
+      );
+  } catch (error: any) {
+    // A collection that does not exist yet has no indexes and no rows to scan.
+    if (error?.codeName !== 'NamespaceNotFound')
+      warn(`Could not verify UserBlocks indexes: ${error?.message || error}`);
+  }
 }

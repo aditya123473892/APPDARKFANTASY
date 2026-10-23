@@ -1,5 +1,5 @@
 import { forwardRef, useState } from 'react';
-import { StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
+import { StyleSheet, TextInput, View, type TextInputProps, type TextInputInstance } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Text } from './Text';
@@ -14,7 +14,7 @@ type InputProps = TextInputProps & {
   showCount?: boolean;
 };
 
-export const Input = forwardRef<TextInput, InputProps>(function Input(
+export const Input = forwardRef<TextInputInstance, InputProps>(function Input(
   {
     label,
     error,

@@ -19,26 +19,30 @@ export const safetyQuery = (key: readonly unknown[]) =>
     'posts',
   ].includes(String(key[0]));
 /** Cached group text remains available, but is collapsed and never opens media. */
-export function redactCached(value: any, peer: string): any {
+export function redactCached(value: unknown, peer: string): unknown {
   if (Array.isArray(value))
     return value.map((item) => redactCached(item, peer)).filter((item) => item !== undefined);
   if (!value || typeof value !== 'object') return value;
+  const row = value as Record<string, unknown>;
+  const hasPeerId = (candidate: unknown) =>
+    candidate !== null && typeof candidate === 'object' &&
+    (('id' in candidate && candidate.id === peer) ||
+      ('_id' in candidate && candidate._id === peer));
   if (
-    typeof value.conversationId === 'string' &&
-    value.conversationId.startsWith('group:') &&
-    value.senderId === peer
+    typeof row.conversationId === 'string' &&
+    row.conversationId.startsWith('group:') &&
+    row.senderId === peer
   )
     return { ...value, blockedSender: true };
   if (
-    value.id === `user:${peer}` ||
-    value.id === peer ||
-    value._id === peer ||
-    value.authorId === peer ||
-    value.author?.id === peer ||
-    value.user?.id === peer ||
-    value.user?._id === peer ||
-    value.senderId === peer ||
-    value.actor?.id === peer
+    row.id === `user:${peer}` ||
+    row.id === peer ||
+    row._id === peer ||
+    row.authorId === peer ||
+    hasPeerId(row.author) ||
+    hasPeerId(row.user) ||
+    row.senderId === peer ||
+    hasPeerId(row.actor)
   )
     return undefined;
   return Object.fromEntries(

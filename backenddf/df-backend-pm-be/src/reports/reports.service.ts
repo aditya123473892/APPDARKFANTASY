@@ -15,6 +15,15 @@ import { readReportSource } from './evidence-reader';
 import { reportInput, sanitizeReportText } from './report-input';
 import { preservationGate } from './preservation';
 import { reportIndexes } from './report-indexes';
+export function encodeReportCursor(row: { createdAt: Date; reportId: string }) {
+  return `${new Date(row.createdAt).getTime()}_${row.reportId}`;
+}
+export function decodeReportCursor(value?: string) {
+  const match = /^(\d{1,15})_([\w-]{1,100})$/.exec(value || '');
+  return match
+    ? { createdAt: new Date(Number(match[1])), id: match[2] }
+    : undefined;
+}
 const REPORT_TRANSACTION = {
   readConcern: { level: 'snapshot' as const },
   writeConcern: { w: 'majority' as const },
@@ -64,6 +73,7 @@ export class ReportsService implements OnModuleInit {
         'Invalid report: choose a valid target/category and a note of at most 500 characters',
       );
     const input = parsed.data;
+    await this.assertNotProbing(reporterId);
     return preservationGate(this.db, async () => {
       const session = await this.db.startSession();
       let result: any;
@@ -206,28 +216,36 @@ export class ReportsService implements OnModuleInit {
             );
           }
           if (restricted) {
-            await this.db.db.collection<any>('RestrictedContent').updateOne(
-              { _id: `${source.collection}:${source.sourceId}` },
-              {
-                $setOnInsert: {
-                  collection: source.collection,
-                  contentId: source.sourceId,
-                  ownerId: source.owner,
-                  reportId,
-                  createdAt: now,
+            // Only an eligible (verified, non-abusive) reporter can hide content
+            // instantly; otherwise one throwaway account could take anyone down.
+            // Every child-safety report still enters the highest-priority queue.
+            if (eligible)
+              await this.db.db.collection<any>('RestrictedContent').updateOne(
+                { _id: `${source.collection}:${source.sourceId}` },
+                {
+                  $setOnInsert: {
+                    collection: source.collection,
+                    contentId: source.sourceId,
+                    ownerId: source.owner,
+                    reportId,
+                    createdAt: now,
+                  },
                 },
-              },
-              { upsert: true, session },
-            );
+                { upsert: true, session },
+              );
             await this.db.db.collection<any>('StaffAuditLog').insertOne(
               {
                 actorId: 'system',
                 role: 'system',
-                action: 'restricted_preservation_escalated',
+                action: eligible
+                  ? 'restricted_preservation_escalated'
+                  : 'restricted_report_queued_unverified',
                 reportId,
                 targetUserId: source.owner,
                 contentId: source.sourceId,
-                reason: 'Child-safety intake; admin/root review required',
+                reason: eligible
+                  ? 'Child-safety intake; admin/root review required'
+                  : 'Child-safety intake from ineligible reporter; content not hidden pending review',
                 timestamp: now,
               },
               { session },
@@ -302,6 +320,8 @@ export class ReportsService implements OnModuleInit {
           result = { reportId, status: 'open', targetOwnerId: source.owner };
         }, REPORT_TRANSACTION);
       } catch (error) {
+        if ([403, 404].includes(error.getStatus?.()))
+          await this.recordFailedAttempt(reporterId);
         if (error.getStatus?.() === 429) {
           const policies = this.db.db.collection<any>('ReportReporterPolicies'),
             day = Math.floor(Date.now() / 86400000);
@@ -349,20 +369,70 @@ export class ReportsService implements OnModuleInit {
       return result;
     });
   }
+  /**
+   * Rejected intakes (404 missing / 403 no access) insert no Report, so the
+   * per-report limits never see them. Cap them separately: otherwise the
+   * 404-vs-403 difference lets a script enumerate private content IDs.
+   */
+  private async assertNotProbing(reporterId: string) {
+    const policy = await this.db.db
+      .collection<any>('ReportReporterPolicies')
+      .findOne({ _id: reporterId });
+    if (
+      policy?.failedHour === Math.floor(Date.now() / 3600000) &&
+      policy.failedHits >= this.setting('REPORT_FAILED_HOURLY_LIMIT', 20, 200)
+    )
+      throw new HttpException('Too many reports; please try again later', 429);
+  }
+  private async recordFailedAttempt(reporterId: string) {
+    const hour = Math.floor(Date.now() / 3600000);
+    await this.db.db.collection<any>('ReportReporterPolicies').updateOne(
+      { _id: reporterId },
+      [
+        {
+          $set: {
+            failedHour: hour,
+            failedHits: {
+              $cond: [
+                { $eq: ['$failedHour', hour] },
+                { $add: [{ $ifNull: ['$failedHits', 0] }, 1] },
+                1,
+              ],
+            },
+          },
+        },
+      ],
+      { upsert: true },
+    );
+  }
   async mine(reporterId: string, before?: string, requestedLimit = 20) {
     const limit = Math.min(100, Math.max(1, Number(requestedLimit) || 20));
+    // Report IDs are random UUIDs, so page newest-first by createdAt with the
+    // ID as a tiebreak. The cursor is opaque to the client.
+    const cursor = decodeReportCursor(before);
     const rows = await this.db.db
-      .collection('Reports')
+      .collection<any>('Reports')
       .find(
-        { reporterId, ...(before ? { _id: { $lt: before } } : {}) } as any,
+        {
+          reporterId,
+          ...(cursor
+            ? {
+                $or: [
+                  { createdAt: { $lt: cursor.createdAt } },
+                  { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+                ],
+              }
+            : {}),
+        } as any,
         { projection: { _id: 0, reportId: 1, status: 1, createdAt: 1 } },
       )
-      .sort({ _id: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .limit(limit + 1)
       .toArray();
+    const last = rows[limit - 1];
     return {
       reports: rows.slice(0, limit),
-      nextCursor: rows.length > limit ? rows[limit - 1].reportId : null,
+      nextCursor: rows.length > limit ? encodeReportCursor(last) : null,
     };
   }
   async notices(reporterId: string) {
@@ -469,9 +539,17 @@ export class ReportsService implements OnModuleInit {
           .collection<any>('ReportEvidenceJobs')
           .find({ reportId: candidate.reportId })
           .toArray();
-        if (jobs.some((job) => job.state !== 'copied')) continue;
+        // While copying is enabled, wait for pending copies. With copying off they
+        // can never complete: skipping them kept holds active forever, so the
+        // reported user's deleted photos were never removed. Copies run under this
+        // same gate, so only 'copied' jobs have an evidence object to delete.
+        if (
+          (process.env.REPORT_EVIDENCE_COPY || 'off') === 'on' &&
+          jobs.some((job) => job.state === 'copy_pending')
+        )
+          continue;
         // Re-read status/hold immediately before EACH irreversible storage delete.
-        for (const job of jobs) {
+        for (const job of jobs.filter((row) => row.state === 'copied')) {
           if (!(await reports.findOne({ _id: candidate._id, ...eligible })))
             break;
           await this.storage.deleteOne(job.destinationKey);

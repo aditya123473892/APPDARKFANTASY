@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, type ComponentRef } from 'react';
 import { StyleSheet, Text as RNText, type TextProps as RNTextProps } from 'react-native';
 
 import { typography } from '@/theme';
@@ -13,7 +13,7 @@ type TextProps = RNTextProps & {
   center?: boolean;
 };
 
-export const Text = forwardRef<RNText, TextProps>(function Text(
+export const Text = forwardRef<ComponentRef<typeof RNText>, TextProps>(function Text(
   { variant = 'body', color = 'default', weight, center, serif, style, ...props },
   ref,
 ) {

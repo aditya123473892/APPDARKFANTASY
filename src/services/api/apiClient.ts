@@ -73,7 +73,7 @@ apiClient.interceptors.response.use(
           response.config.url === '/auth/me' &&
             response.data.message === 'Account blocked!, contact administrator Dark Fantasy',
         );
-      else if (response.config.url !== '/auth/me')
+      else if (!['/auth/me', '/reports'].includes(response.config.url || ''))
         await notifyForbidden(response.config.headers.Authorization);
       throw new AxiosError(
         response.data.statusCode === 403
@@ -96,7 +96,9 @@ apiClient.interceptors.response.use(
         config?.url === '/auth/me' &&
           error.response?.data?.message === 'Account blocked!, contact administrator Dark Fantasy',
       );
-    if (error.response?.status === 403) {
+    // A report 403 means "not reportable" (own content, no prior access), not a
+    // revoked role: keep its message and skip the session-wide permission refresh.
+    if (error.response?.status === 403 && config?.url !== '/reports') {
       error.message = 'You are not permitted to perform this action.';
       if (config?.url !== '/auth/me') await notifyForbidden(config?.headers.Authorization);
     }

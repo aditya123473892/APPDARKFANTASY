@@ -22,7 +22,7 @@ export async function store(owner: string, id: string, bytes: Uint8Array): Promi
     partial = `${path}.partial`;
   // Ordinary JPEGs in private app storage; no additional image encryption.
   try {
-    new File(partial).write(bytes);
+    await new File(partial).write(bytes);
     await FS.moveAsync({ from: partial, to: path });
   } finally {
     await FS.deleteAsync(partial, { idempotent: true });
@@ -42,7 +42,7 @@ export async function temporaryFile(bytes: Uint8Array): Promise<string> {
   const dir = tempDirectory();
   await FS.makeDirectoryAsync(dir, { intermediates: true });
   const uri = `${dir}${uuid()}.jpg`;
-  new File(uri).write(bytes);
+  await new File(uri).write(bytes);
   return uri;
 }
 export async function removeTemp(uri: string): Promise<void> {

@@ -72,7 +72,7 @@ export function EventsScreen() {
           ListHeaderComponent={
             query.isError ? (
               <Text color="danger">Could not refresh events. Pull down to try again.</Text>
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={
             <EmptyState

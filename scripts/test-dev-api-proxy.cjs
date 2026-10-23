@@ -3,10 +3,36 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { createDevApiProxy } = require('./dev-api-proxy.cjs');
 
-async function listen(server) {
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+async function listen(server, hostname = '127.0.0.1') {
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, hostname, resolve);
+  });
   return server.address().port;
 }
+
+test('IPv6 backend selection reaches login with the correct Host header', async (t) => {
+  const backend = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ path: req.url, host: req.headers.host }));
+    });
+  });
+  const backendPort = await listen(backend, '::1');
+  const proxy = http.createServer(createDevApiProxy(() => {}, backendPort, '::1'));
+  const port = await listen(proxy);
+  t.after(() => {
+    proxy.closeAllConnections(); proxy.close();
+    backend.closeAllConnections(); backend.close();
+  });
+  const result = await fetch(`http://127.0.0.1:${port}/api/auth/login`, { method: 'POST' });
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), {
+    path: '/api/auth/login', host: `[::1]:${backendPort}`,
+  });
+  assert.throws(() => createDevApiProxy(() => {}, 9000, 'example.com'), /loopback/);
+});
 
 test('Metro proxy forwards API bodies, auth headers, uploads and Socket.IO polling', async (t) => {
   const backend = http.createServer((req, res) => {

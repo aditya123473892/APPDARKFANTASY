@@ -8,6 +8,7 @@ import { preservationGate } from './preservation';
 import { actionInput, assignInput, holdInput, parseMod, transitionInput } from './mod-input';
 import { BlockService } from '../user-blocks/block.service';
 import { protectLastRoot } from '../users/role-policy';
+import { decodeReportCursor, encodeReportCursor } from './reports.service';
 
 type Actor = { id: string; roles: string[] };
 @Injectable()
@@ -29,13 +30,18 @@ export class ModService {
     return { ...safe, revision: report.revision || 0 };
   }
   async queue(actor: Actor, before?: string) {
+    // Report IDs are random UUIDs: page by createdAt, ID as tiebreak.
+    const cursor = decodeReportCursor(before);
     const rows = await this.db.db.collection<any>('Reports').find({ ...this.scope(actor), open: true,
-      ...(before ? { _id: { $lt: before } } : {}) }, { projection: { details: 0, evidenceSnapshotRefs: 0 } })
-      .sort({ _id: -1 }).limit(51).toArray();
-    return { cases: rows.slice(0, 50).map((row) => this.safe(row)), nextCursor: rows.length > 50 ? rows[49].reportId : null };
+      ...(cursor ? { $or: [{ createdAt: { $lt: cursor.createdAt } }, { createdAt: cursor.createdAt, _id: { $lt: cursor.id } }] } : {}) },
+      { projection: { details: 0, evidenceSnapshotRefs: 0 } })
+      .sort({ createdAt: -1, _id: -1 }).limit(51).toArray();
+    return { cases: rows.slice(0, 50).map((row) => this.safe(row)), nextCursor: rows.length > 50 ? encodeReportCursor(rows[49]) : null };
   }
   async detail(actor: Actor, id: string) {
     const report = await this.case(actor, id);
+    // Snapshots can hold private DM text: every read is audited, and refused if the audit cannot be written.
+    await this.auditCase(actor, report, report.restricted ? 'restricted_case_view' : 'case_view');
     // No source or destination storage keys. Images require the separate audited route.
     const evidence = await this.db.db.collection<any>(report.restricted ? 'RestrictedReportEvidence' : 'ReportEvidence')
       .find({ reportId: id }, { projection: { snapshot: 1, context: 1, 'images.evidenceId': 1, 'images.state': 1 } }).toArray();
@@ -137,7 +143,7 @@ export class ModService {
           }
           if (kind === 'action' && input.action === 'soft_remove') {
             const evidence = await this.db.db.collection<any>(report.restricted ? 'RestrictedReportEvidence' : 'ReportEvidence').findOne({ reportId: id }, { session });
-            const collection = { user: 'Users', post: 'Posts', event: 'Events', group: 'Groups', chat_message: 'ChatMessages', chat_media: 'ChatMessages' }[report.targetType];
+            const collection = { user: 'Users', post: 'Posts', comment: 'Comments', event: 'Events', group: 'Groups', chat_message: 'ChatMessages', chat_media: 'ChatMessages' }[report.targetType];
             const contentId = report.messageId || report.targetId;
             await this.db.db.collection<any>('RestrictedContent').updateOne({ _id: `${collection}:${contentId}` },
               { $setOnInsert: { collection, contentId, ownerId: report.targetOwnerId, reportId: id, createdAt: new Date(), reason: 'moderation_removed' } }, { upsert: true, session });
@@ -150,7 +156,7 @@ export class ModService {
             }
           }
           if (status && ['actioned', 'dismissed'].includes(status)) {
-            await this.notice(report.reporterId, status === 'actioned' ? 'Action taken' : 'No violation found', session);
+            await this.notice(report.reporterId, status === 'actioned' ? 'Action taken' : 'No violation found', session, id);
             if (status === 'actioned') await this.notice(report.targetOwnerId, 'Your content or account violated our content policy. Please review the policy.', session);
           }
         }, { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } });
@@ -163,9 +169,9 @@ export class ModService {
       return this.safe(await this.case(actor, id));
     });
   }
-  private async notice(receiver: string, message: string, session: any) {
+  private async notice(receiver: string, message: string, session: any, reportId?: string) {
     if (!await this.db.db.collection('Users').findOne({ _id: new Types.ObjectId(receiver) }, { session })) return;
     await this.db.db.collection('Notifications').insertOne({ receiver: new Types.ObjectId(receiver), sender: null,
-      type: 'moderation_notice', message, metadata: { systemNotice: true }, isRead: false, createdAt: new Date() }, { session });
+      type: 'moderation_notice', message, metadata: { systemNotice: true, ...(reportId ? { reportId } : {}) }, isRead: false, createdAt: new Date() }, { session });
   }
 }

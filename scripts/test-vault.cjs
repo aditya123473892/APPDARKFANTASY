@@ -25,7 +25,7 @@ function load(file, modules = {}) {
 }
 const crypto = load('src/features/vault/crypto.ts', {
   // Deliberately do not mock a native crypto module: checksum tests run the real JS library.
-  'expo-modules-core': { uuid: { v4: require('node:crypto').randomUUID } },
+  expo: { uuid: { v4: require('node:crypto').randomUUID } },
 });
 module.exports = { load };
 
@@ -118,6 +118,7 @@ test('sandbox JPEGs persist after temp cleanup, reject other-account paths and w
       getFreeDiskStorageAsync: async () => 100_000_000,
       makeDirectoryAsync: async () => {},
       moveAsync: async ({ from, to }) => {
+        assert.ok(disk.has(from), 'photo write must finish before moving it');
         disk.set(to, disk.get(from));
         disk.delete(from);
       },
@@ -130,7 +131,8 @@ test('sandbox JPEGs persist after temp cleanup, reject other-account paths and w
         constructor(uri) {
           this.uri = uri;
         }
-        write(bytes) {
+        async write(bytes) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
           disk.set(this.uri, Buffer.from(bytes));
         }
         async bytes() {
@@ -153,6 +155,7 @@ test('sandbox JPEGs persist after temp cleanup, reject other-account paths and w
   assert.deepEqual(Buffer.from(await files.plaintext(owner, id, path)), bytes);
   await assert.rejects(files.plaintext('different-account', id, path), /Invalid vault path/);
   const temp = await files.temporaryFile(bytes);
+  assert.deepEqual(disk.get(temp), bytes);
   await files.removeTemp(path);
   await files.removeTemp(temp);
   await files.clearTemps();

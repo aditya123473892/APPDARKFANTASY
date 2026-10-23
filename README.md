@@ -37,6 +37,14 @@ Press `a` for Android, `i` for an iOS simulator on macOS, or scan the QR code in
 
 ### Expo Go on a physical phone
 
+On Windows, `powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1`
+opens separate Command Prompt terminals for the canonical backend and mobile app.
+These launchers use backend port **9001** and Metro port **8081**. Configure
+`.env.mobile` with the proxy settings below and `EXPO_DEV_API_PORT=9001` to match.
+MongoDB must already be running as a replica set and configured in
+`backenddf/df-backend-pm-be/.env`. The launchers require Node.js 22.13+ and `rtk`
+on PATH.
+
 Set `EXPO_PUBLIC_API_URL` in `.env.mobile` to `http://<PC-Wi-Fi-IP>:9000/api`.
 `localhost` points to the phone itself; `10.0.2.2` is for the Android emulator only.
 Keep the PC and phone on the same Wi-Fi, then restart Metro with
@@ -53,11 +61,15 @@ launcher supports an API proxy through Metro. Set `.env.mobile` to:
 ```dotenv
 EXPO_PUBLIC_API_URL=http://<PC-Wi-Fi-IP>:8081/api
 EXPO_DEV_API_PROXY=true
+EXPO_DEV_API_PORT=9000
 EXPO_PUBLIC_DEV_API_PROXY=true
 ```
 
 Restart with `npm start -- --clear --lan`. Metro forwards `/api`, `/uploads`,
-and Socket.IO polling to `127.0.0.1:9000`; the backend keeps running on 9000.
+and Socket.IO polling to `127.0.0.1:9000` by default. Set `EXPO_DEV_API_PORT`
+to the backend's port when using another port. If the backend listens on IPv6
+localhost, set `EXPO_DEV_API_HOST=::1` to reach it instead of an IPv4 service
+using the same port. Only loopback upstream hosts are allowed.
 This proxy runs only with the development launcher. Chat uses polling while
 the proxy is enabled. The app uses the host and port of its Expo connection,
 so LAN address changes do not require updating the API URL in proxy mode.

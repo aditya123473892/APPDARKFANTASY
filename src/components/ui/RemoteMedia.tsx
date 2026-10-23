@@ -16,12 +16,15 @@ export function RemoteMedia({
   width,
   height,
   privateMedia = false,
+  onSize,
 }: {
   uri: string;
   mimetype?: string;
   width: number;
   height: number;
   privateMedia?: boolean;
+  /** Reports the image's natural pixel size once loaded. */
+  onSize?: (width: number, height: number) => void;
 }) {
   const [failedUri, setFailedUri] = useState<string | null>(null);
   const { theme } = useTheme();
@@ -44,6 +47,13 @@ export function RemoteMedia({
     <Image
       source={{ uri }}
       onError={() => setFailedUri(uri)}
+      onLoad={
+        onSize
+          ? ({ source }) => {
+              if (source.width > 0 && source.height > 0) onSize(source.width, source.height);
+            }
+          : undefined
+      }
       recyclingKey={uri}
       contentFit="contain"
       cachePolicy={privateMedia ? 'none' : 'memory'}

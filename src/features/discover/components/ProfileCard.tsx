@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Can } from '@/features/auth/components/Access';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { memo } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { Text } from '@/components/ui';
+import { FitImage, Text } from '@/components/ui';
 import type { ProfileView } from '@/features/profile/types';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -55,15 +54,7 @@ export const ProfileCard = memo(function ProfileCard({
         pressed && styles.pressed,
       ]}
     >
-      <Image
-        source={{ uri: profile.avatarUri }}
-        contentFit="cover"
-        transition={180}
-        cachePolicy="memory-disk"
-        recyclingKey={profile.id}
-        accessibilityIgnoresInvertColors
-        style={StyleSheet.absoluteFill}
-      />
+      <FitImage uri={profile.avatarUri} recyclingKey={profile.id} style={StyleSheet.absoluteFill} />
       <LinearGradient
         colors={[theme.colors.overlayTransparent, theme.colors.overlayStrong]}
         locations={[0.35, 1]}

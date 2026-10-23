@@ -10,6 +10,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  NotFoundException,
   Put,
   Delete,
 } from '@nestjs/common';
@@ -137,10 +138,11 @@ export class UsersController {
     status: 200,
     description: 'Successfully fetched user details',
   })
-  @ApiResponse({ status: 400, description: 'User not found' })
+  @ApiResponse({ status: 404, description: 'User not found or blocked' })
   async findOne(@Param('id') userId: string, @AuthUser() actor: IAuthUser) {
     const user = await this.usersService.findByIdWithUserPost(userId, actor.id);
-    return user ? successRes({ user }) : badRequestRes('User not found!');
+    if (!user) throw new NotFoundException('User not found!');
+    return successRes({ user });
   }
 
   @UseGuards(RolesGuard)

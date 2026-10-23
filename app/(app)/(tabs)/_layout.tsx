@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Tabs } from 'expo-router';
+import { Tabs } from 'expo-router/js-tabs';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUnreadMessageCount } from '@/features/chat/hooks/useChat';
@@ -96,12 +96,12 @@ export default function TabsLayout(): React.JSX.Element {
             elevation: 0,
           },
           tabBarItemStyle: styles.item,
-          tabBarIcon: ({ focused, color }) => (
+          tabBarIcon: ({ focused }) => (
             <View style={[styles.icon, focused && { backgroundColor: theme.colors.primarySoft }]}>
               <Ionicons
                 name={focused ? pair[0] : pair[1]}
                 size={22}
-                color={focused ? theme.colors.primaryText : color}
+                color={focused ? theme.colors.primaryText : theme.colors.textMuted}
               />
             </View>
           ),

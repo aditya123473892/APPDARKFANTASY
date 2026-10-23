@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AppState, StyleSheet, TextInput, View } from 'react-native';
+import { AppState, StyleSheet, type TextInputInstance, View } from 'react-native';
 import { Button, Input, PasswordInput, Text } from '@/components/ui';
 import { loginSchema } from '../schemas/authSchemas';
 import { useLogin } from '../hooks/useLogin';
@@ -11,7 +11,7 @@ export function LoginForm(): React.JSX.Element {
   const [email, setEmail] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const password = useRef('');
-  const input = useRef<TextInput>(null);
+  const input = useRef<TextInputInstance>(null);
   useEffect(() => {
     const listener = AppState.addEventListener('change', (state) => {
       if (state !== 'active') {

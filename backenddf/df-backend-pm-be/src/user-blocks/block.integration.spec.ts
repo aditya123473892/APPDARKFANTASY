@@ -249,11 +249,13 @@ integration('User-to-user block boundaries with real MongoDB', () => {
         Object.create(UsersController.prototype),
         { usersService: users() },
       );
-      expect(await controller.findOne(String(b), { id: String(a) })).toEqual(
-        await controller.findOne(String(new Types.ObjectId()), {
-          id: String(a),
-        }),
+      // A blocked profile and a missing one fail identically.
+      await expect(controller.findOne(String(b), { id: String(a) })).rejects.toThrow(
+        'User not found!',
       );
+      await expect(
+        controller.findOne(String(new Types.ObjectId()), { id: String(a) }),
+      ).rejects.toThrow('User not found!');
     });
     await blocks.unblock(String(a), String(b));
     await as(a, async () =>
@@ -327,7 +329,7 @@ integration('User-to-user block boundaries with real MongoDB', () => {
     });
     expect(
       (await service.getChatGroupHistory(String(a), String(group)))[0],
-    ).toMatchObject({ message: 'group text', blockedSender: true });
+    ).toMatchObject({ message: '', media: [], blockedSender: true });
     await expect(
       service.getMediaAccessUrl(
         String(a),

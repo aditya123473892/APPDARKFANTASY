@@ -168,6 +168,16 @@ export function EventDetailScreen() {
                   onPress={() => void list.refetch()}
                 />
               )}
+              <Button
+                label="Report event"
+                variant="ghost"
+                onPress={() =>
+                  router.push({
+                    pathname: '/report' as never,
+                    params: { targetType: 'event', targetId: id },
+                  })
+                }
+              />
             </>
           )}
           {admin && (

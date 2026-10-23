@@ -392,7 +392,8 @@ export class ChatGateway
           .to(`user:${id}`)
           .emit(event || 'receiveGroupMessage', {
             ...message,
-            ...(blockedSender ? { media: [] } : {}),
+            // Withhold blocked content server-side; never trust the client to hide it.
+            ...(blockedSender ? { message: '', media: [] } : {}),
             blockedSender,
           });
       }

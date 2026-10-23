@@ -6,7 +6,7 @@ import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
 import { displayName, type UserSummary } from '@/features/auth/userModel';
 import { ServiceError } from '@/services/errors';
-import type { CommentPage, ContentVisibility, Post, PostAuthor, PostComment, PostImageResponse } from '../types';
+import type { CommentPage, ContentVisibility, Post, PostAuthor, PostComment, PostImageResponse, PostMedia } from '../types';
 import type { FeedService } from './feedService';
 export type BackendPost = {
   _id: string;
@@ -16,8 +16,10 @@ export type BackendPost = {
   visibility?: string;
   contentVisibility?: ContentVisibility;
   locked?: boolean;
-  images?: PostImageResponse[];
   status?: string;
+  /** Current API: per-image signed URL plus the stored pixel size (null for legacy uploads). */
+  images?: PostImageResponse[];
+  /** Legacy API shape, kept for older servers. */
   media?: { url?: string; mimetype?: string }[];
   likes?: (string | { user?: string | UserSummary })[];
   comments?: (string | BackendComment)[];
@@ -55,12 +57,31 @@ export function mapComment(comment: BackendComment): PostComment | null {
     createdAt: comment.createdAt,
   };
 }
+/** 0 width/height means "unknown"; the gallery then measures the loaded image. */
+export function mapPostMedia(raw: Pick<BackendPost, 'images' | 'media' | 'contentVisibility' | 'locked'> & { _id?: string }): PostMedia[] {
+  const size = (value?: number | null) =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+  const locked = raw.contentVisibility === 'premium' && raw.locked !== false;
+  if (raw.images)
+    return raw.images
+      .filter((image) => locked || mediaUrl(image.url))
+      .map((image, index) => ({
+        id: image.id || `${raw._id}:${index}`,
+        uri: mediaUrl(image.url),
+        blurhash: image.blurhash,
+        width: size(image.width),
+        height: size(image.height),
+        mimetype: 'image/jpeg',
+      }));
+  return (raw.contentVisibility === 'premium' ? [] : raw.media ?? [])
+    .filter((m) => mediaUrl(m.url))
+    .map((m, index) => ({ id: `${raw._id}:${index}`, uri: mediaUrl(m.url), width: 0, height: 0, mimetype: m.mimetype }));
+}
 export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
   if (!raw?._id || !raw.createdAt) throw new ServiceError('UNKNOWN');
   const likes = raw.likes ?? [];
   const serverState = typeof raw.likedByMe === 'boolean';
   const locked = raw.contentVisibility === 'premium' && raw.locked !== false;
-  const images = raw.images ?? (raw.contentVisibility === 'premium' ? [] : raw.media ?? []);
   return {
     contentVisibility: raw.contentVisibility ?? 'normal',
     locked,
@@ -68,16 +89,7 @@ export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
     body: raw.caption ?? '',
     createdAt: raw.createdAt,
     user: author(raw.user, fallbackAuthor),
-    media: images
-      .filter((image) => locked || mediaUrl(image.url))
-      .map((image, index) => ({
-        id: 'id' in image ? image.id : `${raw._id}:${index}`,
-        uri: mediaUrl(image.url),
-        blurhash: 'blurhash' in image ? image.blurhash : null,
-        width: ('width' in image && image.width) || 16,
-        height: ('height' in image && image.height) || 12,
-        mimetype: 'mimetype' in image ? image.mimetype : 'image/jpeg',
-      })),
+    media: mapPostMedia(raw),
     likes: raw.likeCount ?? likes.length,
     replies: raw.commentCount ?? raw.comments?.length ?? 0,
     liked: serverState

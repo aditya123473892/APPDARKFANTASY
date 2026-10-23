@@ -51,7 +51,7 @@ export function useBlock() {
     if (mutation.isPending || useBlockState.getState().pending.includes(id)) return;
     Alert.alert(
       'Block this user?',
-      'You will disappear from each other’s profiles, feed and direct chats. Pending requests are cancelled. Shared groups remain; their messages will be collapsed. You can unblock in Settings. Previously opened image links may work briefly until they expire.',
+      'You will disappear from each other’s profiles, feed and direct chats. Pending requests are cancelled. Shared groups remain, but neither of you will see the other’s messages there. You can unblock in Settings. Previously opened image links may work briefly until they expire.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

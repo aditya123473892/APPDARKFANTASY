@@ -6,8 +6,9 @@ import type { PostMedia } from '@/features/feed/types';
 import { useTheme } from '@/theme/useTheme';
 import { Text } from './Text';
 
-export function PostImage({ image, locked, width, height }: {
+export function PostImage({ image, locked, width, height, onSize }: {
   image: PostMedia; locked: boolean; width: number; height: number;
+  onSize?: (width: number, height: number) => void;
 }): React.JSX.Element {
   const router = useRouter();
   const { theme } = useTheme();
@@ -18,6 +19,9 @@ export function PostImage({ image, locked, width, height }: {
         placeholder={image.blurhash ? { blurhash: image.blurhash } : undefined}
         recyclingKey={cacheKey} contentFit="contain" cachePolicy="memory"
         accessibilityLabel={locked ? 'Locked premium image preview' : 'Post image'}
+        onLoad={({ source }) => {
+          if (source.width > 0 && source.height > 0) onSize?.(source.width, source.height);
+        }}
         style={StyleSheet.absoluteFill} />
       {locked ? (
         <Pressable accessibilityRole="button" accessibilityLabel="Subscribe to view"

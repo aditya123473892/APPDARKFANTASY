@@ -1,5 +1,5 @@
 import { forwardRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View, type TextInputProps, type TextInputInstance } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Text } from './Text';
@@ -11,7 +11,7 @@ type PasswordInputProps = Omit<TextInputProps, 'secureTextEntry'> & {
   error?: string;
 };
 
-export const PasswordInput = forwardRef<TextInput, PasswordInputProps>(function PasswordInput(
+export const PasswordInput = forwardRef<TextInputInstance, PasswordInputProps>(function PasswordInput(
   { label, error, style, onFocus, onBlur, ...props },
   ref,
 ) {

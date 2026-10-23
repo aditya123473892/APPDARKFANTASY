@@ -131,10 +131,11 @@ describe('Photo security boundaries', () => {
     } as any);
     expect(posts.updateOnePrivate).toHaveBeenCalledWith(
       expect.any(String),
-      { caption: 'Edited', media },
+      { caption: 'Edited' },
       { id: 'owner' },
       3,
     );
+    expect(photos.bind).not.toHaveBeenCalled();
     expect(photos.retire).not.toHaveBeenCalled();
     expect(photos.enqueue).not.toHaveBeenCalled();
     expect(posts.findVisiblePost).toHaveBeenCalledWith('507f1f77bcf86cd799439011', 'owner');

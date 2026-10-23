@@ -764,15 +764,11 @@ integration('Phase 1 surface verification', () => {
       }
       const blocked = await lookup(String(peer)),
         missing = await lookup(String(new Types.ObjectId()));
-      expect(blocked.status).toBe(400);
-      expect(blocked.bytes).toBe(
-        JSON.stringify({
-          statusCode: 400,
-          error: 'Bad Request',
-          message: 'User not found!',
-          data: null,
-        }),
-      );
+      expect(blocked.status).toBe(404);
+      expect(JSON.parse(blocked.bytes)).toMatchObject({
+        statusCode: 404,
+        message: 'User not found!',
+      });
       expect(blocked.status).toBe(missing.status);
       expect(Buffer.from(blocked.bytes)).toEqual(Buffer.from(missing.bytes));
       expect(blocked.commands).toEqual(missing.commands);

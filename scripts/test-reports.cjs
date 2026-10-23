@@ -7,7 +7,9 @@ function harness() {
   const end = [], calls = [];
   let generation = 1, online = true, transport = async () => ({ data: { data: { reportId: 'case', status: 'open', targetOwnerId: 'owner' } } });
   const runtime = { get generation() { return generation; } };
+  const isAxiosError = (error) => Boolean(error && error.isAxiosError);
   const mock = {
+    axios: { default: { isAxiosError }, isAxiosError },
     'expo-network': { getNetworkStateAsync: async () => ({ isConnected: online, isInternetReachable: online }) },
     '@/services/api/apiClient': { apiClient: { post: async (...args) => { calls.push(args); return transport(...args); } } },
     '@/services/api/backend': { unwrap: value => value.data, getData: async (...args) => { calls.push(args); return {}; } },
@@ -38,7 +40,7 @@ test('synchronous double-submit prevention sends exactly one report and clears i
 });
 test('failed reports never retry automatically and session changes cannot resurrect sensitive drafts', async () => {
   const h = harness(); h.transport(async () => { throw Error('network lost'); });
-  await assert.rejects(h.api.submitReport(target, draft), /network lost/);
+  await assert.rejects(h.api.submitReport(target, draft), /Could not submit/);
   assert.equal(h.calls.length, 1); assert.equal(h.api.getReportDraft(target).details, draft.details);
   let finish; h.transport(() => new Promise(done => finish = done));
   const pending = h.api.submitReport(target, draft); await new Promise(done => setImmediate(done));
@@ -52,4 +54,17 @@ test('report categories and note length are validated before transport; My repor
   assert.equal(h.calls.length, 0);
   await h.api.myReports('cursor'); await h.api.reportNotices();
   assert.equal(h.calls[0][0], '/reports/me'); assert.equal(h.calls[0][1].before, 'cursor'); assert.equal(h.calls[1][0], '/reports/notices');
+});
+test('report failures show the server reason for 403 and friendly copy for 404, 429 and network errors', async () => {
+  const h = harness();
+  const fail = (status, message) => h.transport(async () => { throw Object.assign(Error('Request failed with status code ' + status), { isAxiosError: true, response: status ? { status, data: { message } } : undefined }); });
+  fail(403, 'You cannot report your own content');
+  await assert.rejects(h.api.submitReport(target, draft), /^Error: You cannot report your own content$/);
+  fail(429, 'Too many reports; please try again later');
+  await assert.rejects(h.api.submitReport(target, draft), /a lot of reports recently/);
+  fail(404, 'Reported content is unavailable');
+  await assert.rejects(h.api.submitReport(target, draft), /no longer available/);
+  fail(undefined);
+  await assert.rejects(h.api.submitReport(target, draft), /Connection problem/);
+  assert.equal(h.api.getReportDraft(target).details, draft.details);
 });
