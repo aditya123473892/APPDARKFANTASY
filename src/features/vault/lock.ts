@@ -3,6 +3,15 @@ import { create } from 'zustand';
 import * as LA from 'expo-local-authentication';
 import { clearTemps } from './files';
 import { setting, setSetting } from './repository';
+import {
+  cancelPinPrompt,
+  clearPin,
+  hasPin,
+  requestPin,
+  savePin,
+  verifyPin,
+  type UnlockMethod,
+} from './pin';
 
 export const useVaultLock = create<{ owner: string | null; unlocked: boolean; revision: number }>(
   () => ({ owner: null, unlocked: false, revision: 0 }),
@@ -17,6 +26,7 @@ export function refreshVault(): void {
 }
 export function lock(): void {
   epoch++;
+  cancelPinPrompt();
   useVaultLock.setState({ unlocked: false });
   void clearTemps().catch(() => undefined);
 }
@@ -32,6 +42,28 @@ export function assertEpoch(owner: string, scope: number): void {
 }
 export async function noDeviceLock(): Promise<boolean> {
   return (await LA.getEnrolledLevelAsync()) === LA.SecurityLevel.NONE;
+}
+/** The user's choice: device biometrics (with screen-lock fallback) or a vault PIN. */
+export async function unlockMethod(owner: string): Promise<UnlockMethod> {
+  return (await setting(owner, 'unlockMethod')) === 'pin' && (await hasPin(owner))
+    ? 'pin'
+    : 'device';
+}
+/** Changing the method requires an open vault; a PIN is (re)saved when chosen. */
+export async function setUnlockMethod(
+  owner: string,
+  method: UnlockMethod,
+  pin?: string,
+): Promise<void> {
+  assertUnlocked(owner);
+  if (method === 'pin') {
+    await savePin(owner, pin ?? '');
+    await setSetting(owner, 'unlockMethod', 'pin');
+    return;
+  }
+  if (await noDeviceLock()) throw new Error('Set up an Android screen lock to use biometrics.');
+  await setSetting(owner, 'unlockMethod', 'device');
+  await clearPin(owner);
 }
 export async function waitForForeground(): Promise<void> {
   if (AppState.currentState === 'active') return;
@@ -57,8 +89,14 @@ export async function unlock(owner: string): Promise<void> {
     const until = Number((await setting(owner, 'lockout')) || 0);
     if (Date.now() < until) throw new Error('Too many attempts. Try again after one minute.');
     let success = false;
-    if (await noDeviceLock()) throw new Error('Set up an Android screen lock to use Photo Vault.');
-    {
+    const method = await unlockMethod(owner);
+    if (method === 'pin') {
+      const failures = Number((await setting(owner, 'attempts')) || 0);
+      const pin = await requestPin(failures ? 'Incorrect PIN. Try again.' : '');
+      success = await verifyPin(owner, pin);
+    } else {
+      if (await noDeviceLock())
+        throw new Error('Set up an Android screen lock to use Photo Vault.');
       devicePrompt = true;
       let result: LA.LocalAuthenticationResult;
       try {
@@ -83,7 +121,9 @@ export async function unlock(owner: string): Promise<void> {
         await setSetting(owner, 'attempts', '0');
         lock();
       }
-      throw new Error('Could not unlock. Check your credentials.');
+      throw new Error(
+        method === 'pin' ? 'Incorrect PIN.' : 'Could not unlock. Check your credentials.',
+      );
     }
     if (scope !== epoch || AppState.currentState !== 'active') throw new Error('Unlock cancelled.');
     await setSetting(owner, 'attempts', '0');
@@ -105,6 +145,7 @@ AppState.addEventListener('change', (state) => {
   clearTimeout(timer);
   if (state !== 'active') {
     void clearTemps().catch(() => undefined);
+    cancelPinPrompt();
     // Android device-credential fallback opens Keyguard outside the activity.
     // Keep content locked while allowing that verified native prompt to resume.
     if (devicePrompt) {

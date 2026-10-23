@@ -16,6 +16,7 @@ export function RemoteMedia({
   width,
   height,
   privateMedia = false,
+  locked = false,
   onSize,
 }: {
   uri: string;
@@ -23,6 +24,8 @@ export function RemoteMedia({
   width: number;
   height: number;
   privateMedia?: boolean;
+  /** Premium media the viewer cannot open. */
+  locked?: boolean;
   /** Reports the image's natural pixel size once loaded. */
   onSize?: (width: number, height: number) => void;
 }) {
@@ -39,7 +42,7 @@ export function RemoteMedia({
           backgroundColor: theme.colors.surfaceElevated,
         }}
       >
-        <Text color="muted">Media unavailable</Text>
+        <Text color="muted">{locked ? 'Subscribers only' : 'Media unavailable'}</Text>
       </View>
     );
   if (mimetype?.startsWith('video/')) return <Video uri={uri} width={width} height={height} />;

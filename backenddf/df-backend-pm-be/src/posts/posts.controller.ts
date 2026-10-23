@@ -14,6 +14,7 @@ import {
   Put,
 } from '@nestjs/common';
 import { PhotosService } from '../photos/photos.service';
+import { VideosService } from '../photos/videos.service';
 import { PhotoPostDto, EditPhotoPostDto } from './dto/photo-post.dto';
 import {
   BadRequestException,
@@ -58,6 +59,7 @@ export class PostsController {
     private readonly postsService: PostsService,
     private readonly photos: PhotosService,
     private readonly s3BucketService: S3BucketService,
+    private readonly videos: VideosService,
   ) {}
 
   @ApiBearerAuth()
@@ -128,9 +130,10 @@ export class PostsController {
       .slice(0, 24);
     const existing = await this.postsService.findByIdPrivate(id, actor.id);
     if (existing) return successRes(existing);
-    if (!dto.photoIds?.length)
-      throw new BadRequestException('Choose at least one photo');
-    const media = await this.photos.bind(actor.id, dto.photoIds, `post:${id}`);
+    if (!dto.photoIds?.length && !dto.videoIds?.length)
+      throw new BadRequestException('Choose at least one photo or video');
+    const media = await this.photos.bind(actor.id, dto.photoIds || [], `post:${id}`);
+    const videos = await this.videos.bind(actor.id, dto.videoIds || [], `post:${id}`);
     try {
       const post = await this.postsService.create({
         _id: id,
@@ -140,6 +143,7 @@ export class PostsController {
         contentVisibility: dto.contentVisibility || 'normal',
         user: actor.id,
         media,
+        ...(videos.length ? { videos } : {}),
         status: EPostStatus.APPROVED,
       } as any);
       return successRes(post);
@@ -237,11 +241,17 @@ export class PostsController {
     const media = dto.photoIds
       ? await this.photos.bind(actor.id, dto.photoIds, `post:${id}`)
       : post.media;
+    const videos = dto.videoIds
+      ? await this.videos.bind(actor.id, dto.videoIds, `post:${id}`)
+      : undefined;
+    if (!media?.length && !(videos ?? (post as any).videos ?? []).length)
+      throw new BadRequestException('A post needs at least one photo or video');
     const patch: any = {};
     if (dto.photoIds) patch.media = media;
+    if (videos) patch.videos = videos;
     for (const field of ['caption', 'location', 'visibility', 'contentVisibility'])
       if (dto[field] !== undefined) patch[field] = dto[field];
-    if (dto.photoIds) patch.status = EPostStatus.APPROVED;
+    if (dto.photoIds || dto.videoIds) patch.status = EPostStatus.APPROVED;
     const updated = await this.postsService.updateOnePrivate(
       id,
       patch,
@@ -263,6 +273,7 @@ export class PostsController {
           .map((item) => item.filename || item.url),
       );
     }
+    if (videos) await this.videos.release(actor.id, `post:${id}`, dto.videoIds);
     return successRes(await this.postsService.findVisiblePost(id, actor.id));
   }
 
@@ -284,6 +295,7 @@ export class PostsController {
     if (!result.deletedCount)
       throw new NotFoundException('Post changed; refresh before deleting');
     await this.photos.release(actor.id, `post:${id}`);
+    await this.videos.release(actor.id, `post:${id}`);
     return successRes({ deleted: true });
   }
 

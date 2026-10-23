@@ -5,7 +5,11 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash, randomUUID } from 'crypto';
 import { PhotosService } from '../photos/photos.service';
 import { allocateKey, storedKey } from '../s3-bucket/storage-layout';
-import { S3BucketService } from '../s3-bucket/s3-bucket.service';
+import { S3BucketService, videoMaxBytes } from '../s3-bucket/s3-bucket.service';
+
+type UploadInput = { id: string; hidden: boolean; order: number; updatedAt: number;
+  kind?: 'photo' | 'video'; contentType?: 'video/mp4' | 'video/quicktime'; size?: number; md5?: string };
+const videoExtension = (contentType: string) => (contentType === 'video/quicktime' ? 'mov' : 'mp4');
 
 @Injectable()
 export class VaultService implements OnModuleInit {
@@ -27,22 +31,34 @@ export class VaultService implements OnModuleInit {
   private present(row: any) {
     return { id: row.id, s3Key: row.deletedAt || row.state !== 'approved' ? null : storedKey(row) ?? null, sha256: row.sha256 ?? '', size: row.size ?? 0,
       status: row.state === 'rejected' ? 'rejected' : row.state === 'approved' ? 'approved' : 'local', hidden: row.hidden ? 1 : 0,
-      sortOrder: row.order ?? 0, createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null };
+      sortOrder: row.order ?? 0, createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
+      kind: row.kind === 'video' ? 'video' : 'photo' };
   }
-  async issue(owner: string, input: { id: string; hidden: boolean; order: number; updatedAt: number }) {
-    await this.guard(owner, 'upload', 20); this.stamp(input.updatedAt);
+  async issue(owner: string, upload: UploadInput) {
+    await this.guard(owner, 'upload', 20); this.stamp(upload.updatedAt);
+    const { kind = 'photo', contentType, size, md5, ...input } = upload;
+    const video = kind === 'video';
+    if (video && size > videoMaxBytes()) throw new BadRequestException(`Choose a video smaller than ${Math.floor(videoMaxBytes() / 1048576)} MB`);
     if (await this.tombstones.findOne({ owner, id: input.id })) throw new ConflictException('Photo was deleted');
     let row = await this.rows.findOne({ owner, id: input.id });
+    if (row && (row.kind === 'video') !== video) throw new ConflictException('Vault item type has changed');
+    if (!row && video) {
+      const videos = Math.min(100, Math.max(1, Number(process.env.VAULT_MAX_VIDEOS) || 20));
+      if (await this.rows.countDocuments({ owner, kind: 'video', state: { $ne: 'deleting' } }) >= videos)
+        throw new ConflictException('Vault video limit reached');
+    }
     if (!row) {
       const maximum = Math.min(100, Math.max(1, Number(process.env.VAULT_MAX_PHOTOS) || 50));
       for (let slot = 0; slot < maximum; slot++) {
         try {
           const allocation = allocateKey({ ownerId: owner, resourceType: 'vault', resourceId: randomUUID() });
           const resourceId = allocation.objectId;
-          const finalKey = allocation.key;
-          const tempKey = allocateKey({ ownerId: owner, resourceType: 'temp', resourceId }).key;
+          const finalKey = video ? `vault/${owner}/${randomUUID()}.${videoExtension(contentType)}` : allocation.key;
+          const tempKey = video ? `temp/${owner}/${resourceId}.${videoExtension(contentType)}`
+            : allocateKey({ ownerId: owner, resourceType: 'temp', resourceId }).key;
           const candidate = { ownerId: owner, resourceType: 'temp', resourceId, serverPhotoId: resourceId, s3Key: tempKey, finalKey,
-            status: 'pending', storageLayoutVersion: 1, contentType: 'image/jpeg', storageKeyUniqueEligible: true, _id: `${owner}:${input.id}`, owner, ...input, slot, state: 'pending',
+            status: 'pending', storageLayoutVersion: 1, contentType: video ? contentType : 'image/jpeg', storageKeyUniqueEligible: true, _id: `${owner}:${input.id}`, owner, ...input, slot, state: 'pending',
+            ...(video ? { kind: 'video', size, md5 } : {}),
             tempKey, createdAt: Date.now(), expiresAt: new Date(Date.now() + 300000) };
           await this.rows.insertOne(candidate); row = candidate; break;
         } catch (error) { if (error.code !== 11000) throw error; row = await this.rows.findOne({ owner, id: input.id }); if (row) break; }
@@ -53,12 +69,14 @@ export class VaultService implements OnModuleInit {
     if (await this.tombstones.findOne({ owner, id: input.id })) { await this.rows.updateOne({ _id: row._id }, { $set: { state: 'deleting', status: 'deleting', deleteAfter: new Date(Date.now() + 600000) } }); throw new ConflictException('Photo was deleted'); }
     if (row.state === 'approved' || row.state === 'rejected') return { status: row.state, photo: this.present(row) };
     if (row.state === 'deleting') throw new ConflictException('Photo was deleted');
+    if (row.state === 'scanning') return { status: 'scanning' };
     if (row.state === 'processing' && row.leaseUntil > new Date()) throw new ConflictException('Photo processing');
     const expiresAt = new Date(Date.now() + 300000);
     const reserved = await this.rows.updateOne({ _id: row._id, state: { $in: ['pending', 'processing'] }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] },
       { $set: { expiresAt, state: 'pending' }, $unset: { token: '', leaseUntil: '' } });
     if (!reserved.matchedCount) throw new ConflictException('Photo processing');
-    return { status: 'pending', ...(await this.storage.presign(row.tempKey, 'image/jpeg', 300)) };
+    return { status: 'pending', ...(await this.storage.presign(row.tempKey, row.kind === 'video' ? row.contentType : 'image/jpeg', 300,
+      row.kind === 'video' ? videoMaxBytes() : undefined)) };
   }
   async confirm(owner: string, id: string) {
     await this.guard(owner, 'confirm', 30);
@@ -66,6 +84,7 @@ export class VaultService implements OnModuleInit {
     const row = await this.rows.findOne({ owner, id }); if (!row) throw new NotFoundException('Photo not found');
     if (row.state === 'approved') return this.present(row);
     if (row.state === 'rejected') throw new UnprocessableEntityException('Photo did not pass moderation');
+    if (row.kind === 'video') return this.confirmVideo(owner, row);
     if (this.processing >= 2) throw new ConflictException('Image processing is busy');
     const token = randomUUID();
     let key = row.finalKey;
@@ -105,6 +124,48 @@ export class VaultService implements OnModuleInit {
       throw error;
     } finally { this.processing--; }
   }
+  /** Videos are verified by header and scanned asynchronously; clients re-confirm until done. */
+  private async confirmVideo(owner: string, row: any) {
+    const processing = () => ({ ...this.present(row), processing: true });
+    if (row.state === 'scanning') {
+      if (!row.jobId) return processing();
+      const scan = await this.storage.videoModerationResult(row.jobId);
+      if (scan === 'pending') return processing();
+      if (scan === 'rejected') {
+        await this.rows.updateOne({ _id: row._id, state: 'scanning' }, { $set: { state: 'rejected', status: 'rejected' } });
+        await this.photos.enqueue([row.tempKey]);
+        throw new UnprocessableEntityException('Video did not pass moderation');
+      }
+      return this.approveVideo(owner, row);
+    }
+    if (row.state !== 'pending' || row.expiresAt.getTime() + 1800000 < Date.now()) throw new ConflictException('Upload expired or processing');
+    const { size, etag } = await this.storage.verifyVideo(row.tempKey, row.contentType);
+    if (size !== row.size) throw new BadRequestException('Uploaded video size does not match');
+    const claim = await this.rows.updateOne({ _id: row._id, state: 'pending' }, { $set: { state: 'scanning', status: 'scanning', etag, scanStartedAt: new Date() } });
+    if (!claim.modifiedCount) throw new ConflictException('Video processing');
+    let jobId: string | null;
+    try { jobId = await this.storage.startVideoModeration(row.tempKey); }
+    catch (error) {
+      await this.rows.updateOne({ _id: row._id, state: 'scanning' }, { $set: { state: 'pending', status: 'pending' } });
+      throw error;
+    }
+    if (jobId === null) return this.approveVideo(owner, { ...row, etag });
+    await this.rows.updateOne({ _id: row._id, state: 'scanning' }, { $set: { jobId } });
+    return processing();
+  }
+  private async approveVideo(owner: string, row: any) {
+    if (await this.tombstones.findOne({ owner, id: row.id })) throw new ConflictException('Photo was deleted');
+    const key = row.finalKey;
+    await this.photos.enqueue([key], new Date(Date.now() + 600000), true);
+    await this.photos.assertActiveAccount(owner);
+    await this.storage.copyVideo(row.tempKey, key, row.contentType, row.etag);
+    const fields = { state: 'approved', status: 'approved', ownerId: owner, resourceType: 'vault', resourceId: row.serverPhotoId || row.id,
+      key, s3Key: key, sha256: `md5:${row.md5}`, size: row.size, contentType: row.contentType };
+    const commit = await this.rows.updateOne({ _id: row._id, state: 'scanning' }, { $set: fields, $unset: { jobId: '' } });
+    if (!commit.modifiedCount) throw new ConflictException('Photo changed');
+    await this.photos.enqueue([row.tempKey], new Date(Date.now() + 60000));
+    return this.present({ ...row, ...fields });
+  }
   async changes(owner: string, cursor: string) {
     await this.guard(owner, 'changes', 60);
     // Full, bounded metadata reconciliation, resumable by UUID. It deliberately replays
@@ -122,7 +183,8 @@ export class VaultService implements OnModuleInit {
     const row = await this.rows.findOne({ owner, id, state: 'approved' });
     const key = row && storedKey(row);
     const legacyPrefix = key?.startsWith(`users/${owner}/vault/${id}/`) && /\/[0-9a-f-]{36}\.jpg$/.test(key);
-    const canonicalPrefix = key?.startsWith(`vault/${owner}/`) && /^vault\/[^/]+\/[0-9a-f-]{36}\.jpg$/.test(key);
+    const canonicalPrefix = key?.startsWith(`vault/${owner}/`) &&
+      (row.kind === 'video' ? /^vault\/[^/]+\/[0-9a-f-]{36}\.(mp4|mov)$/ : /^vault\/[^/]+\/[0-9a-f-]{36}\.jpg$/).test(key);
     // Owner/id were selected by the existing dedicated route; no role bypass.
     if (!row || !key || !(legacyPrefix || canonicalPrefix) ||
         (row.ownerId && row.ownerId !== owner) ||

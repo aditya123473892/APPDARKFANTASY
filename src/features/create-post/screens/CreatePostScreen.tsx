@@ -160,7 +160,7 @@ export function CreatePostScreen(): React.JSX.Element {
               <Text accessibilityLiveRegion="polite">{uploadStatus}</Text>
             ) : null}
             <Button
-              label={assets.length ? 'Change media' : 'Add photos'}
+              label={assets.length ? 'Change media' : 'Add photos or a video'}
               icon="images-outline"
               variant="secondary"
               disabled={createPost.isPending}
@@ -173,12 +173,18 @@ export function CreatePostScreen(): React.JSX.Element {
                       clientId.current = createClientId();
                     }
                   })
-                  .catch(() => toast.error('Unable to open your photo library.'));
+                  .catch((error: unknown) =>
+                    toast.error(
+                      error instanceof Error && /one video/.test(error.message)
+                        ? 'A post can include one video. Choose again.'
+                        : 'Unable to open your photo library.',
+                    ),
+                  );
               }}
             />
             <Text variant="caption" color="secondary">
-              Choose at least one photo. Posts may require approval before appearing in the public
-              feed.
+              Choose up to five photos, or one video (up to 2 minutes, 50 MB). Videos are checked
+              before posting. Posts may require approval before appearing in the public feed.
             </Text>
             {assets.length ? (
               // The whole photo is previewed exactly as it will be posted: nothing is cropped.
@@ -189,12 +195,32 @@ export function CreatePostScreen(): React.JSX.Element {
               >
                 {assets.map((asset, index) => (
                   <View key={`${asset.uri}-${index}`}>
-                    <FitImage
-                      uri={asset.uri}
-                      cachePolicy="none"
-                      accessibilityLabel={`Selected photo ${index + 1} of ${assets.length}`}
-                      style={styles.preview}
-                    />
+                    {asset.type.startsWith('video/') ? (
+                      <View
+                        accessibilityLabel={`Selected video, item ${index + 1} of ${assets.length}`}
+                        style={[
+                          styles.preview,
+                          styles.videoPreview,
+                          { backgroundColor: theme.colors.surfaceMuted },
+                        ]}
+                      >
+                        <Ionicons
+                          name="videocam-outline"
+                          size={30}
+                          color={theme.colors.textMuted}
+                        />
+                        <Text variant="caption" color="secondary">
+                          Video
+                        </Text>
+                      </View>
+                    ) : (
+                      <FitImage
+                        uri={asset.uri}
+                        cachePolicy="none"
+                        accessibilityLabel={`Selected photo ${index + 1} of ${assets.length}`}
+                        style={styles.preview}
+                      />
+                    )}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Remove photo ${index + 1}`}
@@ -306,6 +332,7 @@ const styles = StyleSheet.create({
   error: { marginTop: spacing.sm },
   previews: { gap: spacing.sm },
   preview: { width: 132, aspectRatio: 0.8, borderRadius: radius.md },
+  videoPreview: { alignItems: 'center', justifyContent: 'center', gap: 6 },
   remove: {
     position: 'absolute',
     top: spacing.xs,

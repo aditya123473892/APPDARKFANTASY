@@ -1,6 +1,7 @@
 import { apiClient } from '@/services/api/apiClient';
 import { getCollection, getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
 import { uploadPhoto } from '@/services/api/photoUpload';
+import { uploadVideo } from '@/services/api/videoUpload';
 import { createClientId } from '@/utils/clientId';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
@@ -19,6 +20,8 @@ export type BackendPost = {
   status?: string;
   /** Current API: per-image signed URL plus the stored pixel size (null for legacy uploads). */
   images?: PostImageResponse[];
+  /** Moderated post videos; url is empty while the viewer lacks premium access. */
+  videos?: { url?: string; contentType?: string }[];
   /** Legacy API shape, kept for older servers. */
   media?: { url?: string; mimetype?: string }[];
   likes?: (string | { user?: string | UserSummary })[];
@@ -58,7 +61,24 @@ export function mapComment(comment: BackendComment): PostComment | null {
   };
 }
 /** 0 width/height means "unknown"; the gallery then measures the loaded image. */
-export function mapPostMedia(raw: Pick<BackendPost, 'images' | 'media' | 'contentVisibility' | 'locked'> & { _id?: string }): PostMedia[] {
+type MediaSource = Pick<BackendPost, 'images' | 'media' | 'videos' | 'contentVisibility' | 'locked'> & {
+  _id?: string;
+};
+export function mapPostMedia(raw: MediaSource): PostMedia[] {
+  const videos: PostMedia[] = (raw.videos ?? [])
+    .filter((video) => mediaUrl(video.url) || raw.locked)
+    .map((video, index) => ({
+      id: `${raw._id}:video:${index}`,
+      uri: mediaUrl(video.url),
+      width: 0,
+      height: 0,
+      mimetype: video.contentType === 'video/quicktime' ? 'video/quicktime' : 'video/mp4',
+      locked: !mediaUrl(video.url),
+    }));
+  const images = mapPostImages(raw);
+  return videos.length ? [...videos, ...images] : images;
+}
+function mapPostImages(raw: MediaSource): PostMedia[] {
   const size = (value?: number | null) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
   const locked = raw.contentVisibility === 'premium' && raw.locked !== false;
@@ -202,10 +222,14 @@ export const realFeedService: FeedService = {
   },
   async create(input) {
     if (!input.assets?.length)
-      throw new ServiceError('VALIDATION', 'Choose a photo before posting.');
+      throw new ServiceError('VALIDATION', 'Choose a photo or video before posting.');
     try {
       const photoIds: string[] = [];
-      for (const asset of input.assets) photoIds.push(await uploadPhoto(asset, input.onUploadProgress));
+      const videoIds: string[] = [];
+      for (const asset of input.assets)
+        if (asset.type.startsWith('video/'))
+          videoIds.push(await uploadVideo(asset, input.onUploadProgress));
+        else photoIds.push(await uploadPhoto(asset, input.onUploadProgress));
       const response = await apiClient.post('/posts', {
         caption: input.body,
         contentVisibility: input.contentVisibility ?? 'normal',
@@ -215,7 +239,8 @@ export const realFeedService: FeedService = {
             : input.audience === 'private'
               ? 'private'
               : 'friends',
-        photoIds,
+        ...(photoIds.length ? { photoIds } : {}),
+        ...(videoIds.length ? { videoIds } : {}),
         clientId: input.clientId || createClientId(),
       });
       return mapPost(unwrap<BackendPost>(response.data));

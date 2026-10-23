@@ -19,6 +19,14 @@ export class Posts {
   @Prop({ type: [Media], required: false })
   media: Media[];
 
+  /** Approved, moderated post videos bound through VideosService. */
+  @Prop({ type: [mongoose.Schema.Types.Mixed], required: false, default: undefined })
+  videos?: { videoId: string; storageKey: string; contentType: string; size?: number; status: string }[];
+
+  /** Staff moderation marker; hidden flags also archive the post. */
+  @Prop({ type: mongoose.Schema.Types.Mixed, required: false })
+  flag?: { reason: string; note?: string; hidden: boolean; by: string; at: Date; previousStatus?: string };
+
   @Prop({ type: String,
     enum: EPostVisibility,
     required: true,

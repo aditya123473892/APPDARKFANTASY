@@ -30,6 +30,7 @@ import { VaultModule } from './vault/vault.module';
 import { UserBlocksModule } from './user-blocks/user-blocks.module';
 import { blockContext, blockQueryPlugin } from './user-blocks/block-context';
 import { ReportsModule } from './reports/reports.module';
+import { GodChatModule } from './god-chat/god-chat.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
 
 @Module({
@@ -76,6 +77,7 @@ import { EntitlementsModule } from './entitlements/entitlements.module';
     CouponModule,
     NotificationModule,
     ContactModule,
+    GodChatModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [AppController],

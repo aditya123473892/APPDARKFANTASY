@@ -39,7 +39,11 @@
     {
       "Sid": "PhotoModeration",
       "Effect": "Allow",
-      "Action": "rekognition:DetectModerationLabels",
+      "Action": [
+        "rekognition:DetectModerationLabels",
+        "rekognition:StartContentModeration",
+        "rekognition:GetContentModeration"
+      ],
       "Resource": "*",
       "Condition": {
         "StringEquals": { "aws:RequestedRegion": "ap-south-1" }

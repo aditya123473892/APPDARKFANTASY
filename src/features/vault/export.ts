@@ -8,14 +8,15 @@ import { assertUnlocked, assertEpoch } from './lock';
 import { viewPhoto } from './vaultService';
 import { photoUri } from './media';
 import { read, temporaryFile, removeTemp } from './files';
+import { get } from './repository';
 
 function confirmExport(sharing: boolean): Promise<boolean> {
   return new Promise((resolve) =>
     Alert.alert(
       sharing ? 'Share outside Photo Vault?' : 'Export to Photos?',
       sharing
-        ? 'This photo will leave the vault. The receiving app can keep a copy.'
-        : 'This photo will leave the vault and become visible in your gallery and to other apps. The vault copy stays.',
+        ? 'This will leave the vault. The receiving app can keep a copy.'
+        : 'This will leave the vault and become visible in your gallery and to other apps. The vault copy stays.',
       [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
         { text: sharing ? 'Share' : 'Export', onPress: () => resolve(true) },
@@ -30,7 +31,7 @@ export async function exportPhotos(owner: string, ids: string[], sharing = false
   assertEpoch(owner, scope);
   // Android 10+ inserts app-owned media via MediaStore without read permission.
   if (!sharing && Platform.OS === 'android' && Number(Platform.Version) < 30) {
-    const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
+    const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo', 'video']);
     if (!permission.granted)
       throw new Error('Photo export permission was denied. Your vault copy is safe.');
   }
@@ -41,6 +42,15 @@ export async function exportPhotos(owner: string, ids: string[], sharing = false
     let source: string | undefined, normalized: string | undefined, output: string | undefined;
     try {
       await photoUri(owner, id);
+      if ((await get(owner, id))?.kind === 'video') {
+        // Videos leave the vault unchanged (no re-encode), after a native checksum check.
+        output = await viewPhoto(owner, id);
+        assertEpoch(owner, scope);
+        if (sharing)
+          await Sharing.shareAsync(output, { mimeType: 'video/mp4', dialogTitle: 'Share video' });
+        else await MediaLibrary.saveToLibraryAsync(output);
+        continue;
+      }
       source = await viewPhoto(owner, id);
       const context = ImageManipulator.manipulate(source);
       const rendered = await context.renderAsync();

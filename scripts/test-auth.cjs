@@ -608,7 +608,7 @@ test('each role has confirmed capabilities; unknown roles fail closed', () => {
   for (const role of ['root', 'admin', 'user', 'manager', 'moderator']) {
     assert.equal(hasCapability([role], 'canSendMessages'), true);
     assert.equal(hasCapability([role], 'canShareMedia'), true);
-    assert.equal(hasCapability([role], 'canModerate'), ['root', 'admin'].includes(role));
+    assert.equal(hasCapability([role], 'canModerate'), ['root', 'admin', 'moderator'].includes(role));
     assert.equal(hasCapability([role], 'canRequestConnection'), role === 'user');
     assert.equal(hasCapability([role], 'canCreateGroups'), true);
   }
@@ -1140,6 +1140,7 @@ function harness(overrides = {}) {
         }
       },
     },
+    '@/services/api/videoUpload': { uploadVideo: async () => '5b0c7f8e-3a4b-4c2d-9e1f-0a1b2c3d4e5f' },
     '@/services/api/photoUpload': {
       uploadPhoto: async () => 'c191eb48-9c83-4996-99c1-01c2af8d9426',
       uploadChatPhoto: async () => 'c191eb48-9c83-4996-99c1-01c2af8d9426',

@@ -47,6 +47,9 @@ export class PhotosService implements OnModuleInit {
   private get purges() {
     return this.db.db.collection<any>('AccountPurges');
   }
+  private get videoUploads() {
+    return this.db.db.collection<any>('VideoUploads');
+  }
   async onModuleInit() {
     if (['apply', 'report'].includes(process.env.PHOTO_STORAGE_INDEXES)) {
       await storageIndexes(this.db, process.env.PHOTO_STORAGE_INDEXES === 'apply', (report) => this.logger.log(report));
@@ -414,8 +417,8 @@ export class PhotosService implements OnModuleInit {
       // Entitlement is freshly read from DB, never from JWT or client flags.
       const viewer = requester && Types.ObjectId.isValid(requester)
         ? await this.db.db.collection('Users').findOne({ _id: new Types.ObjectId(requester) }, { projection: { premiumUntil: 1 } }) : null;
-      source = await new PostMapper().toResponse({ ...source, media: persisted.media || [],
-        contentVisibility: persisted.contentVisibility || 'normal', user: source.user || persisted.user },
+      source = await new PostMapper().toResponse({ ...source, media: persisted.media || [], videos: persisted.videos || [],
+        flag: persisted.flag, contentVisibility: persisted.contentVisibility || 'normal', user: source.user || persisted.user },
         { id: requester, premiumUntil: viewer?.premiumUntil, admin: adminPosts }, {
           canRead: async () => {
             try { await this.assertPairAccess(context, adminPosts); return true; }
@@ -431,6 +434,10 @@ export class PhotosService implements OnModuleInit {
             }
           },
           preview: key => new MediaService(this.storage).previewUrl(key),
+          video: async (video) => {
+            try { return await this.videoAccessUrl(String(video.storageKey || ''), context, adminPosts); }
+            catch (error) { if (error instanceof NotFoundException || error instanceof ForbiddenException) return ''; throw error; }
+          },
         });
       if (!source) return null;
     }
@@ -483,6 +490,21 @@ export class PhotosService implements OnModuleInit {
     await this.assertPremiumAccess(context, adminPost);
     // No cross-request URL cache: every request rechecks resource and authorization state.
     const url = await this.storage.getSignedURL(storedKey(photo), undefined, seconds, ['post', 'chat'].includes(context.resourceType));
+    await this.assertPairAccess(context, adminPost);
+    await this.assertPremiumAccess(context, adminPost);
+    return url;
+  }
+
+  /** Same checks as post images: bound row, pair access and premium entitlement, before and after signing. */
+  async videoAccessUrl(key: string, context: ResourceContext, adminPost = false) {
+    if (context?.resourceType !== 'post' || !/^videos\/[a-f\d]{24}\/[0-9a-f-]{36}\.(mp4|mov)$/.test(key))
+      throw new NotFoundException('Video not available');
+    const row = await this.videoUploads.findOne({ key, state: 'attached', ref: `post:${context.resourceId}`, owner: context.ownerId });
+    if (!row) throw new NotFoundException('Video not available');
+    if (!adminPost) await this.active(context.ownerId);
+    await this.assertPairAccess(context, adminPost);
+    await this.assertPremiumAccess(context, adminPost);
+    const url = await this.storage.getSignedURL(key, undefined, originalUrlSeconds(), true);
     await this.assertPairAccess(context, adminPost);
     await this.assertPremiumAccess(context, adminPost);
     return url;
@@ -701,10 +723,14 @@ export class PhotosService implements OnModuleInit {
         .toArray()) {
         if (
           job.onlyIfUnused &&
-          (await this.uploads.findOne({
+          ((await this.uploads.findOne({
             $or: [{ key: job.key }, { previewKey: job.key }],
             state: { $in: ['approved', 'attached'] },
-          }))
+          })) ||
+            (await this.videoUploads.findOne({
+              $or: [{ key: job.key }, { finalKey: job.key }],
+              state: { $in: ['scanning', 'approved', 'attached'] },
+            })))
         ) {
           await this.jobs.deleteOne({ _id: job._id });
           continue;
@@ -777,8 +803,12 @@ export class PhotosService implements OnModuleInit {
   private async inUse(key: string) {
     if (await hasPreservationHold(this.db, [`key:${key}`])) return true;
     if (key.startsWith('previews/') && await this.uploads.findOne({ previewKey: key, state: { $in: ['approved', 'attached'] } })) return true;
+    // A temp video is the moderation source until it is copied.
+    if (key.startsWith('temp/') && await this.videoUploads.findOne({ tempKey: key, state: { $in: ['pending', 'scanning'] } })) return true;
     if (key.startsWith('temp/')) return !!(await this.uploads.findOne({ key, state: { $in: ['approved', 'attached'] } }));
     if (await this.db.db.collection('VaultPhotos').findOne({ key, state: { $in: ['approved', 'processing'] } })) return true;
+    if (key.startsWith('videos/') && (await this.videoUploads.findOne({ key, state: { $in: ['approved', 'attached'] } }) ||
+      await this.db.db.collection('Posts').findOne({ 'videos.storageKey': key, deletedAt: null }, { projection: { _id: 1 } }))) return true;
     if (await this.uploads.findOne({ $or: [{ processingKey: key }, { previewProcessingKey: key }, { finalKey: key }], state: 'processing', leaseUntil: { $gt: new Date() } })) return true;
     // Deletion and image replacement can race. An object referenced by a live
     // record must survive, even if an older mutation already enqueued it.
@@ -906,7 +936,12 @@ export class PhotosService implements OnModuleInit {
       add(photo.previewProcessingKey);
       add(photo.finalKey);
     }
-    for (const prefix of [`previews/${owner}/`, `users/${owner}/`, `temp/${owner}/`, `profile/${owner}/`, `posts/${owner}/`, `vault/${owner}/`])
+    for (const video of await this.videoUploads.find({ owner }).toArray()) {
+      add(video.tempKey);
+      add(video.finalKey);
+      add(video.key);
+    }
+    for (const prefix of [`previews/${owner}/`, `users/${owner}/`, `temp/${owner}/`, `profile/${owner}/`, `posts/${owner}/`, `videos/${owner}/`, `vault/${owner}/`])
       (await this.storage.keysUnder(prefix)).forEach(add);
     // Any failure keeps the account blocked and the durable job present.
     for (const key of keys) {
@@ -915,6 +950,7 @@ export class PhotosService implements OnModuleInit {
       } else await this.storage.deleteOne(key);
     }
     await this.uploads.deleteMany({ owner });
+    await this.videoUploads.deleteMany({ owner });
     await this.db.db.collection('VaultPhotos').deleteMany({ owner });
     await this.db.db.collection('VaultTombstones').deleteMany({ owner });
     await this.db.db.collection('Posts').deleteMany({ user: id });

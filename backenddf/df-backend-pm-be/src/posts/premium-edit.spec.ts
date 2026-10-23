@@ -9,7 +9,7 @@ describe('Content tier edits preserve media storage', () => {
     const posts: any = { findByIdPrivate: jest.fn(async () => post), updateOnePrivate: jest.fn(async () => post), findVisiblePost: jest.fn(async () => post) };
     const photos: any = { bind: jest.fn(), retire: jest.fn(), enqueue: jest.fn() };
     const actor: any = { id };
-    await new PostsController(posts, photos, {} as any).update(id, { contentVisibility }, actor);
+    await new PostsController(posts, photos, {} as any, {} as any).update(id, { contentVisibility }, actor);
     expect(posts.updateOnePrivate).toHaveBeenCalledWith(id, { contentVisibility }, actor, 3);
     expect(photos.bind).not.toHaveBeenCalled(); expect(photos.retire).not.toHaveBeenCalled();
     expect(post.media[0].previewKey).toBe('unchanged-preview');

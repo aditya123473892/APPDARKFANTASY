@@ -17,6 +17,8 @@ interface PostMediaDelivery {
   canRead: () => Promise<boolean>;
   original: (image: any) => Promise<string>;
   preview: (key?: string) => string;
+  /** Signs one bound post video; resolves '' when it is unavailable. */
+  video?: (video: any) => Promise<string>;
 }
 
 export class PostMapper {
@@ -38,12 +40,28 @@ export class PostMapper {
       Object.defineProperty(result, mappedImage, { value: true });
       return result;
     }));
+    // Locked videos have no preview frame: nothing is signed for them.
+    const videos = await Promise.all((post.videos || []).map(async (video: any) => {
+      const result = {
+        id: String(video.videoId || ''),
+        url: locked || !delivery.video ? '' : await delivery.video(video),
+        contentType: video.contentType === 'video/quicktime' ? 'video/quicktime' : 'video/mp4',
+      };
+      Object.defineProperty(result, mappedImage, { value: true });
+      return result;
+    }));
     const result: Record<string, any> = {};
     for (const field of ['_id', 'caption', 'location', 'tags', 'user', 'visibility', 'status',
       'createdAt', 'updatedAt', 'likes', 'comments', 'likeCount', 'commentCount',
       'likedByMe', 'followStatus', 'isBookmarked']) {
       if (post[field] !== undefined) result[field] = post[field];
     }
-    return { ...result, contentVisibility, locked, images };
+    // Moderation flags are staff-only metadata.
+    if (viewer.admin && post.flag) {
+      const flag = { reason: post.flag.reason, note: post.flag.note || '', hidden: !!post.flag.hidden, at: post.flag.at };
+      Object.defineProperty(flag, mappedImage, { value: true });
+      result.flag = flag;
+    }
+    return { ...result, contentVisibility, locked, images, videos };
   }
 }

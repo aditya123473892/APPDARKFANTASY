@@ -190,6 +190,7 @@ test('device-auth lockout persists across restarts and no screen lock cannot byp
       authenticateAsync: async () =>
         succeed ? { success: true } : { success: false, error: 'authentication_failed' },
     },
+    './pin': { hasPin: async () => false, cancelPinPrompt() {}, requestPin: async () => '', verifyPin: async () => false, savePin: async () => {}, clearPin: async () => {} },
     './files': { clearTemps: async () => {} },
     './repository': {
       setting: async (o, k) => settings.get(k),
@@ -270,6 +271,7 @@ test('Android device-credential activity can return successfully, and normal bac
     },
     'expo-secure-store': {},
     './files': { clearTemps: async () => {} },
+    './pin': { hasPin: async () => false, cancelPinPrompt() {}, requestPin: async () => '', verifyPin: async () => false, savePin: async () => {}, clearPin: async () => {} },
     './crypto': crypto,
     './repository': { setting: async () => '0', setSetting: async () => {} },
   });
@@ -412,6 +414,7 @@ test('Android 14 exports only after confirmation, without photo-read permission,
         return 'file:///cache/vault-temp/view.jpg';
       },
     },
+    './repository': { get: async () => ({ kind: 'photo' }) },
     './files': {
       read: async () => Buffer.from('jpeg'),
       temporaryFile: async () => 'file:///cache/vault-temp/export.jpg',
@@ -760,4 +763,74 @@ test('library refresh runs before queued work and identical server rows do not r
   await sync.syncVault();
   assert.equal(writes, 2);
   assert.equal(local.hidden, 0);
+});
+
+function store() {
+  let state;
+  return {
+    create: (init) => {
+      state = init();
+      const hook = () => state;
+      hook.getState = () => state;
+      hook.setState = (update) => {
+        state = { ...state, ...(typeof update === 'function' ? update(state) : update) };
+      };
+      hook.subscribe = () => () => {};
+      return hook;
+    },
+  };
+}
+test('vault PIN is salted/hashed, verified exactly and unlocks through the PIN prompt with lockout', async () => {
+  const secure = new Map();
+  const secureStore = {
+    getItemAsync: async (key) => secure.get(key) ?? null,
+    setItemAsync: async (key, value) => secure.set(key, value),
+    deleteItemAsync: async (key) => secure.delete(key),
+  };
+  const pin = load('src/features/vault/pin.ts', {
+    'expo-secure-store': secureStore,
+    zustand: store(),
+    './crypto': crypto,
+  });
+  await assert.rejects(pin.savePin('owner', '12'), /4 to 8 digits/);
+  await pin.savePin('owner', '4821');
+  const saved = [...secure.values()][0];
+  assert.equal([...secure.keys()][0], 'darkfantasy.vault.owner.passcode');
+  assert.doesNotMatch(saved, /4821/);
+  assert.equal(await pin.verifyPin('owner', '4821'), true);
+  assert.equal(await pin.verifyPin('owner', '4820'), false);
+  assert.equal(await pin.verifyPin('other', '4821'), false);
+
+  const settings = new Map([['unlockMethod', 'pin']]);
+  let entered = '0000';
+  const lockState = store();
+  const lock = load('src/features/vault/lock.ts', {
+    'react-native': { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } },
+    zustand: lockState,
+    'expo-local-authentication': {
+      SecurityLevel: { NONE: 0 },
+      // A PIN vault must not need, or fall back to, device authentication.
+      getEnrolledLevelAsync: async () => 0,
+      authenticateAsync: async () => {
+        throw Error('device auth must not run for PIN unlock');
+      },
+    },
+    './files': { clearTemps: async () => {} },
+    './repository': {
+      setting: async (o, k) => settings.get(k) ?? null,
+      setSetting: async (o, k, v) => settings.set(k, v),
+    },
+    './pin': { ...pin, requestPin: async () => entered },
+  });
+  assert.equal(await lock.unlockMethod('owner'), 'pin');
+  await assert.rejects(lock.unlock('owner'), /Incorrect PIN/);
+  entered = '4821';
+  await lock.unlock('owner');
+  assert.equal(lock.useVaultLock.getState().unlocked, true);
+  assert.equal(settings.get('attempts'), '0');
+  lock.lock();
+  entered = '1111';
+  for (let i = 0; i < 5; i++) await assert.rejects(lock.unlock('owner'));
+  entered = '4821';
+  await assert.rejects(lock.unlock('owner'), /Too many attempts/);
 });

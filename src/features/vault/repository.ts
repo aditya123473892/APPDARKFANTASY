@@ -24,6 +24,10 @@ export function database(owner: string): Promise<SQLite.SQLiteDatabase> {
         CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, photoId TEXT NOT NULL, operation TEXT NOT NULL,
           attempts INTEGER NOT NULL DEFAULT 0, nextAttemptAt INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS settings (id TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+      // Videos were added later; existing rows are photos. Fails harmlessly once the column exists.
+      await db
+        .execAsync("ALTER TABLE photos ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'")
+        .catch(() => undefined);
       // Recover interrupted work after process death.
       await db.runAsync("UPDATE photos SET syncState='pending' WHERE syncState='syncing'");
       return db;
@@ -50,9 +54,10 @@ export async function save(
   await db.withExclusiveTransactionAsync(async (tx) => {
     await tx.runAsync(
       `INSERT OR REPLACE INTO photos
-      (id,s3Key,localPath,sha256,size,status,hidden,sortOrder,createdAt,updatedAt,deletedAt,syncState,error)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      (id,kind,s3Key,localPath,sha256,size,status,hidden,sortOrder,createdAt,updatedAt,deletedAt,syncState,error)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       photo.id,
+      photo.kind === 'video' ? 'video' : 'photo',
       photo.s3Key,
       photo.localPath,
       photo.sha256,

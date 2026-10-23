@@ -16,8 +16,8 @@ const member = {
 export const permissions = {
   user: { ...member, canRequestConnection: true },
   manager: { ...member },
-  // The moderation console is separate; this role grants no Android admin tools.
-  moderator: { ...member },
+  // Moderators review reports and blocks; admin media tools stay admin-only.
+  moderator: { ...member, canModerate: true },
   admin: { ...member, canModerate: true, canViewAdminScreens: true, canCreateGroups: true },
   root: { ...member, canModerate: true, canViewAdminScreens: true, canCreateGroups: true },
 } satisfies Record<Role, Record<string, boolean>>;

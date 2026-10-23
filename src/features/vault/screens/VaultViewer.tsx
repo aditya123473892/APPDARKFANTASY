@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Alert, Image, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { Text, Button, IconButton } from '@/components/ui';
 import { useTheme } from '@/theme/useTheme';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
@@ -13,6 +14,21 @@ import { exportPhotos } from '../export';
 import { vaultError } from '../presentation';
 import type { VaultPhoto } from '../types';
 
+/** Plays a private local file; unmounting on lock/background releases the player. */
+function VaultVideo({ uri }: { uri: string }): React.JSX.Element {
+  const player = useVideoPlayer({ uri, useCaching: false }, (instance) => {
+    instance.loop = false;
+  });
+  return (
+    <VideoView
+      player={player}
+      nativeControls
+      contentFit="contain"
+      allowsPictureInPicture={false}
+      style={StyleSheet.absoluteFill}
+    />
+  );
+}
 export function VaultViewer(): React.JSX.Element {
   useScreenshotProtection('vault-viewer');
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -30,6 +46,7 @@ export function VaultViewer(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const unlocked = lockOpen && unlockedOwner === owner;
   const uri = unlocked && active && display?.id === id ? display.uri : undefined;
+  const noun = photo?.kind === 'video' ? 'video' : 'photo';
 
   useEffect(() => {
     let mounted = true;
@@ -67,6 +84,8 @@ export function VaultViewer(): React.JSX.Element {
         const row = await get(owner, id);
         if (cancelled) return;
         if (!row || row.deletedAt) throw new Error('Photo unavailable');
+        // Clear any previous item first so a video player never starts on stale media.
+        setDisplay(undefined);
         setError('');
         setPhoto(row);
         const restore = repair.current;
@@ -76,7 +95,7 @@ export function VaultViewer(): React.JSX.Element {
       })().catch(() => {
         if (!cancelled) {
           setDisplay(undefined);
-          setError('Couldn’t open this photo. Check your connection and try again.');
+          setError('Couldn’t open this item. Check your connection and try again.');
         }
       });
     }
@@ -98,7 +117,7 @@ export function VaultViewer(): React.JSX.Element {
   };
   const remove = () =>
     Alert.alert(
-      'Delete photo?',
+      `Delete ${noun}?`,
       'This removes it from your vault on all devices. Exported copies will stay.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -115,22 +134,22 @@ export function VaultViewer(): React.JSX.Element {
       ],
     );
   const more = () =>
-    Alert.alert('Photo options', undefined, [
+    Alert.alert(`${noun === 'video' ? 'Video' : 'Photo'} options`, undefined, [
       {
-        text: photo?.hidden ? 'Unhide photo' : 'Hide photo',
+        text: photo?.hidden ? `Unhide ${noun}` : `Hide ${noun}`,
         onPress: () =>
           void run(
             () => editPhoto(owner, id, { hidden: photo?.hidden ? 0 : 1 }),
             'Couldn’t update this photo.',
           ),
       },
-      { text: 'Delete photo', style: 'destructive', onPress: remove },
+      { text: `Delete ${noun}`, style: 'destructive', onPress: remove },
       { text: 'Cancel', style: 'cancel' },
     ]);
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']}>
       <Header
-        title="Private photo"
+        title={noun === 'video' ? 'Private video' : 'Private photo'}
         back
         backFallback={'/vault' as Href}
         action={
@@ -162,7 +181,9 @@ export function VaultViewer(): React.JSX.Element {
         ) : (
           <>
             <View style={[styles.image, { backgroundColor: colors.mediaBackground }]}>
-              {uri ? (
+              {uri && photo?.kind === 'video' ? (
+                <VaultVideo key={`${id}:${photo.sha256}`} uri={uri} />
+              ) : uri ? (
                 <Image
                   key={`${id}:${photo?.sha256}`}
                   accessibilityLabel="Private vault photo"

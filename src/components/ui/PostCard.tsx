@@ -86,9 +86,10 @@ function MediaGallery({ media, locked, postId }: { media: PostMedia[]; locked: b
           style={[styles.mediaScroller, { backgroundColor: theme.colors.surfaceMuted }]}
         >
           {media.map((item, index) => (
-            item.mimetype?.startsWith('video/') && !locked ? (
+            item.mimetype?.startsWith('video/') ? (
               <RemoteMedia key={item.id || `${postId}:${index}`} uri={item.uri}
-                mimetype={item.mimetype} width={width} height={width / aspect} />
+                mimetype={item.mimetype} locked={locked || item.locked}
+                width={width} height={width / aspect} />
             ) : <PostImage
               key={item.id || `${postId}:${index}`}
               image={{ ...item, id: item.id || `${postId}:${index}` }}

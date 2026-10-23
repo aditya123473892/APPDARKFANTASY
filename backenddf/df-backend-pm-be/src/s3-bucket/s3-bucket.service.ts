@@ -15,6 +15,19 @@ import sharp = require('sharp');
 import { bucketForKey } from './storage-layout';
 
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+export const VIDEO_TYPES = ['video/mp4', 'video/quicktime'] as const;
+export type VideoContentType = (typeof VIDEO_TYPES)[number];
+/** Default 50 MB, operator-tunable up to 200 MB. */
+export function videoMaxBytes() {
+  const configured = Number(process.env.VIDEO_MAX_BYTES) || 50 * 1024 * 1024;
+  return Math.min(200 * 1024 * 1024, Math.max(1024 * 1024, Math.floor(configured)));
+}
+/** ISO base media (MP4/MOV) files start with a size word followed by an `ftyp` box. */
+export function videoType(bytes: Buffer): VideoContentType | undefined {
+  if (bytes.length < 12 || bytes.toString('ascii', 4, 8) !== 'ftyp') return undefined;
+  return bytes.toString('ascii', 8, 12) === 'qt  ' ? 'video/quicktime' : 'video/mp4';
+}
+export type VideoScan = 'pending' | 'approved' | 'rejected';
 export function imageType(bytes: Buffer): string | undefined {
   if (
     bytes.length >= 12 &&
@@ -131,7 +144,7 @@ export class S3BucketService implements OnModuleInit {
       'Upload images through /photos/upload-url and /photos/confirm',
     );
   }
-  async presign(key: string, contentType: string, seconds = 300) {
+  async presign(key: string, contentType: string, seconds = 300, maxBytes = PHOTO_MAX_BYTES) {
     await this.ensurePrivate(this.bucketFor(key));
     return createPresignedPost(this.s3, {
       Bucket: this.bucketFor(key),
@@ -146,9 +159,73 @@ export class S3BucketService implements OnModuleInit {
         ['eq', '$key', key],
         ['eq', '$Content-Type', contentType],
         ['eq', '$success_action_status', '204'],
-        ['content-length-range', 1, PHOTO_MAX_BYTES],
+        ['content-length-range', 1, maxBytes],
       ],
     });
+  }
+  /**
+   * Videos are never buffered whole: check the declared size/type, then sniff
+   * only the container header with a ranged, ETag-pinned read.
+   */
+  async verifyVideo(key: string, expectedType: string) {
+    if (!(VIDEO_TYPES as readonly string[]).includes(expectedType))
+      throw new UnsupportedMediaTypeException('Only MP4 and MOV videos are supported');
+    const head = await this.s3.headObject({ Bucket: this.bucketFor(key), Key: key });
+    if (!head.ContentLength || head.ContentLength > videoMaxBytes() ||
+        head.ContentType !== expectedType || !head.ETag)
+      throw new BadRequestException('Invalid video size or type');
+    const result = await this.s3.getObject({ Bucket: this.bucketFor(key), Key: key, IfMatch: head.ETag, Range: 'bytes=0-31' });
+    const stream = result.Body as Readable;
+    if (!stream) throw new BadRequestException('Video body is missing');
+    const chunks: Buffer[] = [];
+    for await (const part of stream) chunks.push(Buffer.from(part));
+    if (!videoType(Buffer.concat(chunks)))
+      throw new UnsupportedMediaTypeException('Video content does not match its declared type');
+    return { size: head.ContentLength, etag: head.ETag };
+  }
+  /** Server-side copy of a verified video; the source ETag pins exactly what was scanned. */
+  async copyVideo(sourceKey: string, destinationKey: string, contentType: string, etag: string) {
+    if (!(VIDEO_TYPES as readonly string[]).includes(contentType)) throw new BadRequestException('Invalid video type');
+    const source = this.bucketFor(sourceKey);
+    await Promise.all([this.ensurePrivate(source), this.ensurePrivate(this.bucketFor(destinationKey))]);
+    return this.s3.copyObject({
+      Bucket: this.bucketFor(destinationKey), Key: destinationKey,
+      CopySource: `${source}/${sourceKey.split('/').map(encodeURIComponent).join('/')}`,
+      CopySourceIfMatch: etag, MetadataDirective: 'REPLACE', ContentType: contentType,
+      CacheControl: /^vault\//.test(destinationKey) ? 'private, no-store' : 'private, max-age=120',
+      ContentDisposition: 'inline', ServerSideEncryption: 'AES256',
+    });
+  }
+  /**
+   * Starts asynchronous Rekognition video moderation. Returns null when the
+   * development bypass is active, meaning the video is approved immediately.
+   */
+  async startVideoModeration(key: string): Promise<string | null> {
+    if (this.developmentModerationBypass) return null;
+    try {
+      const { JobId } = await this.videoScanner().startContentModeration({
+        Video: { S3Object: { Bucket: this.bucketFor(key), Name: key } }, MinConfidence: 60,
+      });
+      if (!JobId) throw new Error('Missing moderation job');
+      return JobId;
+    } catch {
+      throw new ServiceUnavailableException('Video moderation is temporarily unavailable');
+    }
+  }
+  /** Any moderation label, or a failed/unreadable scan, rejects the video. */
+  async videoModerationResult(jobId: string): Promise<VideoScan> {
+    let result;
+    try {
+      result = await this.videoScanner().getContentModeration({ JobId: jobId, MaxResults: 1 });
+    } catch {
+      throw new ServiceUnavailableException('Video moderation is temporarily unavailable');
+    }
+    if (result.JobStatus === 'IN_PROGRESS') return 'pending';
+    if (result.JobStatus !== 'SUCCEEDED' || !Array.isArray(result.ModerationLabels)) return 'rejected';
+    return result.ModerationLabels.length ? 'rejected' : 'approved';
+  }
+  protected videoScanner() {
+    return new Rekognition({ ...this.options, region: process.env.AWS_REKOGNITION_REGION || this.options.region });
   }
   async readVerified(key: string, expectedType: string) {
     const head = await this.s3
@@ -339,7 +416,7 @@ export class S3BucketService implements OnModuleInit {
   keyFromReference(value?: string): string | undefined {
     if (!value || value.includes('\\') || value.split('/').some(part => part === '..' || part === '.')) return undefined;
     if (
-      /^(previews|users|temp|profile|posts|avatars|groupIcon|events|groups|vault|chat|quarantine|reports|chat-media)\//.test(value) &&
+      /^(previews|users|temp|profile|posts|videos|avatars|groupIcon|events|groups|vault|chat|quarantine|reports|chat-media)\//.test(value) &&
       !value.includes('://')
     )
       return value;

@@ -1,6 +1,9 @@
 export type SyncState = 'pending_upload' | 'pending' | 'syncing' | 'synced' | 'failed' | 'rejected';
+export type VaultKind = 'photo' | 'video';
 export interface VaultPhoto {
   id: string;
+  /** Photos are JPEGs; videos are stored byte-for-byte as MP4. */
+  kind: VaultKind;
   s3Key: string | null;
   localPath: string | null;
   sha256: string;

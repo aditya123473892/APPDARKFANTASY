@@ -55,6 +55,53 @@ export class ModService {
     return Object.fromEntries(Object.entries(safe).map(([key, value]) => [key,
       typeof value === 'string' ? value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;') : value]));
   }
+  private async names(ids: string[]) {
+    const users = await this.db.db.collection('Users').find({ _id: { $in: [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) } },
+      { projection: { displayname: 1, firstName: 1, lastName: 1, isBlocked: 1, moderationSuspendedUntil: 1 } }).toArray();
+    return new Map(users.map((user: any) => [String(user._id), {
+      id: String(user._id),
+      name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.displayname || 'Member',
+      handle: user.displayname || '',
+      restricted: !!user.isBlocked || user.moderationSuspendedUntil > new Date(),
+    }]));
+  }
+  /** Who blocked whom, newest first. Rows involving the reviewer are excluded (conflict of interest). */
+  async listBlocks(actor: Actor, before?: string) {
+    const cursor = /^(\d{1,15})_([\w:-]{1,100})$/.exec(before || '');
+    const actorId = new Types.ObjectId(actor.id);
+    const rows = await this.db.db.collection<any>('UserBlocks').find({
+      blockerId: { $ne: actorId }, blockedId: { $ne: actorId },
+      ...(cursor ? { $or: [{ createdAt: { $lt: new Date(Number(cursor[1])) } }, { createdAt: new Date(Number(cursor[1])), _id: { $lt: cursor[2] } }] } : {}),
+    }).sort({ createdAt: -1, _id: -1 }).limit(51).toArray();
+    await this.audit.append({ actorId: actor.id, role: this.role(actor), action: 'blocks_view', reportId: 'blocks', reason: 'case_review' });
+    const page = rows.slice(0, 50);
+    const users = await this.names(page.flatMap((row) => [String(row.blockerId), String(row.blockedId)]));
+    const unknown = (id: string) => ({ id, name: 'Deleted account', handle: '', restricted: true });
+    return {
+      blocks: page.map((row) => ({ id: String(row._id), createdAt: row.createdAt,
+        blocker: users.get(String(row.blockerId)) || unknown(String(row.blockerId)),
+        blocked: users.get(String(row.blockedId)) || unknown(String(row.blockedId)) })),
+      nextCursor: rows.length > 50 ? `${new Date(page[49].createdAt).getTime()}_${page[49]._id}` : null,
+    };
+  }
+  /** Most-blocked members, with their open report counts, to surface repeat offenders. */
+  async blockSummary(actor: Actor) {
+    const top = await this.db.db.collection('UserBlocks').aggregate([
+      { $match: { blockedId: { $ne: new Types.ObjectId(actor.id) } } },
+      { $group: { _id: '$blockedId', blocks: { $sum: 1 }, lastBlockedAt: { $max: '$createdAt' } } },
+      { $sort: { blocks: -1, lastBlockedAt: -1 } }, { $limit: 20 },
+    ]).toArray();
+    await this.audit.append({ actorId: actor.id, role: this.role(actor), action: 'blocks_summary_view', reportId: 'blocks', reason: 'case_review' });
+    const users = await this.names(top.map((row) => String(row._id)));
+    const reports = await this.db.db.collection('Reports').aggregate([
+      { $match: { open: true, targetOwnerId: { $in: top.map((row) => String(row._id)) }, ...this.scope(actor) } },
+      { $group: { _id: '$targetOwnerId', count: { $sum: 1 } } },
+    ]).toArray();
+    const open = new Map(reports.map((row) => [String(row._id), row.count]));
+    return top.map((row) => ({ user: users.get(String(row._id)) || { id: String(row._id), name: 'Deleted account', handle: '', restricted: true },
+      blocks: row.blocks, lastBlockedAt: row.lastBlockedAt, openReports: open.get(String(row._id)) || 0 }));
+  }
+  private role(actor: Actor) { return actor.roles.includes('root') ? 'root' : this.admin(actor) ? 'admin' : 'moderator'; }
   async reviewQueue(actor: Actor) {
     const conflicts = await this.db.db.collection('Reports').distinct('targetOwnerId', { reporterId: actor.id });
     const cases = await this.db.db.collection<any>('ReportReviewQueue').find({ targetOwnerId: { $nin: [actor.id, ...conflicts] },
