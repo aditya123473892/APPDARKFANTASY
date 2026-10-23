@@ -64,6 +64,12 @@ export function SettingsScreen(): React.JSX.Element {
           />
         </SettingsGroup>
         <SettingsGroup title="Account">
+          <SettingsRow
+            icon="sparkles-outline"
+            title="Chat with God"
+            subtitle="Ask the AI guide anything about the app"
+            onPress={() => router.push('/god-chat' as Href)}
+          />
           <SettingsRow icon="flag-outline" title="My reports" onPress={() => router.push('/settings/my-reports' as Href)} />
           <SettingsRow
             icon="ban-outline"
