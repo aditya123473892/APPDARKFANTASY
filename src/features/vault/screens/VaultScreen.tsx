@@ -8,13 +8,14 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, Header } from '@/components/layout';
 import { Text, Button, IconButton } from '@/components/ui';
 import { useTheme } from '@/theme/useTheme';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
-import { useVaultLock, unlock, lock, noDeviceLock } from '../lock';
+import { useVaultLock, unlock, lock, noDeviceLock, unlockMethod } from '../lock';
+import type { UnlockMethod } from '../pin';
 import { addPhotos, editPhoto, initializeVaultOwner } from '../vaultService';
 import * as repo from '../repository';
 import type { VaultPhoto } from '../types';
@@ -35,6 +36,7 @@ export function VaultScreen(): React.JSX.Element {
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
   const [hidden, setHidden] = useState(false);
   const [noLock, setNoLock] = useState(false);
+  const [method, setMethod] = useState<UnlockMethod>('device');
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,6 +55,35 @@ export function VaultScreen(): React.JSX.Element {
       return () => setFocused(false);
     }, []),
   );
+  useFocusEffect(
+    useCallback(() => {
+      if (owner)
+        void unlockMethod(owner)
+          .then(setMethod)
+          .catch(() => undefined);
+    }, [owner]),
+  );
+  const pinUnlock = method === 'pin';
+  const addFromCamera = () =>
+    Alert.alert('Camera', undefined, [
+      {
+        text: 'Take a photo',
+        onPress: () =>
+          void run(
+            () => addPhotos(owner, 'camera'),
+            'Couldn’t open the camera. Check camera permission.',
+          ),
+      },
+      {
+        text: 'Record a video',
+        onPress: () =>
+          void run(
+            () => addPhotos(owner, 'video-camera'),
+            'Couldn’t record a video. Check camera permission.',
+          ),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   useEffect(() => {
     let mounted = true;
     void initializeVaultOwner()
@@ -122,7 +153,7 @@ export function VaultScreen(): React.JSX.Element {
     setSelected((ids) => (ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]));
   const deleteSelected = () =>
     Alert.alert(
-      `Delete ${selected.length === 1 ? 'photo' : `${selected.length} photos`}?`,
+      `Delete ${selected.length === 1 ? 'item' : `${selected.length} items`}?`,
       'This removes them from your vault on all devices. Exported copies will stay.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -160,11 +191,20 @@ export function VaultScreen(): React.JSX.Element {
         backFallback="/settings"
         action={
           canView && (
-            <IconButton
-              icon={selected.length ? 'close' : 'lock-closed-outline'}
-              label={selected.length ? 'Clear selection' : 'Lock vault'}
-              onPress={() => (selected.length ? setSelected([]) : lock())}
-            />
+            <View style={styles.headerActions}>
+              {!selected.length && (
+                <IconButton
+                  icon="settings-outline"
+                  label="Vault security"
+                  onPress={() => router.push('/vault/settings' as Href)}
+                />
+              )}
+              <IconButton
+                icon={selected.length ? 'close' : 'lock-closed-outline'}
+                label={selected.length ? 'Clear selection' : 'Lock vault'}
+                onPress={() => (selected.length ? setSelected([]) : lock())}
+              />
+            </View>
           )
         }
       />
@@ -177,9 +217,11 @@ export function VaultScreen(): React.JSX.Element {
             Just for you
           </Text>
           <Text color="secondary" center>
-            {noLock
-              ? 'Set up a screen lock on your phone to open your vault.'
-              : 'Unlock to see your private photos.'}
+            {pinUnlock
+              ? 'Enter your vault PIN to see your private photos and videos.'
+              : noLock
+                ? 'Set up a screen lock on your phone, or open the vault with a PIN.'
+                : 'Unlock to see your private photos and videos.'}
           </Text>
           {!!error && (
             <Text color="danger" center accessibilityRole="alert">
@@ -187,10 +229,10 @@ export function VaultScreen(): React.JSX.Element {
             </Text>
           )}
           <Button
-            label="Unlock vault"
-            icon="finger-print"
+            label={pinUnlock ? 'Enter PIN' : 'Unlock vault'}
+            icon={pinUnlock ? 'keypad-outline' : 'finger-print'}
             loading={busy}
-            disabled={!owner || noLock}
+            disabled={!owner || (noLock && !pinUnlock)}
             onPress={() => void run(() => unlock(owner), 'Couldn’t unlock. Please try again.')}
             style={styles.unlock}
           />
@@ -199,7 +241,7 @@ export function VaultScreen(): React.JSX.Element {
         <View style={styles.library}>
           <View style={styles.topLine}>
             <Text color="secondary" variant="caption">
-              Only you can see these photos
+              Only you can see these photos and videos
             </Text>
             {offline && (
               <View style={[styles.offline, { backgroundColor: colors.surfaceMuted }]}>
@@ -237,7 +279,7 @@ export function VaultScreen(): React.JSX.Element {
                 <Text variant="label" color={hidden === hiddenOnly ? 'default' : 'secondary'}>
                   {hiddenOnly
                     ? `Hidden · ${photos.filter((photo) => photo.hidden).length}`
-                    : `All photos · ${photos.length}`}
+                    : `All · ${photos.length}`}
                 </Text>
               </Pressable>
             ))}
@@ -284,12 +326,12 @@ export function VaultScreen(): React.JSX.Element {
                     color={colors.textMuted}
                   />
                   <Text variant="heading" center>
-                    {hidden ? 'No hidden photos' : 'Your private collection'}
+                    {hidden ? 'Nothing hidden' : 'Your private collection'}
                   </Text>
                   <Text color="secondary" center>
                     {hidden
-                      ? 'Hide a photo from its menu to keep it here.'
-                      : 'Add photos from your phone or take a new one.'}
+                      ? 'Hide a photo or video from its menu to keep it here.'
+                      : 'Add photos and videos from your phone, or use the camera.'}
                   </Text>
                 </View>
               )
@@ -304,7 +346,10 @@ export function VaultScreen(): React.JSX.Element {
                 onPress={() =>
                   selected.length
                     ? toggle(item.id)
-                    : router.push({ pathname: '/vault/[id]', params: { id: item.id } })
+                    : router.push({
+                        pathname: '/vault/[id]',
+                        params: { id: item.id },
+                      } as unknown as Href)
                 }
               />
             )}
@@ -328,7 +373,7 @@ export function VaultScreen(): React.JSX.Element {
               />
               <IconButton
                 icon="download-outline"
-                label="Export selected photos"
+                label="Export selected items"
                 disabled={busy}
                 onPress={() =>
                   void run(
@@ -339,7 +384,7 @@ export function VaultScreen(): React.JSX.Element {
               />
               <IconButton
                 icon="trash-outline"
-                label="Delete selected photos"
+                label="Delete selected items"
                 disabled={busy}
                 onPress={deleteSelected}
               />
@@ -347,26 +392,21 @@ export function VaultScreen(): React.JSX.Element {
           ) : (
             <View style={[styles.actions, { borderTopColor: colors.border }]}>
               <Button
-                label="Add photos"
+                label="Add photos & videos"
                 icon="add"
                 fullWidth={false}
                 loading={busy}
                 style={styles.grow}
                 onPress={() =>
-                  void run(() => addPhotos(owner), 'Couldn’t add these photos. Please try again.')
+                  void run(() => addPhotos(owner), 'Couldn’t add these items. Please try again.')
                 }
               />
               <IconButton
                 icon="camera-outline"
-                label="Take a photo"
+                label="Take a photo or video"
                 filled
                 disabled={busy}
-                onPress={() =>
-                  void run(
-                    () => addPhotos(owner, true),
-                    'Couldn’t open the camera. Check camera permission.',
-                  )
-                }
+                onPress={addFromCamera}
               />
             </View>
           )}
@@ -377,6 +417,7 @@ export function VaultScreen(): React.JSX.Element {
 }
 const styles = StyleSheet.create({
   grow: { flex: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   library: { flex: 1, gap: 12 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
   lockIcon: {

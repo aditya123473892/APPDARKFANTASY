@@ -13,6 +13,10 @@ export class ModController {
   constructor(private readonly mod: ModService) {}
   @Get('reports')
   async queue(@AuthUser() actor: any, @Query('before') before?: string) { return successGetRes(await this.mod.queue(actor, before)); }
+  @Get('blocks')
+  async blocks(@AuthUser() actor: any, @Query('before') before?: string) { return successGetRes(await this.mod.listBlocks(actor, before)); }
+  @Get('blocks/summary')
+  async blockSummary(@AuthUser() actor: any) { return successGetRes(await this.mod.blockSummary(actor)); }
   @Get('review-queue')
   async review(@AuthUser() actor: any) { return successGetRes(await this.mod.reviewQueue(actor)); }
   @Get('reports/:reportId')

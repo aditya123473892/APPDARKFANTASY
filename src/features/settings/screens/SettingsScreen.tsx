@@ -6,6 +6,7 @@ import { Header, Screen } from '@/components/layout';
 import { Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { useAuthStore } from '@/features/auth/store/authStore';
+import { useCan } from '@/features/auth/hooks/useCurrentUser';
 import { spacing } from '@/theme';
 import { APP_NAME } from '@/utils/constants';
 import { useTheme } from '@/theme/useTheme';
@@ -17,6 +18,8 @@ export function SettingsScreen(): React.JSX.Element {
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
   const [loggingOut, setLoggingOut] = useState(false);
+  const canModerate = useCan('canModerate');
+  const canAdmin = useCan('canViewAdminScreens');
 
   const confirmLogout = (): void =>
     Alert.alert('Log out?', 'You will need to sign in again to see your messages.', [
@@ -70,7 +73,7 @@ export function SettingsScreen(): React.JSX.Element {
           <SettingsRow
             icon="lock-closed-outline"
             title="Photo Vault"
-            subtitle="Private photos, available offline"
+            subtitle="Private photos and videos, PIN or biometric lock"
             onPress={() => router.push('/vault' as Href)}
           />
           <SettingsRow
@@ -87,6 +90,29 @@ export function SettingsScreen(): React.JSX.Element {
             last
           />
         </SettingsGroup>
+
+        {(canModerate || canAdmin) && (
+          <SettingsGroup title="Staff">
+            {canAdmin && (
+              <SettingsRow
+                icon="images-outline"
+                title="Media review"
+                subtitle="All uploaded photos and videos: flag or make subscriber-only"
+                onPress={() => router.push('/admin/media' as Href)}
+                last={!canModerate}
+              />
+            )}
+            {canModerate && (
+              <SettingsRow
+                icon="shield-outline"
+                title="Moderation"
+                subtitle="Reports and blocks"
+                onPress={() => router.push('/moderation' as Href)}
+                last
+              />
+            )}
+          </SettingsGroup>
+        )}
 
         <SettingsGroup>
           <SettingsRow

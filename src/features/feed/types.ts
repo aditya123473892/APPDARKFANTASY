@@ -10,7 +10,16 @@ export type ContentVisibility = 'normal' | 'premium';
 export type PostImageResponse = {
   id: string; url: string; blurhash: string | null; width: number | null; height: number | null;
 };
-export type PostMedia = { id?: string; uri: string; blurhash?: string | null; width: number; height: number; mimetype?: string };
+export type PostMedia = {
+  id?: string;
+  uri: string;
+  blurhash?: string | null;
+  width: number;
+  height: number;
+  mimetype?: string;
+  /** Premium content the viewer is not subscribed to; videos then have no URL. */
+  locked?: boolean;
+};
 export type PostAudience = 'everyone' | 'connections' | 'private';
 export type PostComment = {
   id: string;

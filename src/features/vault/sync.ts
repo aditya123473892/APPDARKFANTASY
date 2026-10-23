@@ -84,7 +84,54 @@ async function canonicalBytes(
     cancelTransfers.delete(cancel);
   }
 }
+/** Videos download straight to disk and are verified natively (size + MD5), never buffered in JS. */
+async function downloadVideo(owner: string, id: string): Promise<void> {
+  const scope = assertUnlocked(owner),
+    session = sessionIdentity.generation;
+  const { url, photo } = await remoteRequest<{ url: string; photo: RemotePhoto }>(() =>
+    apiClient.get(`/vault/${id}/download-url`),
+  );
+  const partial = `${files.tempDirectory()}${id}.download`;
+  await FS.makeDirectoryAsync(files.tempDirectory(), { intermediates: true });
+  const task = FS.createDownloadResumable(signedURL(url), partial, { cache: false });
+  const cancel = () => {
+    void task.cancelAsync().catch(() => undefined);
+  };
+  cancelTransfers.add(cancel);
+  const timeout = setTimeout(cancel, 600_000);
+  try {
+    const result = await task.downloadAsync();
+    if (!result || result.status !== 200) throw new Error('Download failed');
+    assertSessionCurrent(session);
+    assertEpoch(owner, scope);
+    await serial(async () => {
+      assertEpoch(owner, scope);
+      assertSessionCurrent(session);
+      const local = await repo.get(owner, id);
+      if (local?.deletedAt || !local?.s3Key) throw new Error('No cloud copy is available.');
+      const stored = await files.storeVideo(owner, id, partial, true);
+      if (stored.size !== photo.size || `md5:${stored.md5}` !== photo.sha256) {
+        await FS.deleteAsync(stored.path, { idempotent: true });
+        throw new Error('Video checksum failed');
+      }
+      assertEpoch(owner, scope);
+      assertSessionCurrent(session);
+      await repo.save(owner, {
+        ...local,
+        localPath: stored.path,
+        sha256: photo.sha256,
+        size: photo.size,
+      });
+      refreshVault();
+    });
+  } finally {
+    clearTimeout(timeout);
+    cancelTransfers.delete(cancel);
+    await FS.deleteAsync(partial, { idempotent: true }).catch(() => undefined);
+  }
+}
 export async function downloadPhoto(owner: string, id: string): Promise<void> {
+  if ((await repo.get(owner, id))?.kind === 'video') return downloadVideo(owner, id);
   const scope = assertUnlocked(owner),
     session = sessionIdentity.generation;
   const { bytes, photo } = await canonicalBytes(owner, id);
@@ -106,9 +153,12 @@ export async function downloadPhoto(owner: string, id: string): Promise<void> {
     bytes.fill(0);
   }
 }
+/** Thrown while the server is still scanning a video; retried soon without counting as a failure. */
+const SCANNING = 202;
 async function upload(owner: string, photo: VaultPhoto, valid: () => void): Promise<RemotePhoto> {
   if (!photo.localPath) throw new Error('Local photo missing');
   valid();
+  const video = photo.kind === 'video';
   const signed = await remoteRequest<{
     status: string;
     url?: string;
@@ -120,11 +170,43 @@ async function upload(owner: string, photo: VaultPhoto, valid: () => void): Prom
       hidden: Boolean(photo.hidden),
       order: photo.sortOrder,
       updatedAt: photo.updatedAt,
+      ...(video
+        ? {
+            kind: 'video',
+            contentType: 'video/mp4',
+            size: photo.size,
+            md5: photo.sha256.replace(/^md5:/, ''),
+          }
+        : {}),
     }),
   );
   if (signed.status === 'rejected')
     throw Object.assign(new Error('Moderation rejected'), { status: 422 });
-  if (signed.status !== 'approved') {
+  if (video && signed.status === 'pending') {
+    // The private file is uploaded directly; no JS copy of the video is made.
+    if (!signed.fields?.key) throw new Error('Invalid upload response');
+    const task = FS.createUploadTask(signedURL(signed.url!), photo.localPath, {
+      httpMethod: 'POST',
+      uploadType: FS.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType: 'video/mp4',
+      parameters: signed.fields,
+    });
+    const cancel = () => {
+      void task.cancelAsync().catch(() => undefined);
+    };
+    cancelTransfers.add(cancel);
+    const timeout = setTimeout(cancel, 600_000);
+    try {
+      const result = await task.uploadAsync();
+      valid();
+      if (result?.status !== 204)
+        throw Object.assign(new Error('Upload failed'), { status: result?.status });
+    } finally {
+      clearTimeout(timeout);
+      cancelTransfers.delete(cancel);
+    }
+  } else if (!video && signed.status !== 'approved') {
     const bytes = await files.plaintext(owner, photo.id, photo.localPath);
     let uri: string | undefined;
     try {
@@ -159,9 +241,11 @@ async function upload(owner: string, photo: VaultPhoto, valid: () => void): Prom
     }
   }
   valid();
-  const confirmed = await remoteRequest<RemotePhoto>(() =>
+  const confirmed = await remoteRequest<RemotePhoto & { processing?: boolean }>(() =>
     apiClient.post('/vault/confirm', { id: photo.id }, { timeout: 60_000 }),
   );
+  if (confirmed.processing)
+    throw Object.assign(new Error('Video is being checked'), { status: SCANNING });
   if (confirmed.deletedAt) return confirmed;
   return remoteRequest<RemotePhoto>(() =>
     apiClient.patch(`/vault/${photo.id}`, {
@@ -228,8 +312,10 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
                 }),
               );
         valid();
+        // Photos are re-encoded by the server, so the canonical bytes replace the local copy.
+        // Videos are stored unchanged and keep their local file.
         const canonical =
-          job.operation === 'upload' && !remote.deletedAt
+          job.operation === 'upload' && !remote.deletedAt && photo.kind !== 'video'
             ? await canonicalBytes(owner, photo.id)
             : null;
         try {
@@ -292,6 +378,15 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
         valid();
         const latest = await repo.get(owner, photo.id);
         if (!latest) return;
+        if (status === SCANNING) {
+          await repo.save(owner, { ...latest, syncState: 'pending', error: null });
+          await db.runAsync(
+            'UPDATE queue SET nextAttemptAt=? WHERE id=?',
+            Date.now() + 15_000,
+            job.id,
+          );
+          return;
+        }
         if (latest.deletedAt && job.operation !== 'delete') {
           await db.runAsync('DELETE FROM queue WHERE id=?', job.id);
           return;
@@ -301,7 +396,7 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
           syncState: rejected ? 'rejected' : 'failed',
           status: rejected ? 'rejected' : latest.status,
           error: rejected
-            ? 'Photo did not pass moderation. Delete it to remove it.'
+            ? `${latest.kind === 'video' ? 'Video' : 'Photo'} did not pass moderation. Delete it to remove it.`
             : status === 401
               ? 'Sign in again to back up this photo.'
               : status === 403

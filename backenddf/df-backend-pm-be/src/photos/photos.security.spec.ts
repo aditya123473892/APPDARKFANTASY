@@ -102,7 +102,7 @@ describe('Photo security boundaries', () => {
     };
     const photos: any = { enqueue: jest.fn(), release: jest.fn() };
     const storage: any = { deleteOne: jest.fn() };
-    const controller = new PostsController(posts, photos, storage);
+    const controller = new PostsController(posts, photos, storage, { bind: jest.fn(), release: jest.fn() } as any);
     await expect(
       controller.remove('507f1f77bcf86cd799439011', {
         id: '507f1f77bcf86cd799439012',
@@ -125,7 +125,7 @@ describe('Photo security boundaries', () => {
       retire: jest.fn(),
       enqueue: jest.fn(),
     };
-    const controller = new PostsController(posts, photos, {} as any);
+    const controller = new PostsController(posts, photos, {} as any, { bind: jest.fn(), release: jest.fn() } as any);
     await controller.update('507f1f77bcf86cd799439011', { caption: 'Edited' }, {
       id: 'owner',
     } as any);

@@ -59,6 +59,7 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
         assertEpoch(owner, scope);
         const photo: VaultPhoto = {
           id,
+          kind: 'photo',
           s3Key: null,
           localPath: path,
           sha256: checksum,
@@ -89,19 +90,65 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
         await FS.deleteAsync(path, { idempotent: true }).catch(() => undefined);
   }
 }
-export async function addPhotos(owner: string, camera = false): Promise<void> {
+/** Copies a picked/recorded video into private storage byte-for-byte (no re-encode). */
+export async function importVideo(owner: string, uri: string): Promise<VaultPhoto> {
+  const scope = assertUnlocked(owner);
+  return serial(async () => {
+    assertEpoch(owner, scope);
+    if ((await repo.list(owner)).length >= 50) throw new Error('Your vault is full (50 items).');
+    const id = uuid(),
+      now = Date.now();
+    const cached = Boolean(FS.cacheDirectory && uri.startsWith(FS.cacheDirectory));
+    const stored = await files.storeVideo(owner, id, uri, cached);
+    try {
+      assertEpoch(owner, scope);
+      const video: VaultPhoto = {
+        id,
+        kind: 'video',
+        s3Key: null,
+        localPath: stored.path,
+        sha256: `md5:${stored.md5}`,
+        size: stored.size,
+        status: 'local',
+        hidden: 0,
+        sortOrder: 0,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+        syncState: 'pending_upload',
+        error: null,
+      };
+      await repo.save(owner, video, 'upload');
+      await rememberOwner(owner);
+      refreshVault();
+      return video;
+    } catch (error) {
+      await FS.deleteAsync(stored.path, { idempotent: true });
+      throw error;
+    }
+  });
+}
+export type AddSource = 'library' | 'camera' | 'video-camera';
+export async function addPhotos(
+  owner: string,
+  source: AddSource | boolean = 'library',
+): Promise<void> {
   assertUnlocked(owner);
+  const from: AddSource = source === true ? 'camera' : source === false ? 'library' : source;
+  const camera = from !== 'library';
   if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted)
     throw new Error('Camera permission was denied. You can enable it in Settings.');
   const result = camera
     ? await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images'],
+        mediaTypes: [from === 'video-camera' ? 'videos' : 'images'],
+        videoMaxDuration: 120,
         exif: false,
         base64: false,
         quality: 1,
       })
     : await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ['images', 'videos'],
+        videoMaxDuration: 120,
         allowsMultipleSelection: true,
         selectionLimit: 5,
         exif: false,
@@ -115,7 +162,10 @@ export async function addPhotos(owner: string, camera = false): Promise<void> {
     if (!useVaultLock.getState().unlocked) {
       await unlock(owner);
     }
-    for (const asset of result.assets) await importPhoto(owner, asset.uri);
+    for (const asset of result.assets)
+      if (asset.type === 'video' || asset.mimeType?.startsWith('video/'))
+        await importVideo(owner, asset.uri);
+      else await importPhoto(owner, asset.uri);
   } finally {
     // A batch can partly succeed. Back up every committed photo even if a later import fails.
     void import('./sync').then(({ syncVault }) => syncVault()).catch(() => undefined);
@@ -155,6 +205,13 @@ export async function viewPhoto(owner: string, id: string): Promise<string> {
   const photo = await repo.get(owner, id);
   if (!photo || photo.deletedAt || !photo.localPath)
     throw new Error('Download this photo before viewing.');
+  if (photo.kind === 'video') {
+    const info = await FS.getInfoAsync(photo.localPath, { md5: true });
+    if (!info.exists || info.size !== photo.size || `md5:${info.md5}` !== photo.sha256)
+      throw new Error('Video is damaged. Download the cloud copy again.');
+    assertEpoch(owner, scope);
+    return files.temporaryCopy(photo.localPath, 'mp4');
+  }
   const bytes = await files.plaintext(owner, id, photo.localPath);
   try {
     if (bytes.length !== photo.size || (await hash(bytes)) !== photo.sha256)

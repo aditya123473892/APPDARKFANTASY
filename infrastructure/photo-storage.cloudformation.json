@@ -234,7 +234,11 @@
           "Statement": [
             {
               "Effect": "Allow",
-              "Action": ["rekognition:DetectModerationLabels"],
+              "Action": [
+                "rekognition:DetectModerationLabels",
+                "rekognition:StartContentModeration",
+                "rekognition:GetContentModeration"
+              ],
               "Resource": "*",
               "Condition": {
                 "StringEquals": {

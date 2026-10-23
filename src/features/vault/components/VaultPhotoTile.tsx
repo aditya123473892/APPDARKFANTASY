@@ -28,7 +28,10 @@ export function VaultPhotoTile({
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const lastAttempt = useRef(0);
+  const video = photo.kind === 'video';
   useEffect(() => {
+    // Videos are fetched only when opened, never just because a grid cell is visible.
+    if (video) return;
     let cancelled = false;
     const repair = attempt > lastAttempt.current;
     lastAttempt.current = attempt;
@@ -48,12 +51,12 @@ export function VaultPhotoTile({
     return () => {
       cancelled = true;
     };
-  }, [owner, photo.id, photo.localPath, photo.sha256, photo.s3Key, attempt]);
+  }, [owner, photo.id, photo.localPath, photo.sha256, photo.s3Key, attempt, video]);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${photo.hidden ? 'Hidden photo' : 'Photo'}${selected ? ', selected' : ''}${failed ? ', tap to retry' : ''}${photo.status === 'rejected' ? ', backup unavailable' : ''}`}
-      accessibilityState={{ selected, busy: !uri && !failed }}
+      accessibilityLabel={`${photo.hidden ? 'Hidden ' : ''}${video ? 'video' : 'photo'}${selected ? ', selected' : ''}${failed ? ', tap to retry' : ''}${photo.status === 'rejected' ? ', backup unavailable' : ''}`}
+      accessibilityState={{ selected, busy: !video && !uri && !failed }}
       onLongPress={onLongPress}
       onPress={() => {
         if (failed && !selecting) {
@@ -72,7 +75,14 @@ export function VaultPhotoTile({
           },
         ]}
       >
-        {uri ? (
+        {video ? (
+          <View style={styles.placeholder}>
+            <Ionicons name="play-circle-outline" size={34} color={colors.textMuted} />
+            <Text variant="caption" color="muted" center>
+              {photo.localPath ? 'Video' : 'Video · tap to load'}
+            </Text>
+          </View>
+        ) : uri ? (
           <Image
             key={photo.sha256}
             source={{ uri }}

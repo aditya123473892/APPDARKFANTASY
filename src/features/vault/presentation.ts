@@ -13,7 +13,8 @@ export function vaultError(error: unknown, fallback: string): string {
   if (/permission/i.test(message))
     return 'Permission is needed for this action. You can enable it in phone settings.';
   if (/vault is full/i.test(message))
-    return 'Your vault is full. Remove a photo before adding more.';
+    return 'Your vault is full. Remove a photo or video before adding more.';
+  if (/smaller than/i.test(message)) return message;
   if (/screen lock/i.test(message)) return 'Set up a screen lock on your phone to open your vault.';
   if (/Too many attempts/i.test(message)) return 'Please wait a minute before trying again.';
   return fallback;

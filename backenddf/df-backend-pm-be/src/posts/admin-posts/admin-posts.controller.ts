@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Patch,
   Post,
   Body,
   Param,
@@ -29,6 +30,7 @@ import { ERole } from 'src/common/enums';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PostsService } from '../posts.service';
 import { UpdatePostDto } from '../dto/update-post.dto';
+import { AdminMediaService, flagInput, mediaListInput, parseAdmin, visibilityInput } from './admin-media.service';
 
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -40,7 +42,26 @@ export class AdminPostsController {
     private readonly postsService: PostsService,
     private readonly s3BucketService: S3BucketService,
     private readonly photos: PhotosService,
+    private readonly media?: AdminMediaService,
   ) {}
+
+  /** Review list of post photos/videos; signed for admins by the response interceptor. */
+  @Get('media')
+  async listMedia(@Query() query: Record<string, unknown>) {
+    return successRes(await this.media.list(parseAdmin(mediaListInput, query)));
+  }
+
+  /** Switch a post between normal and premium (subscriber-only) content. */
+  @Patch(':id/content-visibility')
+  async setContentVisibility(@AuthUser() actor: IAuthUser, @Param('id') id: string, @Body() body: unknown) {
+    return successRes(await this.media.setVisibility(actor.id, id, parseAdmin(visibilityInput, body).contentVisibility));
+  }
+
+  /** Flag (optionally hiding from everyone but the owner) or unflag a post. */
+  @Patch(':id/flag')
+  async setFlag(@AuthUser() actor: IAuthUser, @Param('id') id: string, @Body() body: unknown) {
+    return successRes(await this.media.setFlag(actor.id, id, parseAdmin(flagInput, body)));
+  }
 
   @Get()
   async findAll(@Query() params: FilterPostDto) {

@@ -6,12 +6,15 @@ export default function AppLayout(): React.JSX.Element {
   useEntitlementSync();
   const { theme } = useTheme();
   const path = usePathname();
-  const capability =
-    path === '/groups/new'
-      ? 'canCreateGroups'
-      : path.startsWith('/chat')
-        ? 'canSendMessages'
-        : 'canUseApp';
+  const capability = path.startsWith('/admin')
+    ? 'canViewAdminScreens'
+    : path.startsWith('/moderation')
+      ? 'canModerate'
+      : path === '/groups/new'
+        ? 'canCreateGroups'
+        : path.startsWith('/chat')
+          ? 'canSendMessages'
+          : 'canUseApp';
   return (
     <ProtectedRoute capability={capability}>
       <Stack

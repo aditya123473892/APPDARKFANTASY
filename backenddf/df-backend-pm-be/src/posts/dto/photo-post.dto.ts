@@ -1,6 +1,5 @@
 import {
   ArrayMaxSize,
-  ArrayMinSize,
   ArrayUnique,
   IsArray,
   IsEnum,
@@ -18,12 +17,19 @@ export class PhotoPostDto {
   @IsOptional() @IsString() @MaxLength(500) caption?: string;
   @IsOptional() @IsString() @MaxLength(200) location?: string;
   @IsOptional() @IsEnum(EPostVisibility) visibility?: EPostVisibility;
+  /** At least one photo or video is required; checked by the controller. */
+  @IsOptional()
   @IsArray()
   @ArrayUnique()
-  @ArrayMinSize(1)
   @ArrayMaxSize(5)
   @IsUUID('4', { each: true })
-  photoIds: string[];
+  photoIds?: string[];
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(1)
+  @IsUUID('4', { each: true })
+  videoIds?: string[];
 }
 export class EditPhotoPostDto extends PartialType(
   OmitType(PhotoPostDto, ['clientId'] as const),
