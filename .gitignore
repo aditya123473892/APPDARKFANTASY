@@ -31,6 +31,7 @@ backenddf/df-backend-pm-be/scripts/*
 !backenddf/df-backend-pm-be/scripts/user-block-indexes.ts
 !backenddf/df-backend-pm-be/scripts/report-indexes.ts
 !backenddf/df-backend-pm-be/scripts/recover-report-gate.ts
+!backenddf/df-backend-pm-be/scripts/phone-otp-indexes.ts
 !backenddf/df-backend-pm-be/README.md
 !backenddf/df-backend-pm-be/MODERATION.md
 !backenddf/df-backend-pm-be/package.json

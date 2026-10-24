@@ -1,7 +1,10 @@
 import { useRef, useState } from 'react';
-import { authService } from '../services';
+import { phoneAuth, phoneErrorMessage } from '../services/phoneAuth';
+import { completePhoneSignIn } from '../phoneSignIn';
 import { AuthError, type RegisterInput } from '../types';
-export function useRegister() {
+
+/** Creates the account for a phone already verified with signupToken. */
+export function useRegister(signupToken: string, onSignupExpired?: () => void) {
   const submitting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setLoading] = useState(false);
@@ -13,17 +16,18 @@ export function useRegister() {
     setError(null);
     setSuccess(false);
     try {
-      await authService.register(input);
-      setSuccess(true);
+      const result = await phoneAuth.completeSignup(input, signupToken);
+      // Signed in straight away unless the email must be verified first.
+      if (result) await completePhoneSignIn(async () => result);
+      else setSuccess(true);
       return true;
     } catch (caught) {
       const code = caught instanceof AuthError ? caught.code : 'SERVER';
+      if (code === 'SIGNUP_SESSION_INVALID' || code === 'PHONE_IN_USE') onSignupExpired?.();
       setError(
-        code === 'NETWORK'
-          ? 'Unable to reach the server. Check your connection and try again.'
-          : code === 'EMAIL_IN_USE'
-            ? 'An account with this email already exists. Please sign in.'
-            : 'We could not create your account. Please try again.',
+        ['SERVER', 'UNKNOWN'].includes(code)
+          ? 'We could not create your account. Please try again.'
+          : phoneErrorMessage(caught),
       );
       return false;
     } finally {

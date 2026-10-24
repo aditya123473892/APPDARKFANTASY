@@ -16,7 +16,8 @@ import {
   unAuthorizedRes,
 } from 'src/common/interceptors';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
+import { isMobileClient, JwtAuthGuard, RolesGuard } from 'src/common/guards';
+import { otpError } from './otp/otp-errors';
 import { AuthUser, Roles } from 'src/common/decorators';
 import { IAuthUser } from 'src/common/interfaces';
 import { decrypt, encrypt } from 'src/common/functions';
@@ -35,6 +36,9 @@ export class AuthController {
 
   @Post('login')
   async login(@Body() credentials: LoginDto, @Req() request?: any) {
+    // Mobile signs in with phone OTP only; existing users use /auth/phone/bootstrap once.
+    if (isMobileClient(request)) throw otpError('PHONE_LOGIN_REQUIRED');
+
     const foundUser = await this.userService.findByUsername(
       credentials.username,
     );
@@ -98,7 +102,9 @@ export class AuthController {
   }
 
   @Post('signup')
-  async signUp(@Body() createUserDto: CreateUserDto) {
+  async signUp(@Body() createUserDto: CreateUserDto, @Req() request?: any) {
+    // Mobile signups verify the phone first: /auth/otp/signup/verify then /auth/otp/signup.
+    if (isMobileClient(request)) throw otpError('PHONE_LOGIN_REQUIRED');
     try {
       const foundUser = await this.userService.findByUsername(
         createUserDto.username,

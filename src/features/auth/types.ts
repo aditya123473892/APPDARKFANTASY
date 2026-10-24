@@ -13,6 +13,16 @@ export type AuthErrorCode =
   | 'NETWORK'
   | 'SERVER'
   | 'ACCOUNT_UNAVAILABLE'
+  | 'PHONE_INVALID'
+  | 'PHONE_UNSUPPORTED'
+  | 'PHONE_IN_USE'
+  | 'PHONE_ALREADY_LINKED'
+  | 'OTP_INVALID'
+  | 'OTP_EXPIRED'
+  | 'OTP_COOLDOWN'
+  | 'OTP_CHECK_LIMIT'
+  | 'OTP_UNAVAILABLE'
+  | 'SIGNUP_SESSION_INVALID'
   | 'UNKNOWN';
 
 export type UserView = {

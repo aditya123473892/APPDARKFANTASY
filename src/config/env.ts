@@ -29,6 +29,8 @@ export const env = {
     0,
     Number(process.env.EXPO_PUBLIC_AUTH_BACKGROUND_TIMEOUT_MINUTES) || 0,
   ),
+  /** Preselected phone country (ISO 3166 alpha-2); keep in step with OTP_DEFAULT_COUNTRY. */
+  defaultPhoneCountry: (process.env.EXPO_PUBLIC_DEFAULT_PHONE_COUNTRY ?? 'IN').toUpperCase(),
   pinningEnabled: process.env.EXPO_PUBLIC_SSL_PINNING_ENABLED === 'true',
   pins: (process.env.EXPO_PUBLIC_SSL_PINS ?? '')
     .split(',')

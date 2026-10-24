@@ -53,6 +53,35 @@ export class UsersService {
     });
   }
 
+  async findByVerifiedPhone(phoneE164: string) {
+    return await this.usersModel.findOne({
+      phoneE164,
+      phoneVerifiedAt: { $ne: null },
+    });
+  }
+
+  /** Raw driver read: viewer blocks and restrictions must not hide an existing owner. */
+  async phoneOwnerId(phoneE164: string): Promise<string | null> {
+    const owner = await this.usersModel.collection.findOne(
+      { phoneE164 },
+      { projection: { _id: 1 } },
+    );
+    return owner ? String(owner._id) : null;
+  }
+
+  /** Links a number already proven by OTP. Returns false when another account holds it. */
+  async setVerifiedPhone(_id: string, phoneE164: string): Promise<boolean> {
+    const owner = await this.phoneOwnerId(phoneE164);
+    if (owner && owner !== String(_id)) return false;
+    try {
+      await this.updateOne(_id, { phoneE164, phoneVerifiedAt: new Date() });
+      return true;
+    } catch (error) {
+      if (error?.code === 11000 && error?.keyPattern?.phoneE164) return false;
+      throw error;
+    }
+  }
+
   async create(createUserDto: CreateUserDto, actorId?: string) {
     if ('premiumUntil' in createUserDto) throw new BadRequestException('Entitlements are server managed');
     validateRoles(createUserDto.roles);

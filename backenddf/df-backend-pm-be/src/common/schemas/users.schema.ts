@@ -27,8 +27,17 @@ export class Users {
   @Prop({ required: true })
   lastName: string;
 
+  // Legacy free-text value from web signup; never verified or unique.
   @Prop({ required: false })
   phoneNumber: string;
+
+  // Set only together with phoneVerifiedAt after a Twilio Verify approval.
+  // Unique via the operator-managed partial index phone_e164_unique.
+  @Prop({ type: String, required: false })
+  phoneE164?: string;
+
+  @Prop({ type: Date, required: false })
+  phoneVerifiedAt?: Date;
 
   @Prop({ required: false })
   gender: string;

@@ -7,6 +7,7 @@ import {
   notifyForbidden,
 } from '@/features/auth/sessionRuntime';
 import { initializePinning } from './pinning';
+import { CLIENT_PLATFORM_HEADERS } from './clientPlatform';
 import { useBlockState } from '@/features/safety/blockState';
 
 type RetryConfig = InternalAxiosRequestConfig & {
@@ -26,9 +27,11 @@ registerSessionTeardown(() => {
 export const apiClient = axios.create({
   baseURL: env.apiUrl,
   timeout: 15_000,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', ...CLIENT_PLATFORM_HEADERS },
   maxRedirects: 0,
 });
+// Sign-in endpoints never carry the stored session token.
+const PUBLIC_AUTH = /^\/auth\/(login|otp\/.+|phone\/bootstrap)$/;
 apiClient.interceptors.request.use(async (config) => {
   const guarded = config as RetryConfig;
   guarded._sessionGeneration ??= sessionIdentity.generation;
@@ -50,7 +53,7 @@ apiClient.interceptors.request.use(async (config) => {
     throw new Error('Credentials are forbidden in request URLs');
   if (!__DEV__ && target.protocol !== 'https:') throw new Error('HTTPS is required');
   const token = sessionIdentity.getToken();
-  if (config.url === '/auth/login') config.headers.delete('Authorization');
+  if (PUBLIC_AUTH.test(config.url || '')) config.headers.delete('Authorization');
   else if (!config.headers.Authorization && token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });

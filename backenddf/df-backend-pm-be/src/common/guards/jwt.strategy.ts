@@ -5,6 +5,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
 import { blockContext } from '../../user-blocks/block-context';
+import { isMobileClient } from './otp-session.guard';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -17,11 +18,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       ignoreExpiration: false,
       algorithms: ['HS256'],
       secretOrKey: configService.get<string>('JWT_SECRET'),
+      passReqToCallback: true,
     });
   }
 
-  async validate(payload) {
+  async validate(req, payload) {
     if (!Types.ObjectId.isValid(payload.sub)) throw new UnauthorizedException();
+    // Mobile = phone OTP only. Password sessions (web, or issued before OTP) are
+    // rejected so the app signs out and returns to phone sign-in.
+    if (isMobileClient(req) && payload.auth_method !== 'otp')
+      throw new UnauthorizedException('Phone sign-in required');
     const user = await this.db.db
       .collection('Users')
       .findOne({
@@ -37,6 +43,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const context = blockContext.getStore();
     if (context) context.viewerId = String(user._id);
     return { id: String(user._id), user: user.username, roles: user.roles,
+      authMethod: payload.auth_method === 'otp' ? 'otp' : 'password',
       staffClaims: { iat: payload.iat, exp: payload.exp, amr: payload.amr, iss: payload.iss } };
   }
 }
