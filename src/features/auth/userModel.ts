@@ -16,6 +16,9 @@ export type User = {
   status?: 'open' | 'blocked';
   blockedTime?: string;
   phoneNumber?: string;
+  /** Verified sign-in number (E.164); set with phoneVerifiedAt. */
+  phoneE164?: string;
+  phoneVerifiedAt?: string;
   gender?: string;
   age?: number;
   avatar?: string;

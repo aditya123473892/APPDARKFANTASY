@@ -1,4 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
+import { useRouter, type Href } from 'expo-router';
+import { formatPhone } from '@/features/auth/phone';
 import { Alert, StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Input, Text } from '@/components/ui';
@@ -11,7 +13,9 @@ import { unwrap } from '@/services/api/backend';
 import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
 
 export function AccountScreen(): React.JSX.Element {
+  const router = useRouter();
   const user = useAuthStore((state) => state.user);
+  const phone = useAuthStore((state) => state.currentUser?.phoneE164);
   const deletion = useMutation({
     mutationFn: async () => unwrap((await apiClient.delete('/users/me')).data),
     onSuccess: async () => {
@@ -55,8 +59,14 @@ export function AccountScreen(): React.JSX.Element {
         </View>
         <SettingsGroup title="Security">
           <SettingsRow
+            icon="call-outline"
+            title="Phone number"
+            subtitle={phone ? `Sign in with ${formatPhone(phone)}` : 'Add a number for sign-in'}
+            onPress={() => router.push('/settings/phone' as Href)}
+          />
+          <SettingsRow
             icon="key-outline"
-            title="Change password"
+            title="Change website password"
             subtitle="We'll email you a secure reset link"
             loading={reset.isPending}
             onPress={() => user?.email && reset.mutate(user.email)}

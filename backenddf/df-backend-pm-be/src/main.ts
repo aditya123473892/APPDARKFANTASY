@@ -14,6 +14,15 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
 
+  // Behind a load balancer, per-IP OTP limits need the client address from
+  // X-Forwarded-For. Set TRUST_PROXY to the number of proxy hops (e.g. 1).
+  const trustProxy = configService.get<string>('TRUST_PROXY');
+  if (trustProxy)
+    app
+      .getHttpAdapter()
+      .getInstance()
+      .set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
+
   //Middlewares
   const allowedOrigins = [
     ...(configService.get<string>('FRONTEND_ORIGIN') || '').split(','),

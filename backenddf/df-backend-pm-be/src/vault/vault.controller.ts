@@ -1,14 +1,15 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthUser } from '../common/decorators';
-import { JwtAuthGuard } from '../common/guards';
+import { JwtAuthGuard, OtpSessionGuard } from '../common/guards';
 import { IAuthUser } from '../common/interfaces';
 import { successRes } from '../common/interceptors';
 import { VaultService } from './vault.service';
 import { parse, uploadInput, confirmInput, editInput, deleteInput, photoId, cursorInput } from './vault.validation';
 
 @Controller('vault')
-@UseGuards(JwtAuthGuard)
+// The vault is mobile-only: with MOBILE_OTP_ONLY_ROUTES=on it requires a phone OTP session.
+@UseGuards(JwtAuthGuard, OtpSessionGuard)
 export class VaultController {
   constructor(private readonly vault: VaultService) {}
   @Post('upload-url')

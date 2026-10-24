@@ -2963,3 +2963,90 @@ test('installed Expo fetch rejects URI parts and serializes Expo File bytes', as
   assert.ok(serialized.includes(Buffer.from([0xff, 0xd8, 0xff, 0xe0])));
   assert.ok(serialized.includes(Buffer.from('filename="photo.jpg"')));
 });
+
+test('phone sign-in: mobile header, no stored token on OTP calls, /auth/me identity check, secure persistence', async () => {
+  const h = harness();
+  const phoneAuth = h.load('src/features/auth/services/phoneAuth.ts').phoneAuth;
+  const { completePhoneSignIn } = h.load('src/features/auth/phoneSignIn.ts');
+  h.runtime.setRuntimeToken('stale-session-token');
+  const requests = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    requests.push(config.url);
+    assert.equal(config.headers['X-Client-Platform'], 'mobile');
+    if (config.url === '/auth/otp/send') {
+      assert.deepEqual(JSON.parse(config.data), { phone: '+919876543210', purpose: 'login' });
+      assert.equal(config.headers.Authorization, undefined);
+      return h.ok(config, { resendAfterSeconds: 30 });
+    }
+    if (config.url === '/auth/otp/verify') {
+      assert.deepEqual(JSON.parse(config.data), { phone: '+919876543210', code: '123456' });
+      assert.equal(config.headers.Authorization, undefined);
+      return h.ok(config, { accessToken: h.token(), user: h.user });
+    }
+    assert.equal(config.url, '/auth/me');
+    assert.equal(config.headers.Authorization, `Bearer ${h.token()}`);
+    return h.ok(config, { ...h.user, phoneE164: '+919876543210' });
+  };
+  assert.equal(await phoneAuth.sendLoginCode('+919876543210'), 30);
+  await completePhoneSignIn(() => phoneAuth.verifyLoginCode('+919876543210', '123456'));
+  assert.deepEqual(requests, ['/auth/otp/send', '/auth/otp/verify', '/auth/me']);
+  assert.equal(h.useAuthStore.getState().status, 'authenticated');
+  assert.equal(h.writes.at(-1).value, h.token());
+  assert.equal(h.writes.at(-1).options.keychainAccessible, 'device-only');
+});
+
+test('phone sign-in maps server OTP errors to stable codes', async () => {
+  const cases = [
+    [400, 'OTP_INVALID', 'OTP_INVALID'],
+    [400, 'OTP_EXPIRED', 'OTP_EXPIRED'],
+    [429, 'OTP_CHECK_LIMIT', 'OTP_CHECK_LIMIT'],
+    [429, 'OTP_SEND_LIMIT', 'RATE_LIMITED'],
+    [429, 'OTP_COOLDOWN', 'OTP_COOLDOWN'],
+    [409, 'PHONE_IN_USE', 'PHONE_IN_USE'],
+    [503, 'OTP_UNAVAILABLE', 'OTP_UNAVAILABLE'],
+  ];
+  for (const [status, error, expected] of cases) {
+    const h = harness();
+    const phoneAuth = h.load('src/features/auth/services/phoneAuth.ts').phoneAuth;
+    h.apiClient.defaults.adapter = async (config) => {
+      const response = { ...h.ok(config, null), status, data: { statusCode: status, error, message: 'x' } };
+      throw new axios.AxiosError('failed', 'ERR_BAD_REQUEST', config, undefined, response);
+    };
+    await assert.rejects(phoneAuth.verifyLoginCode('+919876543210', '000000'), (caught) => caught.code === expected);
+    assert.equal(h.useAuthStore.getState().session, null);
+  }
+});
+
+test('existing-user phone setup: password once, bootstrap token only on phone calls, then an OTP session', async () => {
+  const h = harness();
+  const phoneAuth = h.load('src/features/auth/services/phoneAuth.ts').phoneAuth;
+  const seen = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    seen.push([config.url, config.headers.Authorization]);
+    if (config.url === '/auth/phone/bootstrap') {
+      assert.deepEqual(JSON.parse(config.data), { username: 'Desktop@example.test', password: 'secret pass' });
+      return h.ok(config, { bootstrapToken: 'bootstrap-token', expiresInSeconds: 900 });
+    }
+    if (config.url === '/auth/phone/send') return h.ok(config, { resendAfterSeconds: 30 });
+    if (config.url === '/auth/phone/verify') return h.ok(config, { accessToken: h.token(), user: h.user });
+    return h.ok(config, h.user);
+  };
+  const token = await phoneAuth.startPhoneSetup(' Desktop@example.test ', 'secret pass');
+  await phoneAuth.sendLinkCode('+919876543210', token);
+  const result = await phoneAuth.verifyLinkCode('+919876543210', '123456', token);
+  assert.equal(result.user._id, h.user._id);
+  assert.deepEqual(seen, [
+    ['/auth/phone/bootstrap', undefined],
+    ['/auth/phone/send', 'Bearer bootstrap-token'],
+    ['/auth/phone/verify', 'Bearer bootstrap-token'],
+    ['/auth/me', `Bearer ${h.token()}`],
+  ]);
+});
+
+test('phone numbers normalise to E.164 for the selected country', () => {
+  const { toE164, formatPhone } = harness().load('src/features/auth/phone.ts');
+  assert.equal(toE164('98765 43210', 'IN'), '+919876543210');
+  assert.equal(toE164('(415) 555-2671', 'US'), '+14155552671');
+  assert.equal(toE164('12345', 'IN'), null);
+  assert.equal(formatPhone('+919876543210'), '+91 98765 43210');
+});

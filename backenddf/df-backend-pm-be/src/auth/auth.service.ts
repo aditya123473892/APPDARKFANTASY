@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { compare, genSalt, hash } from 'bcrypt';
 import { UsersService } from 'src/users/users.service';
-import { TCreateToken } from 'src/common/types/auth';
+import { TAuthMethod, TCreateToken } from 'src/common/types/auth';
 
 @Injectable()
 export class AuthService {
@@ -35,13 +35,18 @@ export class AuthService {
     return passwordIsMatched;
   }
 
-  async createTokens(user): Promise<TCreateToken> {
+  async createTokens(
+    user,
+    authMethod: TAuthMethod = 'password',
+  ): Promise<TCreateToken> {
     // let roles = user.roles.map((role) => role.name);
 
     const payload = {
       user: user.username,
       sub: user._id,
       roles: user.roles,
+      // Mobile requests accept only 'otp' sessions (see JwtStrategy).
+      auth_method: authMethod,
     };
     const staff = user.roles?.some((role) => ['moderator', 'admin', 'root'].includes(role));
     const options = staff ? { expiresIn: Math.min(900, Math.max(60, Number(process.env.STAFF_TOKEN_TTL_SECONDS) || 900)) } : undefined;

@@ -4,8 +4,14 @@ import { StyleSheet, View } from 'react-native';
 import { Button, Input, PasswordInput, Text } from '@/components/ui';
 import { registerSchema, type RegisterValues } from '../schemas/authSchemas';
 import { useRegister } from '../hooks/useRegister';
-export function RegisterForm(): React.JSX.Element {
-  const { register, error, isLoading, success } = useRegister();
+export function RegisterForm({
+  signupToken,
+  onSignupExpired,
+}: {
+  signupToken: string;
+  onSignupExpired: () => void;
+}): React.JSX.Element {
+  const { register, error, isLoading, success } = useRegister(signupToken, onSignupExpired);
   const {
     control,
     handleSubmit,
@@ -17,7 +23,10 @@ export function RegisterForm(): React.JSX.Element {
   });
   if (success)
     return (
-      <Text>Account created. Check your email for verification instructions, then sign in.</Text>
+      <Text>
+        Account created. Check your email for verification instructions, then sign in with your
+        phone number.
+      </Text>
     );
   return (
     <View style={styles.form}>
@@ -99,6 +108,9 @@ export function RegisterForm(): React.JSX.Element {
           />
         )}
       />
+      <Text variant="caption" color="muted">
+        The password is for the website. The app signs you in with your phone number.
+      </Text>
       {error ? <Text color="danger">{error}</Text> : null}
       <Button
         label="Create account"

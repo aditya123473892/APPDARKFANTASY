@@ -3,9 +3,13 @@ import { StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Text, Wordmark, Button } from '@/components/ui';
 import { useRouter, type Href } from 'expo-router';
-import { LoginForm } from '../components/LoginForm';
+import { PhoneOtpFlow } from '../components/PhoneOtpFlow';
 import { SocialButtons } from '../components/SocialButtons';
+import { phoneAuth } from '../services/phoneAuth';
+import { completePhoneSignIn } from '../phoneSignIn';
 import { spacing } from '@/theme';
+
+/** Mobile sign-in is phone number + SMS code only (enforced by the backend too). */
 export function LoginScreen(): React.JSX.Element {
   const router = useRouter();
   useScreenshotProtection('login');
@@ -18,15 +22,28 @@ export function LoginScreen(): React.JSX.Element {
           A little mystery.{'\n'}A real connection.
         </Text>
         <Text color="muted" center>
-          Your next chapter starts here.
+          Sign in with your phone number.
         </Text>
       </View>
-      <LoginForm />
-      <Button
-        label="Open offline Photo Vault"
-        variant="ghost"
-        onPress={() => router.push('/vault' as Href)}
+      <PhoneOtpFlow
+        sendCode={phoneAuth.sendLoginCode}
+        verifyCode={(phone, code) => completePhoneSignIn(() => phoneAuth.verifyLoginCode(phone, code))}
+        verifyLabel="Sign in"
+        phoneHint="If this number is linked to an account, we'll text you a 6-digit code."
       />
+      <View style={styles.links}>
+        <Button
+          label="Used email to sign in before? Set up phone sign-in"
+          variant="ghost"
+          onPress={() => router.push('/phone-setup' as Href)}
+        />
+        <Button label="New here? Create an account" variant="ghost" onPress={() => router.push('/register')} />
+        <Button
+          label="Open offline Photo Vault"
+          variant="ghost"
+          onPress={() => router.push('/vault' as Href)}
+        />
+      </View>
       <View style={styles.social}>
         <Text variant="caption" color="muted" center>
           OR CONTINUE WITH
@@ -38,6 +55,6 @@ export function LoginScreen(): React.JSX.Element {
 }
 const styles = StyleSheet.create({
   copy: { gap: spacing.sm, marginTop: spacing.xxxl, marginBottom: spacing.xxxl },
+  links: { gap: spacing.xs, marginTop: spacing.lg },
   social: { gap: spacing.lg, marginTop: spacing.xl, marginBottom: spacing.xl },
-  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24, marginBottom: 24 },
 });

@@ -2,6 +2,7 @@ import axios from 'axios';
 import { apiClient } from '@/services/api/apiClient';
 import { sessionFromToken } from '../session';
 import { AuthError } from '../types';
+import type { AuthResult } from '../types';
 import type { AuthService } from './authService';
 import { parseUser, type User as BackendUser } from '../userModel';
 type Envelope<T> = { data: T; error: false | string; message?: string; statusCode: number };
@@ -38,6 +39,16 @@ function translate(error: unknown, login = false): AuthError {
   }
   return new AuthError('SERVER');
 }
+/** Confirms a freshly issued token against /auth/me before it becomes the session. */
+export async function sessionFromSignIn(accessToken: string, userId: string): Promise<AuthResult> {
+  const session = sessionFromToken(accessToken);
+  const responseMe = await apiClient.get<Envelope<BackendUser>>('/auth/me', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const user = parseUser(unwrap(responseMe.data));
+  if (user._id !== session.userId || userId !== user._id) throw new AuthError('SESSION_EXPIRED');
+  return { session, user };
+}
 export const realAuthService: AuthService = {
   async login(input) {
     const body = { username: input.email.trim(), password: input.password };
@@ -49,14 +60,7 @@ export const realAuthService: AuthService = {
       );
       response.config.data = undefined;
       const data = unwrap(response.data, true);
-      const session = sessionFromToken(data.accessToken);
-      const responseMe = await apiClient.get<Envelope<BackendUser>>('/auth/me', {
-        headers: { Authorization: `Bearer ${data.accessToken}` },
-      });
-      const user = parseUser(unwrap(responseMe.data));
-      if (user._id !== session.userId || data.user._id !== user._id)
-        throw new AuthError('SESSION_EXPIRED');
-      return { session, user };
+      return await sessionFromSignIn(data.accessToken, data.user._id);
     } catch (error) {
       if (axios.isAxiosError(error) && error.config) error.config.data = undefined;
       throw translate(error, true);
