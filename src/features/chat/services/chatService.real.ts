@@ -1,6 +1,7 @@
 import type { UserSummary } from '@/features/auth/userModel';
 import axios from 'axios';
 import { featureFlags } from '@/config/featureFlags';
+import { env } from '@/config/env';
 import { MESSAGE_TIMERS } from '../disappearing';
 import { displayName } from '@/features/auth/userModel';
 import { userCache } from '@/features/auth/userCache';
@@ -16,11 +17,20 @@ import { emitTyping, getHistory, refreshUnread, socketRequest, socketAck } from 
 import {
   isObjectId,
   mapMessage,
+  conversationKey,
   parseMessage,
   parseUserSummary,
   type BackendMessage,
 } from './chatPayload';
-import { acceptUnread, markPeerRead, mergeMessage, unreadFor } from './chatState';
+import {
+  acceptUnread,
+  markPeerRead,
+  mergeMessage,
+  unreadFor,
+  historyVersion,
+  watchHistory,
+  reconcileHistory,
+} from './chatState';
 import type { ChatService } from './chatService';
 import type { Conversation, Message } from '../types';
 import { isPeerBlocked } from '@/features/safety/blockState';
@@ -89,6 +99,23 @@ function ownMessage(key: string, id: string): Message {
   return message;
 }
 
+async function httpHistory(key: string): Promise<Message[]> {
+  const to = target(key);
+  const scope = sessionIdentity.generation;
+  watchHistory(key);
+  const started = historyVersion();
+  const rows = await getData<unknown[]>('/chats/messages', to);
+  assertSessionCurrent(scope);
+  if (!Array.isArray(rows)) throw new ServiceError('UNKNOWN');
+  const parsed = rows.map(parseMessage);
+  if (parsed.some((row) => !row || conversationKey(row) !== key)) throw new ServiceError('UNKNOWN');
+  return reconcileHistory(
+    key,
+    parsed.map((row) => mapMessage(row, key)),
+    started,
+  );
+}
+
 export const realChatService: ChatService = {
   async listConversations() {
     const scope = sessionIdentity.generation;
@@ -151,7 +178,17 @@ export const realChatService: ChatService = {
     if (!group) throw new ServiceError('NOT_FOUND');
     return groupConversation(group);
   },
-  listMessages: getHistory,
+  async listMessages(key) {
+    // The local HTTP proxy can deliver history before its realtime handshake is ready.
+    if (env.localApiProxy) return httpHistory(key);
+    try {
+      return await getHistory(key);
+    } catch (error) {
+      // A failed realtime handshake must not prevent reading authorized history.
+      if (!(error instanceof ServiceError) || error.code !== 'NETWORK') throw error;
+      return httpHistory(key);
+    }
+  },
   async editMessage(key, id, text) {
     const scope = sessionIdentity.generation;
     const message = ownMessage(key, id);
@@ -207,7 +244,8 @@ export const realChatService: ChatService = {
         ...(input.viewDurationSeconds ? { viewDurationSeconds: input.viewDurationSeconds } : {}),
       };
       const photoIds: string[] = [];
-      for (const asset of input.assets || []) photoIds.push(await uploadChatPhoto(asset, input.onUploadProgress));
+      for (const asset of input.assets || [])
+        photoIds.push(await uploadChatPhoto(asset, input.onUploadProgress));
       assertSessionCurrent(scope);
       const response = await apiClient.post('/chats/messages', {
         ...payload,

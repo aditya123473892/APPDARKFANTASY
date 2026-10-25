@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Avatar, Button, Chip, Text } from '@/components/ui';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -44,7 +45,7 @@ export const RequestCard = memo(function RequestCard({
         onPress={() => onOpenProfile(request)}
         style={styles.top}
       >
-        <Avatar uri={user.avatarUri} label={user.name} size={60} ring={request.superLike} />
+        <Avatar uri={user.avatarUri} label={user.name} size={56} ring={request.superLike} />
         <View style={styles.copy}>
           <View style={styles.nameRow}>
             <Text variant="subheading" numberOfLines={1} style={styles.name}>
@@ -142,19 +143,19 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   top: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  copy: { flex: 1, gap: 2 },
+  copy: { flex: 1, gap: spacing.xs },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   name: { flexShrink: 1 },
   superTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: spacing.none,
     borderRadius: radius.full,
   },
   note: { borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, padding: spacing.md },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs + 2 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   actions: { flexDirection: 'row', gap: spacing.sm },
   action: { flex: 1 },
 });

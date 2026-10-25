@@ -7,18 +7,18 @@ import {
   Alert,
   Modal,
   TextInput,
-  Pressable,
   StyleSheet,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
-import { KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
+import { Header, Screen, KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
 import { Avatar, Button, EmptyState, IconButton, Loader, Skeleton, Text } from '@/components/ui';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { isServiceError, describeError } from '@/services/errors';
@@ -34,7 +34,7 @@ import type { ChatMessage } from '../hooks/useChat';
 import { ChatInput } from '../components/ChatInput';
 import { DateDivider } from '../components/DateDivider';
 import { useMutation } from '@tanstack/react-query';
-import { pickMedia } from '@/features/create-post/pickMedia';
+import { useMediaPicker } from '@/features/create-post/useMediaPicker';
 import { chatService } from '../services';
 import { toast } from '@/components/ui/Toast';
 import {
@@ -102,6 +102,7 @@ export function ChatRoomScreen(): React.JSX.Element {
   const [shareCount, setShareCount] = useState(0);
   const [sharePreview, setSharePreview] = useState<string>();
   const [uploadStatus, setUploadStatus] = useState('');
+  const { pickMedia, picker } = useMediaPicker();
   const shareMounted = useRef(true);
   const shareConversation = useRef(conversationId);
   const shareChoice = useRef<((value: MediaShareChoice | null) => void) | null>(null);
@@ -208,7 +209,10 @@ export function ChatRoomScreen(): React.JSX.Element {
     !isGroup && showPresence ? formatPresence(conversation?.presence ?? null) : null;
   const subtitle =
     typingLabel ??
-    (isGroup && conversation?.memberCount ? `${conversation.memberCount} members` : presenceLabel);
+    (isGroup && conversation?.memberCount
+      ? `${conversation.memberCount} members`
+      : presenceLabel) ??
+    (isGroup ? 'Group chat' : 'Direct message');
 
   const latestIncomingId = useMemo(
     () =>
@@ -333,7 +337,11 @@ export function ChatRoomScreen(): React.JSX.Element {
               {
                 text: 'Report message',
                 onPress: () => {
-                  if (valid()) router.push({ pathname: '/report' as never, params: { targetType: 'chat_message', targetId: message.id } });
+                  if (valid())
+                    router.push({
+                      pathname: '/report' as never,
+                      params: { targetType: 'chat_message', targetId: message.id },
+                    });
                 },
               },
             ]
@@ -440,7 +448,7 @@ export function ChatRoomScreen(): React.JSX.Element {
 
   if (notFound) {
     return (
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.colors.background }]}>
+      <Screen padded={false} style={[styles.root, { backgroundColor: theme.colors.background }]}>
         <EmptyState
           icon="chatbubble-ellipses-outline"
           title="Conversation not found"
@@ -448,13 +456,16 @@ export function ChatRoomScreen(): React.JSX.Element {
           actionLabel="Back to messages"
           onAction={() => router.replace('/chats')}
         />
-      </SafeAreaView>
+      </Screen>
     );
   }
 
   const participant = conversation?.participant;
-  const initialLoading = messagesQuery.isPending && messages.length === 0;
-  const loadFailed = messagesQuery.isError && !messagesQuery.data;
+  const initialLoading =
+    (messagesQuery.isPending || conversationQuery.isPending) && messages.length === 0;
+  const loadFailed =
+    (messagesQuery.isError && !messagesQuery.data) ||
+    (conversationQuery.isError && !conversationQuery.data);
   const openDetails = () => {
     if (!participant) return;
     if (conversation?.kind === 'group')
@@ -467,76 +478,86 @@ export function ChatRoomScreen(): React.JSX.Element {
   };
 
   return (
-    <SafeAreaView
+    <Screen
+      padded={false}
       edges={['top', 'left', 'right']}
-      style={[styles.root, { backgroundColor: theme.colors.background }]}
+      style={[styles.root, { backgroundColor: theme.colors.chatBackground }]}
     >
-      <View style={[styles.header, { borderBottomColor: theme.colors.divider }]}>
-        {!isGroup && participant && (
-          <IconButton
-            icon="ban-outline"
-            label="Block user"
-            onPress={() => block.confirm(participant.id)}
-          />
-        )}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to messages"
-          hitSlop={6}
-          onPress={goBack}
-          style={({ pressed }) => [
-            styles.back,
-            pressed && { backgroundColor: theme.colors.surfacePressed },
-          ]}
-        >
-          <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
-        </Pressable>
-        {participant ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`View ${participant.name}'s ${isGroup ? 'group' : 'profile'}`}
-            onPress={openDetails}
-            style={styles.person}
-          >
-            <Avatar
-              uri={participant.avatarUri}
-              label={participant.name}
-              size={38}
-              online={Boolean(presenceLabel && conversation?.presence?.online)}
-            />
-            <View style={styles.personCopy}>
-              <Text variant="subheading" numberOfLines={1}>
-                {participant.name}
-              </Text>
-              {subtitle ? (
-                <Text
-                  variant="caption"
-                  color={
-                    typingLabel || (presenceLabel && conversation?.presence?.online)
-                      ? 'primary'
-                      : 'muted'
-                  }
-                  numberOfLines={1}
-                  accessibilityLiveRegion="polite"
-                >
-                  {subtitle}
-                </Text>
-              ) : null}
-            </View>
-          </Pressable>
-        ) : (
-          <View style={styles.person}>
-            <Skeleton style={styles.headerAvatar} />
-            <Skeleton style={styles.headerName} />
-          </View>
-        )}
-        {participant ? (
-          <IconButton
-            icon={isGroup ? 'people-circle-outline' : 'person-circle-outline'}
-            label={isGroup ? 'Group info' : 'View profile'}
-            onPress={openDetails}
-          />
-        ) : null}
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.divider },
+        ]}
+      >
+        <Header
+          title={participant?.name ?? 'Messages'}
+          back
+          onBack={goBack}
+          content={
+            participant ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`View ${participant.name}'s ${isGroup ? 'group' : 'profile'}`}
+                onPress={openDetails}
+                style={styles.person}
+              >
+                <Avatar
+                  uri={participant.avatarUri}
+                  label={participant.name}
+                  size={44}
+                  online={Boolean(presenceLabel && conversation?.presence?.online)}
+                />
+                <View style={styles.personCopy}>
+                  <Text weight="semibold" numberOfLines={1} style={{ fontSize: 16 }}>
+                    {participant.name}
+                  </Text>
+                  {subtitle ? (
+                    <Text
+                      variant="caption"
+                      color={
+                        typingLabel || (presenceLabel && conversation?.presence?.online)
+                          ? 'primary'
+                          : 'muted'
+                      }
+                      numberOfLines={1}
+                      accessibilityLiveRegion="polite"
+                    >
+                      {subtitle}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            ) : (
+              <View style={styles.person}>
+                <Skeleton style={styles.headerAvatar} />
+                <Skeleton style={styles.headerName} />
+              </View>
+            )
+          }
+          action={
+            participant ? (
+              <IconButton
+                icon="ellipsis-horizontal"
+                label="Conversation options"
+                onPress={() =>
+                  Alert.alert('Conversation', undefined, [
+                    { text: isGroup ? 'Group info' : 'View profile', onPress: openDetails },
+                    ...(!isGroup
+                      ? [
+                          {
+                            text: 'Block user',
+                            style: 'destructive' as const,
+                            onPress: () => block.confirm(participant.id),
+                          },
+                        ]
+                      : []),
+                    { text: 'Cancel', style: 'cancel' },
+                  ])
+                }
+              />
+            ) : undefined
+          }
+        />
       </View>
 
       {messagesQuery.isRefetchError && messagesQuery.data ? (
@@ -609,7 +630,10 @@ export function ChatRoomScreen(): React.JSX.Element {
             <MessagesSkeleton />
           ) : loadFailed ? (
             <ErrorState
-              onRetry={() => void messagesQuery.refetch()}
+              onRetry={() => {
+                void conversationQuery.refetch();
+                void messagesQuery.refetch();
+              }}
               message="We couldn't load this conversation."
             />
           ) : messages.length === 0 && participant ? (
@@ -690,11 +714,11 @@ export function ChatRoomScreen(): React.JSX.Element {
           ) : null}
         </View>
         {typingLabel ? <TypingDots /> : null}
-          {attach.isPending && uploadStatus ? (
-            <Text accessibilityLiveRegion="polite" style={{ paddingHorizontal: spacing.screen }}>
-              {uploadStatus}
-            </Text>
-          ) : null}
+        {attach.isPending && uploadStatus ? (
+          <Text accessibilityLiveRegion="polite" style={{ paddingHorizontal: spacing.screen }}>
+            {uploadStatus}
+          </Text>
+        ) : null}
         <ChatInput
           timerLabel={timerShortLabel(ttlSeconds)}
           onTimerPress={featureFlags.ENABLE_EPHEMERAL_CHAT ? () => setTimerSheet(true) : undefined}
@@ -718,6 +742,7 @@ export function ChatRoomScreen(): React.JSX.Element {
           placeholder={participant ? `Message ${participant.name}…` : 'Write a message…'}
         />
       </KeyboardAvoidingScreen>
+      {picker}
       <TimerSheet
         visible={timerSheet}
         value={ttlSeconds}
@@ -733,7 +758,7 @@ export function ChatRoomScreen(): React.JSX.Element {
           onChoose={finishShareChoice}
         />
       ) : null}
-    </SafeAreaView>
+    </Screen>
   );
 }
 
@@ -741,14 +766,7 @@ const styles = StyleSheet.create({
   // FlashList v2 uses a mirrored viewport and cells for newest-first chat rows.
   inverted: { transform: [{ scaleY: -1 }] },
   root: { flex: 1 },
-  header: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xxs,
-    paddingHorizontal: spacing.xs,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
+  header: { paddingHorizontal: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
   back: {
     width: 44,
     height: 44,
@@ -760,7 +778,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm + 2,
+    gap: spacing.sm,
     minHeight: 48,
     minWidth: 0,
   },
@@ -768,7 +786,7 @@ const styles = StyleSheet.create({
   headerAvatar: { width: 38, height: 38, borderRadius: radius.full },
   headerName: { width: 120 },
   body: { flex: 1, width: '100%', maxWidth: spacing.contentMax + 120, alignSelf: 'center' },
-  list: { paddingHorizontal: spacing.screen, paddingVertical: spacing.md },
+  list: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
   skeleton: { flex: 1, justifyContent: 'flex-end', padding: spacing.screen, gap: spacing.md },
   skeletonBubble: { height: 40, borderRadius: radius.lg },
   skeletonMine: { alignSelf: 'flex-end' },
@@ -787,7 +805,7 @@ const styles = StyleSheet.create({
     top: -8,
     minWidth: 20,
     height: 20,
-    paddingHorizontal: 5,
+    paddingHorizontal: spacing.xs,
     borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
@@ -796,7 +814,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs + 2,
+    gap: spacing.xs,
     minHeight: 40,
   },
   editBackdrop: { flex: 1, justifyContent: 'center', padding: spacing.xl },
@@ -804,7 +822,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
-    padding: spacing.lg + 2,
+    padding: spacing.lg,
     gap: spacing.md,
     borderRadius: radius.lg,
   },

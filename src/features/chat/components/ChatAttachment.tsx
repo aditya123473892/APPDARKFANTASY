@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { useEffect, useRef, useState } from 'react';
 import {
   sessionIdentity,
@@ -5,14 +6,22 @@ import {
   registerSessionTeardown,
 } from '@/features/auth/sessionRuntime';
 import { AppState, View } from 'react-native';
-import { Button, Text } from '@/components/ui';
+import { AttachmentCard } from './AttachmentCard';
 import { ChatPhotoViewer } from './ChatPhotoViewer';
 import { toast } from '@/components/ui/Toast';
 import { apiClient } from '@/services/api/apiClient';
 import { unwrap, serviceError } from '@/services/api/backend';
 import { describeError } from '@/services/errors';
 import type { ChatMedia } from '../types';
-export function ChatAttachment({ media, messageId, mine }: { media: ChatMedia; messageId: string; mine?: boolean }) {
+export function ChatAttachment({
+  media,
+  messageId,
+  mine,
+}: {
+  media: ChatMedia;
+  messageId: string;
+  mine?: boolean;
+}) {
   const mounted = useRef(true);
   const request = useRef(0);
   const [url, setUrl] = useState<string | null>(null);
@@ -93,8 +102,8 @@ export function ChatAttachment({ media, messageId, mine }: { media: ChatMedia; m
     }
   };
   return (
-    <View style={{ gap: 8, marginTop: 8, maxWidth: '100%' }}>
-      <Button
+    <View style={{ gap: spacing.sm, marginTop: spacing.sm, maxWidth: '100%' }}>
+      <AttachmentCard
         label={
           unavailable
             ? 'Attachment unavailable'
@@ -102,10 +111,24 @@ export function ChatAttachment({ media, messageId, mine }: { media: ChatMedia; m
               ? 'Open video'
               : 'Open photo'
         }
+        title={
+          unavailable
+            ? 'Media unavailable'
+            : media.mimetype?.startsWith('video/')
+              ? 'Video'
+              : 'Photo'
+        }
+        description={unavailable ? 'Expired or removed' : 'Tap to open · Unlimited views'}
+        icon={
+          unavailable
+            ? 'alert-circle-outline'
+            : media.mimetype?.startsWith('video/')
+              ? 'play-outline'
+              : 'image-outline'
+        }
+        mine={mine}
         disabled={Boolean(unavailable)}
         loading={loading}
-        size="sm"
-        variant="secondary"
         onPress={() => void open()}
       />
       <ChatPhotoViewer
@@ -114,7 +137,7 @@ export function ChatAttachment({ media, messageId, mine }: { media: ChatMedia; m
         uri={url}
         mimetype={media.mimetype}
         loading={imageLoading}
-        label="Photo"
+        label={media.mimetype?.startsWith('video/') ? 'Video' : 'Photo'}
         onClose={() => {
           setVisible(false);
           setUrl(null);
@@ -126,11 +149,6 @@ export function ChatAttachment({ media, messageId, mine }: { media: ChatMedia; m
           toast.error('This photo could not be displayed.');
         }}
       />
-      {media.originalname ? (
-        <Text variant="caption" numberOfLines={1}>
-          {media.originalname}
-        </Text>
-      ) : null}
     </View>
   );
 }

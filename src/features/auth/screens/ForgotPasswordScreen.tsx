@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { useRef, useState } from 'react';
@@ -88,4 +89,4 @@ export function ForgotPasswordScreen(): React.JSX.Element {
     </Screen>
   );
 }
-const styles = StyleSheet.create({ content: { gap: 18, marginTop: 28 } });
+const styles = StyleSheet.create({ content: { gap: spacing.lg, marginTop: spacing.xl } });

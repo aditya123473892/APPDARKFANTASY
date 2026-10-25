@@ -3,6 +3,8 @@ const os = require('node:os');
 const fs = require('node:fs');
 const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 const config = getSentryExpoConfig(__dirname);
+// expo-sqlite's web worker imports its WASM binary as an asset.
+if (!config.resolver.assetExts.includes('wasm')) config.resolver.assetExts.push('wasm');
 const resolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   // noble-hashes 1.x's browser map redirects ./crypto to the unexported

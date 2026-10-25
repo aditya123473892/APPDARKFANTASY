@@ -481,14 +481,8 @@ export class PostsController {
     description: 'You have already liked this post.',
   })
   async likePost(@Param('postId') postId: string, @AuthUser() user: IAuthUser) {
-    const post = await this.postsService.likePost(postId, user.id);
-    if (!post) {
-      return { message: 'You have already liked this post.' };
-    }
-    return {
-      message: 'Post liked successfully.',
-      post: await this.postsService.findVisiblePost(postId, user.id),
-    };
+    await this.postsService.likePost(postId, user.id);
+    return successRes(await this.postsService.getLikeState(postId, user.id), 'Post liked successfully.');
   }
 
   @ApiBearerAuth()
@@ -504,13 +498,7 @@ export class PostsController {
     @Param('postId') postId: string,
     @AuthUser() user: IAuthUser,
   ) {
-    const post = await this.postsService.unlikePost(postId, user.id);
-    if (!post) {
-      return { message: 'You have not liked this post yet.' };
-    }
-    return {
-      message: 'Post unliked successfully.',
-      post: await this.postsService.findVisiblePost(postId, user.id),
-    };
+    await this.postsService.unlikePost(postId, user.id);
+    return successRes(await this.postsService.getLikeState(postId, user.id), 'Post unliked successfully.');
   }
 }

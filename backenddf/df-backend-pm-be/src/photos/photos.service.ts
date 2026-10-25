@@ -417,7 +417,9 @@ export class PhotosService implements OnModuleInit {
       // Entitlement is freshly read from DB, never from JWT or client flags.
       const viewer = requester && Types.ObjectId.isValid(requester)
         ? await this.db.db.collection('Users').findOne({ _id: new Types.ObjectId(requester) }, { projection: { premiumUntil: 1 } }) : null;
-      source = await new PostMapper().toResponse({ ...source, media: persisted.media || [], videos: persisted.videos || [],
+      const ownLike = requester && Types.ObjectId.isValid(requester)
+        ? await this.db.db.collection('Likes').findOne({ post: persisted._id, user: new Types.ObjectId(requester) }, { projection: { _id: 1 } }) : null;
+      source = await new PostMapper().toResponse({ ...source, likeCount: (persisted.likes || []).length, likedByMe: !!ownLike, media: persisted.media || [], videos: persisted.videos || [],
         flag: persisted.flag, contentVisibility: persisted.contentVisibility || 'normal', user: source.user || persisted.user },
         { id: requester, premiumUntil: viewer?.premiumUntil, admin: adminPosts }, {
           canRead: async () => {

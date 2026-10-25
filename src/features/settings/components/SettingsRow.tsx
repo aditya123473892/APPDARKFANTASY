@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Switch, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Text } from '@/components/ui';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -69,13 +70,13 @@ export function SettingsRow({
       <View
         style={[
           styles.icon,
-          { backgroundColor: danger ? theme.colors.dangerSoft : theme.colors.primarySoft },
+          { backgroundColor: danger ? theme.colors.dangerSoft : theme.colors.surfaceMuted },
         ]}
       >
         <Ionicons
           name={icon}
           size={19}
-          color={danger ? theme.colors.danger : theme.colors.primary}
+          color={danger ? theme.colors.danger : theme.colors.textSecondary}
         />
       </View>
       <View
@@ -121,13 +122,13 @@ export function SettingsRow({
 const styles = StyleSheet.create({
   group: { gap: spacing.sm },
   groupTitle: { paddingHorizontal: spacing.xs },
-  card: { borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  card: { borderRadius: radius.lg, paddingHorizontal: spacing.lg, overflow: 'hidden' },
   row: {
     minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingLeft: spacing.lg,
+    paddingLeft: spacing.none,
   },
   icon: {
     width: 36,
@@ -142,8 +143,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingRight: spacing.lg,
+    paddingRight: spacing.none,
     paddingVertical: spacing.sm,
   },
-  copy: { flex: 1, gap: 2 },
+  copy: { flex: 1, gap: spacing.xs },
 });

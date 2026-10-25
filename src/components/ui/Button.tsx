@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   base: {
     minWidth: 0,
     flexShrink: 1,
-    borderRadius: radius.input,
+    borderRadius: radius.lg,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -119,8 +119,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.sm,
   },
-  sm: { minHeight: 40, paddingHorizontal: spacing.lg },
-  md: { minHeight: 50 },
-  lg: { minHeight: 56 },
+  sm: { minHeight: spacing.touch, paddingHorizontal: spacing.lg },
+  md: { minHeight: spacing.control },
+  lg: { minHeight: spacing.control },
   full: { width: '100%' },
 });

@@ -1,13 +1,7 @@
+import { radius, spacing } from '@/theme';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  AppState,
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { ActivityIndicator, AppState, Alert, FlatList, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, Header } from '@/components/layout';
@@ -417,57 +411,69 @@ export function VaultScreen(): React.JSX.Element {
 }
 const styles = StyleSheet.create({
   grow: { flex: 1 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  library: { flex: 1, gap: 12 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  library: { flex: 1, gap: spacing.md },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.lg,
+    padding: spacing.xl,
+  },
   lockIcon: {
     width: 88,
     height: 88,
-    borderRadius: 30,
+    borderRadius: radius.xl,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
-  unlock: { marginTop: 12, maxWidth: 320 },
+  unlock: { marginTop: spacing.md, maxWidth: 320 },
   topLine: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: spacing.sm,
     flexWrap: 'wrap',
   },
   offline: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.lg,
   },
-  tabs: { flexDirection: 'row', padding: 4, borderRadius: 14 },
-  tab: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 11 },
-  grid: { flexGrow: 1, paddingBottom: 12 },
+  tabs: { flexDirection: 'row', padding: spacing.xs, borderRadius: radius.md },
+  tab: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: radius.md,
+  },
+  grid: { flexGrow: 1, paddingBottom: spacing.md },
   empty: {
     flex: 1,
     minHeight: 230,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    padding: 24,
+    gap: spacing.md,
+    padding: spacing.xl,
   },
   notice: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
   },
   actions: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing.md,
   },
 });

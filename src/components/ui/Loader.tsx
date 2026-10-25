@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Text } from './Text';
 import { useTheme } from '@/theme/useTheme';
@@ -11,5 +12,5 @@ export function Loader({ label = 'Loading…' }: { label?: string }): React.JSX.
   );
 }
 const styles = StyleSheet.create({
-  base: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  base: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
 });

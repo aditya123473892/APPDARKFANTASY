@@ -6,19 +6,20 @@ import { mediaUrl } from '@/services/api/backend';
 
 import { useTheme } from '@/theme/useTheme';
 import { radius } from '@/theme';
+import { StoryRing } from './StoryRing';
 
 type AvatarProps = { uri: string; size?: number; online?: boolean; ring?: boolean; label: string };
 
-export function Avatar({ uri, size = 48, online, ring, label }: AvatarProps): React.JSX.Element {
+export function Avatar({ uri, size = 44, online, ring, label }: AvatarProps): React.JSX.Element {
   const { theme } = useTheme();
   const [failedUri, setFailedUri] = useState<string | null>(null);
-  const inner = ring ? size - 6 : size;
+  const inner = ring ? size - 8 : size;
   const dot = Math.max(10, Math.round(size * 0.24));
-  return (
+  const content = (
     <View
       style={[
-        { width: size, height: size },
-        ring && [styles.ring, { borderColor: theme.colors.primary }],
+        { width: inner, height: inner },
+        { alignItems: 'center', justifyContent: 'center' },
       ]}
     >
       {!uri || failedUri === uri ? (
@@ -33,7 +34,7 @@ export function Avatar({ uri, size = 48, online, ring, label }: AvatarProps): Re
             backgroundColor: theme.colors.surfaceElevated,
           }}
         >
-          <Text weight="bold">
+          <Text weight="semibold" style={{ fontSize: Math.max(10, size * 0.3) }}>
             {label
               .split(/\s+/)
               .slice(0, 2)
@@ -73,15 +74,16 @@ export function Avatar({ uri, size = 48, online, ring, label }: AvatarProps): Re
       ) : null}
     </View>
   );
+  return ring ? (
+    <StoryRing size={size}>
+      <View style={{ width: inner, height: inner }}>{content}</View>
+    </StoryRing>
+  ) : (
+    content
+  );
 }
 
 const styles = StyleSheet.create({
   image: { borderRadius: radius.full },
-  ring: {
-    borderRadius: radius.full,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   online: { position: 'absolute', right: 0, bottom: 0, borderRadius: radius.full, borderWidth: 2 },
 });

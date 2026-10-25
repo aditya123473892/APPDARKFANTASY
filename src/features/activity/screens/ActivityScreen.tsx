@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { RefreshControl, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { FlashList } from '@shopify/flash-list';
 import { spacing, radius } from '@/theme';
 import { useRouter } from 'expo-router';
@@ -22,7 +23,7 @@ export function ActivityScreen() {
   return (
     <Screen padded={false} edges={['top', 'left', 'right']}>
       <View style={styles.heading}>
-        <Header title="Activity" subtitle="Stay connected with your circle" align="left" />
+        <Header title="Activity" back backFallback="/profile" />
       </View>
       <View style={styles.tabArea}>
         <View style={[styles.tabs, { borderBottomColor: theme.colors.border }]}>
@@ -65,7 +66,7 @@ export function ActivityScreen() {
     </Screen>
   );
 }
-function FollowRequestsScreen() {
+export function FollowRequestsScreen() {
   const router = useRouter();
   const client = useQueryClient();
   const { theme } = useTheme();
@@ -195,8 +196,8 @@ const styles = StyleSheet.create({
     left: spacing.md,
     right: spacing.md,
     height: 3,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
+    borderTopLeftRadius: radius.xs,
+    borderTopRightRadius: radius.xs,
   },
   sectionHeading: { padding: spacing.screen, gap: spacing.xs },
   requestCard: {

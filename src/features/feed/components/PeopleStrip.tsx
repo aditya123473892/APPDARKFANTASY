@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Avatar, Text } from '@/components/ui';
 import { useDiscoverProfiles } from '@/features/profile/hooks/useProfiles';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
@@ -50,7 +51,7 @@ export function PeopleStrip(): React.JSX.Element | null {
             <Avatar
               uri={person.avatarUri}
               label={person.name}
-              size={64}
+              size={56}
               ring
               online={showPresence && Boolean(person.presence?.online)}
             />
@@ -70,10 +71,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.sm + 2,
+    marginBottom: spacing.sm,
   },
   row: { gap: spacing.md, paddingRight: spacing.screen },
-  person: { width: 68, alignItems: 'center', gap: spacing.xs + 2 },
+  person: { width: 68, alignItems: 'center', gap: spacing.xs },
   name: { maxWidth: 68 },
   pressed: { opacity: 0.7 },
 });

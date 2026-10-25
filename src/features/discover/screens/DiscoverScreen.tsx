@@ -56,7 +56,7 @@ export function DiscoverScreen() {
   return (
     <Screen padded={false}>
       <View style={[styles.top, { borderBottomColor: theme.colors.divider }]}>
-        <Header title="Discover" subtitle="A connection worth finding" align="left" />
+        <Header title="Discover" back backFallback="/profile" />
         <SearchField
           accessibilityLabel="Search users"
           placeholder="Search by display name"

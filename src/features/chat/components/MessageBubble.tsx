@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo } from 'react';
 import { useBlockState } from '@/features/safety/blockState';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Text } from '@/components/ui';
-import { radius, spacing } from '@/theme';
+import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { formatMessageTime } from '@/utils/formatters';
 import type { ChatMessage } from '../hooks/useChat';
@@ -97,15 +98,15 @@ export const MessageBubble = memo(function MessageBubble({
           : 'checkmark-done';
   const statusColor =
     message.status === 'read'
-      ? theme.colors.onPrimary
+      ? theme.colors.primaryText
       : failed
         ? theme.colors.danger
         : mine
-          ? theme.colors.onPrimary
+          ? theme.colors.textMuted
           : theme.colors.textMuted;
 
-  const textColor = mine ? theme.colors.onPrimary : theme.colors.text;
-  const metaColor = mine ? theme.colors.onPrimary : theme.colors.textMuted;
+  const textColor = theme.colors.text;
+  const metaColor = theme.colors.textMuted;
   const hasMedia = Boolean(message.media?.length);
 
   // The server withholds blocked senders' content, so there is nothing to reveal.
@@ -115,7 +116,10 @@ export const MessageBubble = memo(function MessageBubble({
         accessibilityRole="text"
         accessibilityLabel="Message from a blocked user"
         onLongPress={() => onActions(message)}
-        style={[styles.bubble, { backgroundColor: theme.colors.bubbleIn, marginBottom: 8 }]}
+        style={[
+          styles.bubble,
+          { backgroundColor: theme.colors.bubbleIn, marginBottom: spacing.sm },
+        ]}
       >
         <Text color="muted">Message from a blocked user</Text>
       </Pressable>
@@ -141,7 +145,7 @@ export const MessageBubble = memo(function MessageBubble({
           styles.bubble,
           mine
             ? [
-                { backgroundColor: theme.colors.primary },
+                { backgroundColor: theme.colors.bubbleOut },
                 !first && styles.mineJoinTop,
                 !last && styles.mineJoinBottom,
                 last && styles.mineTail,
@@ -156,7 +160,7 @@ export const MessageBubble = memo(function MessageBubble({
         ]}
       >
         {replyPreview ? <ReplyPreview {...replyPreview} mine={mine} /> : null}
-        {!mine && first && message.senderName ? (
+        {!mine && group && first && message.senderName ? (
           <Text variant="label" color="primary" numberOfLines={1} style={styles.sender}>
             {message.senderName}
           </Text>
@@ -199,15 +203,8 @@ export const MessageBubble = memo(function MessageBubble({
                 onPress={openFailedActions}
                 style={styles.retry}
               >
-                <Ionicons
-                  name="refresh"
-                  size={16}
-                  color={mine ? theme.colors.onPrimary : theme.colors.danger}
-                />
-                <Text
-                  variant="caption"
-                  style={{ color: mine ? theme.colors.onPrimary : theme.colors.danger }}
-                >
+                <Ionicons name="refresh" size={16} color={theme.colors.danger} />
+                <Text variant="caption" style={{ color: theme.colors.danger }}>
                   Check send status
                 </Text>
               </Pressable>
@@ -232,16 +229,17 @@ const BUBBLE = radius.bubble + 2;
 const JOIN = radius.tail + 2;
 const styles = StyleSheet.create({
   row: { maxWidth: '100%' },
-  mineRow: { alignItems: 'flex-end', paddingLeft: '16%' },
-  theirRow: { alignItems: 'flex-start', paddingRight: '16%' },
-  grouped: { marginBottom: 2 },
-  groupEnd: { marginBottom: spacing.sm + 2 },
+  mineRow: { alignItems: 'flex-end', paddingLeft: '12%' },
+  theirRow: { alignItems: 'flex-start', paddingRight: '12%' },
+  grouped: { marginBottom: spacing.xs },
+  groupEnd: { marginBottom: spacing.sm },
   bubble: {
     maxWidth: 560,
+    minWidth: 64,
     borderRadius: BUBBLE,
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.xs + 3,
-    paddingBottom: spacing.xs + 1,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   mineJoinTop: { borderTopRightRadius: JOIN },
   mineJoinBottom: { borderBottomRightRadius: JOIN },
@@ -249,7 +247,7 @@ const styles = StyleSheet.create({
   theirJoinTop: { borderTopLeftRadius: JOIN },
   theirJoinBottom: { borderBottomLeftRadius: JOIN },
   theirTail: { borderBottomLeftRadius: radius.tail },
-  sender: { marginBottom: 2 },
+  sender: { marginBottom: spacing.none },
   content: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -257,15 +255,15 @@ const styles = StyleSheet.create({
     columnGap: spacing.sm,
   },
   contentMediaOnly: { justifyContent: 'flex-end', marginTop: spacing.xs },
-  text: { flexShrink: 1 },
+  text: { flexShrink: 1, fontSize: 15, lineHeight: 22 },
   meta: {
     marginLeft: 'auto',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    paddingTop: 2,
-    paddingBottom: 1,
+    gap: spacing.xs,
+    paddingTop: spacing.none,
+    paddingBottom: spacing.none,
   },
-  time: { fontSize: 11, lineHeight: 14, opacity: 0.85 },
+  time: { fontSize: typography.size.xs, lineHeight: 14, opacity: 0.85 },
   retry: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 24 },
 });

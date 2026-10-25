@@ -3,7 +3,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { Header, KeyboardAvoidingScreen, Screen } from '@/components/layout';
 import { Avatar, Button, EmptyState, Input, Loader, Text } from '@/components/ui';
@@ -122,7 +123,7 @@ function NewGroup(): React.JSX.Element {
           style={[styles.photo, { backgroundColor: theme.colors.surfaceElevated }]}
         >
           {photo ? (
-            <Avatar uri={photo.uri} label="Group photo" size={72} />
+            <Avatar uri={photo.uri} label="Group photo" size={56} />
           ) : (
             <Ionicons name="camera-outline" size={28} color={theme.colors.textSecondary} />
           )}
@@ -180,7 +181,7 @@ function NewGroup(): React.JSX.Element {
               onPress={() => toggle(user)}
               style={[styles.chip, { backgroundColor: theme.colors.primarySoft }]}
             >
-              <Avatar uri={user.avatarUri} label={user.name} size={24} />
+              <Avatar uri={user.avatarUri} label={user.name} size={32} />
               <Text variant="label" numberOfLines={1} style={styles.chipName}>
                 {user.name}
               </Text>
@@ -264,7 +265,7 @@ function NewGroup(): React.JSX.Element {
                   </Text>
                   <Ionicons
                     name={checked ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={24}
+                    size={32}
                     color={checked ? theme.colors.primary : theme.colors.textMuted}
                   />
                 </Pressable>

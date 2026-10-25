@@ -1,13 +1,13 @@
 import { memo } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Avatar, Text, Skeleton } from '@/components/ui';
 import { Ionicons } from '@expo/vector-icons';
-import { radius, spacing } from '@/theme';
+import { radius, spacing, media } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
-import { formatRelativeTime } from '@/utils/formatters';
 import type { Conversation } from '../types';
 
-export const CHAT_AVATAR = 54;
+export const CHAT_AVATAR = media.avatar.large;
 
 export const ChatListItem = memo(function ChatListItem({
   conversation,
@@ -44,6 +44,12 @@ export const ChatListItem = memo(function ChatListItem({
   const preview = `${sender}${body}`;
   const failedPreview = conversation.previewState === 'error';
   const badgeColor = muted ? theme.colors.textMuted : theme.colors.primary;
+  const date = new Date(conversation.updatedAt);
+  const time = Number.isFinite(date.getTime())
+    ? date.toDateString() === new Date().toDateString()
+      ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    : '';
   return (
     <Pressable
       accessibilityRole="button"
@@ -67,11 +73,11 @@ export const ChatListItem = memo(function ChatListItem({
             <Ionicons
               accessibilityLabel="Group"
               name="people"
-              size={15}
+              size={14}
               color={theme.colors.textSecondary}
             />
           ) : null}
-          <Text variant="subheading" numberOfLines={1} style={styles.name}>
+          <Text weight="semibold" numberOfLines={1} style={styles.name}>
             {participant.name}
           </Text>
           {muted ? (
@@ -93,7 +99,7 @@ export const ChatListItem = memo(function ChatListItem({
             />
           ) : null}
           <Text variant="caption" color={unread && !muted ? 'primary' : 'muted'}>
-            {formatRelativeTime(conversation.updatedAt)}
+            {time}
           </Text>
         </View>
         <View style={styles.row}>
@@ -136,7 +142,10 @@ export const ChatListItem = memo(function ChatListItem({
               accessibilityLabel={`${unreadCount} unread`}
               style={[styles.badge, { backgroundColor: badgeColor }]}
             >
-              <Text variant="caption" weight="bold" color="inverse" maxFontSizeMultiplier={1.2}>
+              <Text
+                weight="semibold"
+                style={{ fontSize: 11, lineHeight: 16, color: theme.colors.onPrimary }}
+              >
                 {unreadCount > 99 ? '99+' : unreadCount}
               </Text>
             </View>
@@ -149,23 +158,23 @@ export const ChatListItem = memo(function ChatListItem({
 
 const styles = StyleSheet.create({
   root: {
-    minHeight: 76,
+    minHeight: 80,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     paddingHorizontal: spacing.screen,
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.md,
   },
-  content: { flex: 1, minWidth: 0, gap: 3 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
-  name: { flex: 1 },
-  preview: { flex: 1 },
+  content: { flex: 1, minWidth: 0, gap: spacing.xs },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  name: { flex: 1, fontSize: 16 },
+  preview: { flex: 1, fontSize: 14 },
   previewSkeleton: { width: '70%', height: 14 },
   badge: {
     minWidth: 22,
     height: 22,
+    paddingHorizontal: spacing.xs,
     borderRadius: radius.full,
-    paddingHorizontal: 7,
     alignItems: 'center',
     justifyContent: 'center',
   },

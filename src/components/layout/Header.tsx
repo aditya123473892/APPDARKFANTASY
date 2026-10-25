@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, type Href } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Text } from '@/components/ui/Text';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -20,13 +21,17 @@ export function Header({
   back = false,
   backFallback,
   action,
-  align = 'center',
+  content,
+  onBack,
+  align = 'left',
 }: {
   title: string;
   subtitle?: string;
   back?: boolean;
   backFallback?: Href;
   action?: React.ReactNode;
+  content?: React.ReactNode;
+  onBack?: () => void;
   align?: 'center' | 'left';
 }): React.JSX.Element {
   const { theme } = useTheme();
@@ -38,7 +43,7 @@ export function Header({
           accessibilityRole="button"
           accessibilityLabel="Go back"
           hitSlop={6}
-          onPress={goBack}
+          onPress={onBack ?? goBack}
           style={({ pressed }) => [
             styles.icon,
             pressed && { backgroundColor: theme.colors.surfacePressed },
@@ -50,26 +55,35 @@ export function Header({
         <View style={styles.icon} />
       ) : null}
       <View style={[styles.titleWrap, align === 'left' && styles.left]}>
-        <Text
-          variant={align === 'left' ? 'title' : 'subheading'}
-          numberOfLines={1}
-          accessibilityRole="header"
-          center={align === 'center'}
-        >
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text variant="caption" color="secondary" numberOfLines={1} center={align === 'center'}>
-            {subtitle}
-          </Text>
-        ) : null}
+        {content ?? (
+          <>
+            <Text
+              variant={align === 'left' ? 'title' : 'subheading'}
+              numberOfLines={1}
+              accessibilityRole="header"
+              center={align === 'center'}
+            >
+              {title}
+            </Text>
+            {subtitle ? (
+              <Text
+                variant="caption"
+                color="secondary"
+                numberOfLines={1}
+                center={align === 'center'}
+              >
+                {subtitle}
+              </Text>
+            ) : null}
+          </>
+        )}
       </View>
       <View style={[styles.icon, styles.action]}>{action}</View>
     </View>
   );
 }
 const styles = StyleSheet.create({
-  base: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  base: { minHeight: spacing.header, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   icon: {
     minWidth: 44,
     minHeight: 44,
@@ -79,5 +93,5 @@ const styles = StyleSheet.create({
   },
   action: { alignItems: 'flex-end' },
   titleWrap: { flex: 1, justifyContent: 'center' },
-  left: { paddingLeft: spacing.xs },
+  left: { minWidth: 0 },
 });

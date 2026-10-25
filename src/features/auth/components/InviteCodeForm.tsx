@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
@@ -38,4 +39,4 @@ export function InviteCodeForm(): React.JSX.Element {
     </View>
   );
 }
-const styles = StyleSheet.create({ form: { gap: 16 } });
+const styles = StyleSheet.create({ form: { gap: spacing.lg } });

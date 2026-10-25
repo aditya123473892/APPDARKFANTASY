@@ -25,14 +25,15 @@ export function EmptyState({
   compact = false,
 }: EmptyStateProps): React.JSX.Element {
   const { theme } = useTheme();
-  const accent = tone === 'danger' ? theme.colors.danger : theme.colors.primary;
+  const accent = tone === 'danger' ? theme.colors.danger : theme.colors.textSecondary;
   return (
     <View style={[styles.root, compact && styles.compact]}>
       <View
         style={[
           styles.icon,
           {
-            backgroundColor: tone === 'danger' ? theme.colors.dangerSoft : theme.colors.primarySoft,
+            backgroundColor:
+              tone === 'danger' ? theme.colors.dangerSoft : theme.colors.surfaceMuted,
           },
         ]}
       >
@@ -41,7 +42,7 @@ export function EmptyState({
       <Text variant="subheading" center>
         {title}
       </Text>
-      <Text color="secondary" center style={styles.message}>
+      <Text color="secondary" style={styles.message}>
         {message}
       </Text>
       {actionLabel && onAction ? (

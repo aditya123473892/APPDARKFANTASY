@@ -119,22 +119,28 @@ export const ONE_DAY = 86_400;
 @Injectable()
 export class OtpThrottle {
   readonly limits: OtpLimits;
+  readonly testingBypass: boolean;
   store: ThrottleStore;
   now = () => Date.now();
 
   constructor(config: ConfigService, @InjectConnection() db: Connection) {
+    this.testingBypass = config.get('NODE_ENV') === 'development' &&
+      config.get('OTP_DEV_BYPASS_RATE_LIMITS') === 'true';
     this.limits = readOtpLimits((key) => config.get(key));
+    if (this.testingBypass) this.limits.resendCooldownSeconds = 0;
     this.store = new MongoThrottleStore(db);
   }
 
   /** Counts every rule (rejected attempts included) and fails on the first exceeded limit. */
   async consume(rules: ThrottleRule[], code: OtpErrorCode = 'OTP_RATE_LIMITED'): Promise<void> {
+    if (this.testingBypass) return;
     const now = this.now();
     for (const rule of rules)
       if ((await this.store.hit(rule.key, rule.windowSeconds, now)) > rule.limit) throw otpError(code);
   }
 
   async cooldown(key: string): Promise<void> {
+    if (this.testingBypass) return;
     const remaining = await this.store.claim(key, this.limits.resendCooldownSeconds, this.now());
     if (remaining > 0)
       throw otpError('OTP_COOLDOWN', `Please wait ${remaining} seconds before requesting another code.`);

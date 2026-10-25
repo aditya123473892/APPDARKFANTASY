@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Text } from '@/components/ui';
@@ -14,4 +15,4 @@ export function InviteCodeScreen(): React.JSX.Element {
     </Screen>
   );
 }
-const styles = StyleSheet.create({ content: { gap: 20, marginTop: 28 } });
+const styles = StyleSheet.create({ content: { gap: spacing.lg, marginTop: spacing.xl } });

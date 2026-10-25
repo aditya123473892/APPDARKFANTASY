@@ -8,7 +8,11 @@ export type PostAuthor = {
 export type ContentVisibility = 'normal' | 'premium';
 /** Allowlisted wire image response shared by feed, profiles and post mutations. */
 export type PostImageResponse = {
-  id: string; url: string; blurhash: string | null; width: number | null; height: number | null;
+  id: string;
+  url: string;
+  blurhash: string | null;
+  width: number | null;
+  height: number | null;
 };
 export type PostMedia = {
   id?: string;
@@ -51,7 +55,14 @@ export type FeedPage = { posts: Post[]; count: number };
 export type LikeState = { liked: boolean; likeCount: number };
 export type CommentPage = { comments: PostComment[]; hasMore: boolean; count: number };
 
-export type UploadAsset = { uri: string; name: string; type: string; file?: File };
+export type UploadAsset = {
+  uri: string;
+  name: string;
+  type: string;
+  file?: File;
+  /** Explicitly selected, verified copy from the vault; avoid importing it again. */
+  fromVault?: boolean;
+};
 export type CreatePostInput = {
   contentVisibility?: ContentVisibility;
   onUploadProgress?: import('@/services/api/uploadProgress').UploadProgressListener;

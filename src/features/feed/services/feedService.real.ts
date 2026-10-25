@@ -7,7 +7,16 @@ import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { userCache } from '@/features/auth/userCache';
 import { displayName, type UserSummary } from '@/features/auth/userModel';
 import { ServiceError } from '@/services/errors';
-import type { CommentPage, ContentVisibility, Post, PostAuthor, PostComment, PostImageResponse, PostMedia } from '../types';
+import type {
+  CommentPage,
+  ContentVisibility,
+  LikeState,
+  Post,
+  PostAuthor,
+  PostComment,
+  PostImageResponse,
+  PostMedia,
+} from '../types';
 import type { FeedService } from './feedService';
 export type BackendPost = {
   _id: string;
@@ -61,20 +70,21 @@ export function mapComment(comment: BackendComment): PostComment | null {
   };
 }
 /** 0 width/height means "unknown"; the gallery then measures the loaded image. */
-type MediaSource = Pick<BackendPost, 'images' | 'media' | 'videos' | 'contentVisibility' | 'locked'> & {
+type MediaSource = Pick<
+  BackendPost,
+  'images' | 'media' | 'videos' | 'contentVisibility' | 'locked'
+> & {
   _id?: string;
 };
 export function mapPostMedia(raw: MediaSource): PostMedia[] {
-  const videos: PostMedia[] = (raw.videos ?? [])
-    .filter((video) => mediaUrl(video.url) || raw.locked)
-    .map((video, index) => ({
-      id: `${raw._id}:video:${index}`,
-      uri: mediaUrl(video.url),
-      width: 0,
-      height: 0,
-      mimetype: video.contentType === 'video/quicktime' ? 'video/quicktime' : 'video/mp4',
-      locked: !mediaUrl(video.url),
-    }));
+  const videos: PostMedia[] = (raw.videos ?? []).map((video, index) => ({
+    id: `${raw._id}:video:${index}`,
+    uri: mediaUrl(video.url),
+    width: 0,
+    height: 0,
+    mimetype: video.contentType === 'video/quicktime' ? 'video/quicktime' : 'video/mp4',
+    locked: Boolean(raw.locked),
+  }));
   const images = mapPostImages(raw);
   return videos.length ? [...videos, ...images] : images;
 }
@@ -84,7 +94,7 @@ function mapPostImages(raw: MediaSource): PostMedia[] {
   const locked = raw.contentVisibility === 'premium' && raw.locked !== false;
   if (raw.images)
     return raw.images
-      .filter((image) => locked || mediaUrl(image.url))
+      .filter((image) => locked || !image.url || Boolean(mediaUrl(image.url)))
       .map((image, index) => ({
         id: image.id || `${raw._id}:${index}`,
         uri: mediaUrl(image.url),
@@ -93,9 +103,15 @@ function mapPostImages(raw: MediaSource): PostMedia[] {
         height: size(image.height),
         mimetype: 'image/jpeg',
       }));
-  return (raw.contentVisibility === 'premium' ? [] : raw.media ?? [])
+  return (raw.contentVisibility === 'premium' ? [] : (raw.media ?? []))
     .filter((m) => mediaUrl(m.url))
-    .map((m, index) => ({ id: `${raw._id}:${index}`, uri: mediaUrl(m.url), width: 0, height: 0, mimetype: m.mimetype }));
+    .map((m, index) => ({
+      id: `${raw._id}:${index}`,
+      uri: mediaUrl(m.url),
+      width: 0,
+      height: 0,
+      mimetype: m.mimetype,
+    }));
 }
 export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
   if (!raw?._id || !raw.createdAt) throw new ServiceError('UNKNOWN');
@@ -134,6 +150,39 @@ export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
           : 'connections',
     status: raw.status,
   };
+}
+/** Accept the current envelope and the older post-shaped like response during upgrades. */
+export function mapLikeResponse(body: unknown, requested: boolean): LikeState {
+  if (!body || typeof body !== 'object') throw new ServiceError('UNKNOWN');
+  const envelope = body as {
+    data?: unknown;
+    error?: unknown;
+    statusCode?: number;
+    post?: BackendPost;
+  };
+  if (envelope.error || (envelope.statusCode ?? 200) >= 400) throw new ServiceError('UNKNOWN');
+  const data = envelope.data ?? body;
+  if (!data || typeof data !== 'object') throw new ServiceError('UNKNOWN');
+  const value = data as { liked?: boolean; likeCount?: number; post?: BackendPost };
+  if (
+    typeof value.liked === 'boolean' &&
+    typeof value.likeCount === 'number' &&
+    Number.isFinite(value.likeCount) &&
+    value.likeCount >= 0
+  )
+    return { liked: value.liked, likeCount: value.likeCount };
+  const post = value.post;
+  const count = post?.likeCount ?? post?.likes?.length;
+  if (post && typeof count === 'number')
+    return {
+      liked: typeof post.likedByMe === 'boolean' ? post.likedByMe : requested,
+      likeCount: count,
+    };
+  throw new ServiceError('UNKNOWN');
+}
+
+export async function getPost(id: string): Promise<Post> {
+  return mapPost(await getData<BackendPost>(`/posts/${encodeURIComponent(id)}`));
 }
 export async function listMyPosts(): Promise<Post[]> {
   return (await getCollection<BackendPost>('/posts/private/me', 'posts')).map((post) =>
@@ -226,10 +275,21 @@ export const realFeedService: FeedService = {
     try {
       const photoIds: string[] = [];
       const videoIds: string[] = [];
-      for (const asset of input.assets)
-        if (asset.type.startsWith('video/'))
-          videoIds.push(await uploadVideo(asset, input.onUploadProgress));
-        else photoIds.push(await uploadPhoto(asset, input.onUploadProgress));
+      for (const [index, asset] of input.assets.entries()) {
+        let fraction = 0;
+        const progress: typeof input.onUploadProgress = (event) => {
+          fraction = Math.max(
+            fraction,
+            event.stage === 'complete' ? 1 : ((event.percent ?? 0) / 100) * 0.9,
+          );
+          input.onUploadProgress?.({
+            ...event,
+            percent: Math.round(((index + fraction) / input.assets!.length) * 95),
+          });
+        };
+        if (asset.type.startsWith('video/')) videoIds.push(await uploadVideo(asset, progress));
+        else photoIds.push(await uploadPhoto(asset, progress));
+      }
       const response = await apiClient.post('/posts', {
         caption: input.body,
         contentVisibility: input.contentVisibility ?? 'normal',
@@ -243,7 +303,9 @@ export const realFeedService: FeedService = {
         ...(videoIds.length ? { videoIds } : {}),
         clientId: input.clientId || createClientId(),
       });
-      return mapPost(unwrap<BackendPost>(response.data));
+      const post = mapPost(unwrap<BackendPost>(response.data));
+      input.onUploadProgress?.({ stage: 'complete', percent: 100, attempt: 1 });
+      return post;
     } catch (error) {
       throw serviceError(error);
     }
@@ -253,10 +315,7 @@ export const realFeedService: FeedService = {
       const response = liked
         ? await apiClient.post(`/posts/${id}/like`)
         : await apiClient.delete(`/posts/${id}/unlike`);
-      const state = unwrap<{ liked?: boolean; likeCount?: number }>(response.data);
-      return typeof state.liked === 'boolean' && typeof state.likeCount === 'number'
-        ? { liked: state.liked, likeCount: state.likeCount }
-        : undefined;
+      return mapLikeResponse(response.data, liked);
     } catch (error) {
       throw serviceError(error);
     }

@@ -1,5 +1,11 @@
 import { forwardRef, useState } from 'react';
-import { StyleSheet, TextInput, View, type TextInputProps, type TextInputInstance } from 'react-native';
+import {
+  StyleSheet,
+  TextInput,
+  View,
+  type TextInputProps,
+  type TextInputInstance,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Text } from './Text';
@@ -102,10 +108,10 @@ export const Input = forwardRef<TextInputInstance, InputProps>(function Input(
 const styles = StyleSheet.create({
   group: { gap: spacing.sm },
   wrapper: {
-    minHeight: 52,
+    minHeight: spacing.control,
     borderRadius: radius.input,
     borderWidth: 1,
-    paddingHorizontal: spacing.md + 2,
+    paddingHorizontal: spacing.lg,
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.sm,

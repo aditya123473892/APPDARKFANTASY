@@ -55,16 +55,19 @@ export async function retryPhotoOperation<T>(
   }
 }
 
-export function uploadPhoto(asset: UploadAsset, onProgress?: UploadProgressListener): Promise<string> {
+export function uploadPhoto(
+  asset: UploadAsset,
+  onProgress?: UploadProgressListener,
+): Promise<string> {
   const scope = sessionIdentity.generation;
   const cached = completed.get(asset);
   if (cached?.generation === scope) return cached.promise;
   const operation =
-    Platform.OS === 'android'
+    Platform.OS === 'android' && !asset.fromVault
       ? import('@/features/vault/vaultService').then(({ publishPhoto }) =>
           publishPhoto(asset, (prepared) => performUpload(prepared, scope, true, onProgress)),
         )
-      : performUpload(asset, scope, false, onProgress);
+      : performUpload(asset, scope, asset.fromVault === true, onProgress);
   const promise = operation.catch((error) => {
     completed.delete(asset);
     if (error instanceof ServiceError) throw error;
@@ -75,7 +78,10 @@ export function uploadPhoto(asset: UploadAsset, onProgress?: UploadProgressListe
 }
 
 /** Gallery-to-chat upload: no vault import, unlock, or persistent local copy. */
-export function uploadChatPhoto(asset: UploadAsset, onProgress?: UploadProgressListener): Promise<string> {
+export function uploadChatPhoto(
+  asset: UploadAsset,
+  onProgress?: UploadProgressListener,
+): Promise<string> {
   const scope = sessionIdentity.generation;
   const cached = chatCompleted.get(asset);
   if (cached?.generation === scope) return cached.promise;
@@ -88,8 +94,12 @@ export function uploadChatPhoto(asset: UploadAsset, onProgress?: UploadProgressL
   return promise;
 }
 
-async function performUpload(asset: UploadAsset, scope: number, prepared = false,
-  onProgress?: UploadProgressListener): Promise<string> {
+async function performUpload(
+  asset: UploadAsset,
+  scope: number,
+  prepared = false,
+  onProgress?: UploadProgressListener,
+): Promise<string> {
   if (!asset.type.startsWith('image/'))
     throw new ServiceError('VALIDATION', 'Choose a photo. Video uploads are unavailable.');
   let temporaryUri: string | undefined;
@@ -113,7 +123,8 @@ async function performUpload(asset: UploadAsset, scope: number, prepared = false
         base64: false,
       });
     }
-    temporaryUri = clean.uri;
+    // Selected vault drafts belong to the caller and must survive a failed upload.
+    if (!prepared || !asset.fromVault) temporaryUri = clean.uri;
     let file: Blob | undefined;
     if (Platform.OS === 'web') {
       file = await (await fetch(clean.uri)).blob();
@@ -152,70 +163,97 @@ async function performUpload(asset: UploadAsset, scope: number, prepared = false
       }
       stage = 'transfer';
       let transferAttempt = 1;
-      await retryPhotoOperation(async () => {
-        const controller = new AbortController();
-        controllers.add(controller);
-        const timer = setTimeout(() => controller.abort(), 60_000);
-        try {
-          let status: number | undefined;
-          if (Platform.OS === 'web') {
-            const form = new FormData();
-            for (const [key, value] of Object.entries(signed.fields!)) form.append(key, value);
-            form.append('file', file!, 'photo.jpg');
-            // API Authorization must never go to S3.
-            const response = await fetch(url.toString(), {
-              method: 'POST',
-              body: form,
-              signal: controller.signal,
-              redirect: 'error',
-            });
-            status = response.status;
-          } else {
-            // Native multipart avoids JS fetch/FormData differences between Expo versions.
-            const task = FileSystem.createUploadTask(url.toString(), clean.uri, {
-              httpMethod: 'POST',
-              uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-              fieldName: 'file',
-              mimeType: 'image/jpeg',
-              parameters: signed.fields!,
-            }, (progress) => {
-              if (progress.totalBytesExpectedToSend > 0) notify(transferAttempt,
-                Math.min(100, Math.max(0, Math.round(progress.totalBytesSent * 100 / progress.totalBytesExpectedToSend))));
-            });
-            const cancel = () => {
-              void task.cancelAsync().catch(() => undefined);
-            };
-            controller.signal.addEventListener('abort', cancel, { once: true });
-            try {
-              status = (await task.uploadAsync())?.status;
-              if (controller.signal.aborted) throw new Error('Photo transfer cancelled');
-            } finally {
-              controller.signal.removeEventListener('abort', cancel);
+      await retryPhotoOperation(
+        async () => {
+          const controller = new AbortController();
+          controllers.add(controller);
+          const timer = setTimeout(() => controller.abort(), 60_000);
+          try {
+            let status: number | undefined;
+            if (Platform.OS === 'web') {
+              const form = new FormData();
+              for (const [key, value] of Object.entries(signed.fields!)) form.append(key, value);
+              form.append('file', file!, 'photo.jpg');
+              // API Authorization must never go to S3.
+              const response = await fetch(url.toString(), {
+                method: 'POST',
+                body: form,
+                signal: controller.signal,
+                redirect: 'error',
+              });
+              status = response.status;
+            } else {
+              // Native multipart avoids JS fetch/FormData differences between Expo versions.
+              const task = FileSystem.createUploadTask(
+                url.toString(),
+                clean.uri,
+                {
+                  httpMethod: 'POST',
+                  uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+                  fieldName: 'file',
+                  mimeType: 'image/jpeg',
+                  parameters: signed.fields!,
+                },
+                (progress) => {
+                  if (progress.totalBytesExpectedToSend > 0)
+                    notify(
+                      transferAttempt,
+                      Math.min(
+                        100,
+                        Math.max(
+                          0,
+                          Math.round(
+                            (progress.totalBytesSent * 100) / progress.totalBytesExpectedToSend,
+                          ),
+                        ),
+                      ),
+                    );
+                },
+              );
+              const cancel = () => {
+                void task.cancelAsync().catch(() => undefined);
+              };
+              controller.signal.addEventListener('abort', cancel, { once: true });
+              try {
+                status = (await task.uploadAsync())?.status;
+                if (controller.signal.aborted) throw new Error('Photo transfer cancelled');
+              } finally {
+                controller.signal.removeEventListener('abort', cancel);
+              }
             }
+            if (status !== 204) throw Object.assign(new Error('Photo upload failed'), { status });
+          } finally {
+            clearTimeout(timer);
+            controllers.delete(controller);
           }
-          if (status !== 204) throw Object.assign(new Error('Photo upload failed'), { status });
-        } finally {
-          clearTimeout(timer);
-          controllers.delete(controller);
-        }
-      }, scope, (attempt) => { transferAttempt = attempt; notify(attempt, 0); });
+        },
+        scope,
+        (attempt) => {
+          transferAttempt = attempt;
+          notify(attempt, 0);
+        },
+      );
     }
     stage = 'confirm';
-    await retryPhotoOperation(async () => {
-      const result = unwrap<{ uploadId: string; status: string }>(
-        (
-          await apiClient.post(
-            '/photos/confirm',
-            {
-              uploadId: signed.uploadId,
-            },
-            { timeout: 60_000 },
-          )
-        ).data,
-      );
-      if (result.status !== 'approved')
-        throw new ServiceError('VALIDATION', 'Photo approval is pending. Try again.');
-    }, scope, (attempt) => notify(attempt));
+    await retryPhotoOperation(
+      async () => {
+        const result = unwrap<{ uploadId: string; status: string }>(
+          (
+            await apiClient.post(
+              '/photos/confirm',
+              {
+                uploadId: signed.uploadId,
+              },
+              { timeout: 60_000 },
+            )
+          ).data,
+        );
+        if (result.status !== 'approved')
+          throw new ServiceError('VALIDATION', 'Photo approval is pending. Try again.');
+      },
+      scope,
+      (attempt) => notify(attempt),
+    );
     onProgress?.({ stage: 'complete', percent: 100, attempt: 1 });
     return signed.uploadId;
   } catch (error) {

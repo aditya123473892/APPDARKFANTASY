@@ -1,14 +1,8 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/ui';
 import { RemoteMedia } from '@/components/ui/RemoteMedia';
@@ -43,11 +37,29 @@ export function ChatPhotoViewer({
     <Modal visible={visible} animationType="none" statusBarTranslucent onRequestClose={onClose}>
       <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.header}>
-          <Text style={styles.text}>{label}</Text>
-          {reportTarget ? <Pressable accessibilityRole="button" accessibilityLabel="Report image" style={styles.close}
-            onPress={() => { onClose(); router.push({ pathname: '/report' as never, params: { targetType: 'chat_media', targetId: reportTarget.mediaId, messageId: reportTarget.messageId } }); }}>
-            <Ionicons name="flag-outline" color="#fff" size={24} />
-          </Pressable> : null}
+          <Text weight="semibold" numberOfLines={1} style={styles.text}>
+            {label}
+          </Text>
+          {reportTarget ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Report image"
+              style={styles.close}
+              onPress={() => {
+                onClose();
+                router.push({
+                  pathname: '/report' as never,
+                  params: {
+                    targetType: 'chat_media',
+                    targetId: reportTarget.mediaId,
+                    messageId: reportTarget.messageId,
+                  },
+                });
+              }}
+            >
+              <Ionicons name="flag-outline" color="#fff" size={24} />
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close photo"
@@ -90,10 +102,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
-    minHeight: 56,
+    minHeight: 64,
+    gap: spacing.sm,
   },
   text: { color: '#fff', flex: 1 },
-  close: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  close: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#ffffff12',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   content: { flex: 1 },
   image: { width: '100%', height: '100%' },
   spinner: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 },

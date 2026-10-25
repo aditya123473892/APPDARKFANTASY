@@ -8,14 +8,12 @@ module.exports = ({ config }) => {
   validateAuthBuild(process.env, { development });
   return {
     ...config,
-    platforms: ['android'],
+    platforms: development ? ['android', 'web'] : ['android'],
     android: {
       ...config.android,
       allowBackup: false,
       blockedPermissions: [
         ...(config.android?.blockedPermissions || []),
-        'android.permission.READ_MEDIA_IMAGES',
-        'android.permission.READ_MEDIA_VIDEO',
         'android.permission.READ_MEDIA_AUDIO',
         'android.permission.ACCESS_MEDIA_LOCATION',
       ],
@@ -42,10 +40,15 @@ module.exports = ({ config }) => {
         'expo-image-picker',
         {
           photosPermission: 'Allow DARKFANTASY to select photos and videos you choose to share.',
-          cameraPermission: 'Allow DARKFANTASY to take a photo for your private vault.',
-          microphonePermission: false,
+          cameraPermission: 'Allow DARKFANTASY to capture a photo or video you choose to share.',
+          microphonePermission: 'Allow DARKFANTASY to record audio when you capture a video.',
         },
       ],
+      ['expo-media-library', {
+        photosPermission: 'Allow DARKFANTASY to show recent photos and videos when creating a post.',
+        granularPermissions: ['photo', 'video'],
+        isAccessMediaLocationEnabled: false,
+      }],
       [
         'expo-build-properties',
         {

@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { View } from 'react-native';
 import { Redirect, useRouter, type Href } from 'expo-router';
 import { Button, Text } from '@/components/ui';
@@ -18,9 +19,11 @@ export default function AccountState() {
         ? 'Verify your email'
         : 'Session expired';
   return (
-    <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 20 }}>
+    <View style={{ flex: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.lg }}>
       <Text>{title}</Text>
-      {status !== 'blocked' && <Button label="Open offline Photo Vault" onPress={() => router.push('/vault' as Href)} />}
+      {status !== 'blocked' && (
+        <Button label="Open offline Photo Vault" onPress={() => router.push('/vault' as Href)} />
+      )}
       <Text>
         {error ||
           (status === 'blocked'

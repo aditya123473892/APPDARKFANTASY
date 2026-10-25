@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Header, KeyboardAvoidingScreen } from '@/components/layout';
+import { Header, KeyboardAvoidingScreen, Screen, SettingsButton } from '@/components/layout';
+import { useContentInsets } from '@/components/layout/useContentInsets';
 import { Button, EmptyState, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { ChatInput } from '@/features/chat/components/ChatInput';
@@ -29,7 +29,7 @@ const GREETING: GodChatMessage = {
 /** Stateless AI guide: the conversation lives only while this screen is open. */
 export function GodChatScreen(): React.JSX.Element {
   const { theme } = useTheme();
-  const insets = useSafeAreaInsets();
+  const contentInsets = useContentInsets();
   const keyboardVisible = useKeyboard();
   const listRef = useRef<FlatList<GodChatMessage>>(null);
   const [messages, setMessages] = useState<GodChatMessage[]>([]);
@@ -68,17 +68,9 @@ export function GodChatScreen(): React.JSX.Element {
 
   const data = [GREETING, ...messages];
   return (
-    <SafeAreaView
-      edges={['top', 'left', 'right']}
-      style={[styles.root, { backgroundColor: theme.colors.background }]}
-    >
+    <Screen padded={false}>
       <View style={styles.header}>
-        <Header
-          title="Chat with God"
-          subtitle="AI guide to the app"
-          back
-          backFallback="/settings"
-        />
+        <Header title="Chat with God" subtitle="AI guide to the app" action={<SettingsButton />} />
       </View>
       <KeyboardAvoidingScreen>
         {unavailable ? (
@@ -92,7 +84,7 @@ export function GodChatScreen(): React.JSX.Element {
             ref={listRef}
             data={data}
             keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.list}
+            contentContainerStyle={[styles.list, { paddingBottom: contentInsets.bottom }]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
@@ -142,21 +134,22 @@ export function GodChatScreen(): React.JSX.Element {
           />
         )}
         <ChatInput
+          minimal
           onSend={send}
           canSendMessages
           disabled={unavailable || ask.isPending}
-          bottomInset={keyboardVisible ? 0 : insets.bottom}
+          bottomInset={keyboardVisible || contentInsets.inTabs ? 0 : contentInsets.bottom}
           placeholder="Ask God anything about the app…"
         />
       </KeyboardAvoidingScreen>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { paddingHorizontal: spacing.screen },
-  list: { padding: spacing.md, gap: spacing.sm },
+  list: { padding: spacing.screen, gap: spacing.md },
   bubble: {
     maxWidth: '85%',
     borderRadius: radius.lg,
@@ -165,7 +158,7 @@ const styles = StyleSheet.create({
   },
   mine: { alignSelf: 'flex-end', borderBottomRightRadius: radius.sm },
   theirs: { alignSelf: 'flex-start', borderBottomLeftRadius: radius.sm },
-  sender: { marginBottom: 2 },
+  sender: { marginBottom: spacing.none },
   typing: { alignSelf: 'flex-start', marginTop: spacing.sm },
   failure: { gap: spacing.sm, marginTop: spacing.md },
 });

@@ -4,3 +4,4 @@ export * from './KeyboardAvoidingScreen';
 export * from './SafeArea';
 export * from './Screen';
 export * from './Spacer';
+export * from './SettingsButton';

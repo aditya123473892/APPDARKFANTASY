@@ -676,10 +676,20 @@ export class PostsService {
     };
   }
 
+  async getLikeState(postId: string, userId: string) {
+    await this.commentPost(postId, userId);
+    const [likeCount, ownLike] = await Promise.all([
+      this.likeModel.countDocuments({ post: postId }),
+      this.likeModel.exists({ post: postId, user: userId }),
+    ]);
+    return { liked: !!ownLike, likeCount };
+  }
+
   async likePost(
     postId: string,
     userId: string,
   ): Promise<PostsDocument | null> {
+    await this.commentPost(postId, userId);
     const post = await this.postsModel.findById(postId);
     if (!post) {
       throw new NotFoundException('Post not found');
@@ -706,6 +716,7 @@ export class PostsService {
     postId: string,
     userId: string,
   ): Promise<PostsDocument | null> {
+    await this.commentPost(postId, userId);
     const post = await this.postsModel.findById(postId);
     if (!post) {
       throw new NotFoundException('Post not found');

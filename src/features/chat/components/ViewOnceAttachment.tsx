@@ -1,8 +1,6 @@
-import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Pressable, StyleSheet } from 'react-native';
-import { Text } from '@/components/ui';
+import { AppState } from 'react-native';
 import { toast } from '@/components/ui/Toast';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
 import {
@@ -13,12 +11,11 @@ import {
 import { apiClient } from '@/services/api/apiClient';
 import { serviceError, unwrap } from '@/services/api/backend';
 import { describeError } from '@/services/errors';
-import { radius, spacing } from '@/theme';
-import { useTheme } from '@/theme/useTheme';
 import { acceptMessage } from '../services/chatState';
 import type { BackendMessage } from '../services/chatPayload';
 import type { ChatMedia } from '../types';
 import { ChatPhotoViewer } from './ChatPhotoViewer';
+import { AttachmentCard } from './AttachmentCard';
 
 export function ViewOnceAttachment({
   media,
@@ -33,7 +30,6 @@ export function ViewOnceAttachment({
   viewedAt?: string;
   viewDurationSeconds?: number;
 }): React.JSX.Element {
-  const { theme } = useTheme();
   const [uri, setUri] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -140,24 +136,29 @@ export function ViewOnceAttachment({
     }
   };
   const label = `${mode} · ${unavailable ? 'Opened or expired' : mine ? 'Not opened yet' : 'Tap to open'}`;
-  const tint = mine ? theme.colors.onPrimary : theme.colors.text;
   return (
     <>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityState={{ disabled: mine || unavailable || loading }}
+      <AttachmentCard
+        label={label}
+        title={
+          unavailable ? (viewedAt || consumed ? 'Opened photo' : 'Photo unavailable') : 'Photo'
+        }
+        description={
+          unavailable
+            ? 'This photo cannot be opened again'
+            : mine
+              ? `${viewDurationSeconds ? `${viewDurationSeconds}s · ` : ''}View once · Not opened yet`
+              : `${viewDurationSeconds ? `${viewDurationSeconds}s · ` : ''}View once · Tap to open`
+        }
+        icon={
+          unavailable ? 'checkmark-done' : viewDurationSeconds ? 'timer-outline' : 'eye-off-outline'
+        }
+        mine={mine}
+        once
+        loading={loading}
         disabled={mine || unavailable || loading}
         onPress={() => void open()}
-        style={[styles.chip, { borderColor: tint, opacity: unavailable ? 0.6 : 1 }]}
-      >
-        <Ionicons
-          name={viewDurationSeconds ? 'timer-outline' : 'radio-button-on'}
-          size={20}
-          color={tint}
-        />
-        <Text style={{ color: tint }}>{label}</Text>
-      </Pressable>
+      />
       <ChatPhotoViewer
         reportTarget={mine ? undefined : { messageId, mediaId: media._id }}
         visible={visible}
@@ -176,16 +177,3 @@ export function ViewOnceAttachment({
     </>
   );
 }
-const styles = StyleSheet.create({
-  chip: {
-    marginTop: spacing.xs,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    alignSelf: 'flex-start',
-  },
-});

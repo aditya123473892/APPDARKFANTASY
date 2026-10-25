@@ -29,6 +29,73 @@ const crypto = load('src/features/vault/crypto.ts', {
 });
 module.exports = { load };
 
+function selectionHarness() {
+  const copies = [], removed = [], temps = [];
+  let locked = false, copiesUntilLock = Infinity;
+  const sessionIdentity = { userId: 'owner', generation: 1 };
+  const valid = () => { if (locked) throw new Error('Vault locked'); };
+  const selection = load('src/features/vault/selectMedia.ts', {
+    'expo-file-system/legacy': {
+      cacheDirectory: 'file:///cache/',
+      makeDirectoryAsync: async () => {},
+      copyAsync: async (copy) => {
+        copies.push(copy);
+        if (copies.length >= copiesUntilLock) locked = true;
+      },
+      deleteAsync: async (uri) => { removed.push(uri); },
+    },
+    '@/features/auth/sessionRuntime': {
+      sessionIdentity,
+      assertSessionCurrent: (scope) => assert.equal(scope, sessionIdentity.generation),
+    },
+    './lock': { assertUnlocked: () => { valid(); return 1; }, assertEpoch: valid },
+    './media': { photoUri: async () => { valid(); } },
+    './vaultService': { viewPhoto: async (owner, id) => `file:///cache/vault-temp/${id}` },
+    './files': { removeTemp: async (uri) => { temps.push(uri); } },
+    './crypto': { uuid: (() => { let id = 0; return () => String(++id); })() },
+  });
+  return { ...selection, copies, removed, temps, sessionIdentity,
+    lockAfter: (count) => { copiesUntilLock = count; } };
+}
+
+test('vault selection makes independent upload copies without modifying vault originals', async () => {
+  const harness = selectionHarness();
+  const assets = await harness.selectVaultMedia('owner', [
+    { id: 'photo', kind: 'photo' }, { id: 'video', kind: 'video' },
+  ]);
+  assert.equal(assets.length, 2);
+  assert.equal(assets[0].type, 'image/jpeg');
+  assert.equal(assets[1].type, 'video/mp4');
+  for (const asset of assets) {
+    assert.equal(asset.fromVault, true);
+    assert.match(asset.uri, /^file:\/\/\/cache\/media-drafts\//);
+  }
+  assert.equal(harness.copies.length, 2);
+  assert.equal(harness.temps.length, 2);
+  assert.equal(harness.removed.length, 0);
+});
+
+test('vault picker enforces post limits and rejects another account before copying', async () => {
+  const harness = selectionHarness();
+  assert.throws(() => harness.validateVaultSelection([]), /one and five/);
+  assert.throws(() => harness.validateVaultSelection(Array(6).fill({ kind: 'photo' })), /one and five/);
+  assert.throws(() => harness.validateVaultSelection(Array(2).fill({ kind: 'video' })), /one video/);
+  assert.throws(() => harness.validateVaultSelection([{ kind: 'photo', deletedAt: 1 }]), /no longer/);
+  await assert.rejects(harness.selectVaultMedia('other', [{ id: 'p', kind: 'photo' }]), /Sign in/);
+  assert.equal(harness.copies.length, 0);
+});
+
+test('locking during vault selection removes every partial upload copy and viewing copy', async () => {
+  const harness = selectionHarness();
+  harness.lockAfter(2);
+  await assert.rejects(harness.selectVaultMedia('owner', [
+    { id: 'first', kind: 'photo' }, { id: 'second', kind: 'photo' },
+  ]), /Vault locked/);
+  assert.equal(harness.removed.length, 2);
+  assert.equal(harness.temps.length, 2);
+  assert.ok(harness.removed.every((uri) => uri.startsWith('file:///cache/media-drafts/')));
+});
+
 test('hashing works without ExpoCrypto and UUIDs use the existing Expo core', async () => {
   const bytes = Buffer.from('private photo pixels');
   assert.equal(

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { useRouter, type Href } from 'expo-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Header, Screen } from '@/components/layout';
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.card,
     padding: spacing.md,
-    gap: 4,
+    gap: spacing.xs,
   },
   rowTop: {
     flexDirection: 'row',
@@ -209,5 +210,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  empty: { marginTop: 48, gap: 12, alignItems: 'center' },
+  empty: { marginTop: spacing.huge, gap: spacing.md, alignItems: 'center' },
 });

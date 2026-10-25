@@ -10,6 +10,7 @@ import {
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
+import { useContentInsets } from './useContentInsets';
 
 /**
  * Base screen container. Applies safe-area insets (status bar, cutouts, gesture bar),
@@ -20,7 +21,7 @@ export function Screen({
   children,
   scroll = false,
   padded = true,
-  edges = ['top', 'left', 'right'],
+  edges,
   style,
 }: PropsWithChildren<{
   scroll?: boolean;
@@ -29,9 +30,20 @@ export function Screen({
   style?: StyleProp<ViewStyle>;
 }>): React.JSX.Element {
   const { theme } = useTheme();
-  const contentStyle = [styles.content, padded && styles.padded, style];
+  const insets = useContentInsets();
+  const contentStyle = [
+    styles.content,
+    padded && styles.padded,
+    scroll && { paddingBottom: insets.bottom },
+    style,
+  ];
   return (
-    <SafeAreaView edges={edges} style={[styles.safe, { backgroundColor: theme.colors.background }]}>
+    <SafeAreaView
+      edges={
+        edges ?? (insets.inTabs ? ['top', 'left', 'right'] : ['top', 'left', 'right', 'bottom'])
+      }
+      style={[styles.safe, { backgroundColor: theme.colors.background }]}
+    >
       {scroll ? (
         // Edge-to-edge Android no longer resizes for the keyboard, so pad on both platforms.
         <KeyboardAvoidingView behavior="padding" style={styles.safe}>

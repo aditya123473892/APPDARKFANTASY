@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 import { Text } from './Text';
-import { radius } from '@/theme';
+import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -38,7 +38,7 @@ const styles = StyleSheet.create({
     minWidth: 20,
     height: 20,
     borderRadius: radius.full,
-    paddingHorizontal: 6,
+    paddingHorizontal: spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
   },

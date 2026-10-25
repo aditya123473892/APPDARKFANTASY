@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { Link } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -29,7 +30,9 @@ export function RegisterScreen(): React.JSX.Element {
       ) : (
         <PhoneOtpFlow
           sendCode={phoneAuth.sendSignupCode}
-          verifyCode={async (phone, code) => setSignupToken(await phoneAuth.verifySignupCode(phone, code))}
+          verifyCode={async (phone, code) =>
+            setSignupToken(await phoneAuth.verifySignupCode(phone, code))
+          }
           verifyLabel="Verify number"
         />
       )}
@@ -45,6 +48,6 @@ export function RegisterScreen(): React.JSX.Element {
   );
 }
 const styles = StyleSheet.create({
-  copy: { gap: 6, marginTop: 18, marginBottom: 24 },
-  footer: { flexDirection: 'row', justifyContent: 'center', marginVertical: 24 },
+  copy: { gap: spacing.xs, marginTop: spacing.lg, marginBottom: spacing.xl },
+  footer: { flexDirection: 'row', justifyContent: 'center', marginVertical: spacing.xl },
 });

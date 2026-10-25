@@ -6,7 +6,7 @@ export function DateDivider({ label }: { label: string }): React.JSX.Element {
   const { theme } = useTheme();
   return (
     <View style={styles.row} accessibilityRole="header">
-      <View style={[styles.pill, { backgroundColor: theme.colors.surfaceMuted }]}>
+      <View style={[styles.pill, { backgroundColor: theme.colors.surface }]}>
         <Text variant="caption" weight="semibold" color="secondary">
           {label}
         </Text>

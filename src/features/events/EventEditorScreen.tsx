@@ -1,10 +1,9 @@
 import { useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
-import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Header, Screen } from '@/components/layout';
-import { Button, Input, Loader, Text } from '@/components/ui';
+import { Button, FitImage, Input, Loader, Text } from '@/components/ui';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { toast } from '@/components/ui/Toast';
 import { pickImage } from '@/features/create-post/pickMedia';
@@ -228,7 +227,7 @@ function EventForm({ event }: { event?: Event }) {
           editable={!busy}
         />
         {coverUri ? (
-          <Image source={{ uri: coverUri }} style={styles.cover} contentFit="cover" />
+          <FitImage uri={coverUri} style={styles.cover} accessibilityLabel="Selected event cover" />
         ) : null}
         <Button
           label={coverUri ? 'Change cover photo' : 'Add cover photo'}
@@ -276,7 +275,7 @@ function EventForm({ event }: { event?: Event }) {
 }
 const styles = StyleSheet.create({
   form: { gap: spacing.md, paddingBottom: spacing.xxxl },
-  cover: { width: '100%', height: 180, borderRadius: radius.md },
+  cover: { width: '100%', borderRadius: radius.lg },
   row: { flexDirection: 'row', gap: spacing.sm },
   choice: { flex: 1 },
 });

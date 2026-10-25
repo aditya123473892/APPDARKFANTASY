@@ -206,14 +206,14 @@ export function ModerationCaseScreen(): React.JSX.Element {
   );
 }
 const styles = StyleSheet.create({
-  gap: { marginTop: 32, gap: 12 },
+  gap: { marginTop: spacing.xxxl, gap: spacing.md },
   content: { gap: spacing.md, paddingVertical: spacing.md },
   card: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.card,
     padding: spacing.md,
-    gap: 6,
+    gap: spacing.xs,
   },
-  snapshot: { gap: 2 },
+  snapshot: { gap: spacing.xs },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
 });

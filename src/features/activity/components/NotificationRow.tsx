@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Avatar, Text } from '@/components/ui';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -44,7 +45,7 @@ export const NotificationRow = memo(function NotificationRow({
       ]}
     >
       <View>
-        <Avatar uri={item.actor.avatarUri} label={item.actor.name} size={48} />
+        <Avatar uri={item.actor.avatarUri} label={item.actor.name} size={40} />
         <View
           style={[
             styles.kind,

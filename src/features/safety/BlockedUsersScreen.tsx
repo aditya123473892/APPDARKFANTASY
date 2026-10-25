@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
@@ -30,7 +31,7 @@ export function BlockedUsersScreen() {
             .flatMap((page) => page.blocks)
             .filter((user) => !pending.includes(user.id) || blocked.includes(user.id))
             .map((user) => (
-              <View key={user.id} style={{ paddingVertical: 12, gap: 8 }}>
+              <View key={user.id} style={{ paddingVertical: spacing.md, gap: spacing.sm }}>
                 <Text>{user.name}</Text>
                 <Button
                   label="Unblock"

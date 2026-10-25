@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Text } from './Text';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -82,7 +83,7 @@ const styles = StyleSheet.create({
     minHeight: spacing.touch,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: spacing.sm + 2,
+    gap: spacing.sm,
   },
   indicator: { height: 2, width: 32, borderRadius: radius.full },
   segmented: {
@@ -98,12 +99,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  labelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   count: {
     minWidth: 18,
     height: 18,
     borderRadius: radius.full,
-    paddingHorizontal: 5,
+    paddingHorizontal: spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
   },

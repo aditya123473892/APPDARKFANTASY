@@ -1,41 +1,48 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
-import { IconButton, Text } from '@/components/ui';
+import { Pressable } from '@/components/ui/Pressable';
+import { Avatar, IconButton } from '@/components/ui';
+import { useAuthStore } from '@/features/auth/store/authStore';
 import { spacing } from '@/theme';
-import { useTheme } from '@/theme/useTheme';
+import { Header } from './Header';
+import { SettingsButton } from './SettingsButton';
 
-export function BrandHeader({ onCompose }: { onCompose?: () => void }): React.JSX.Element {
+export function BrandHeader(): React.JSX.Element {
   const router = useRouter();
-  const { theme } = useTheme();
+  const user = useAuthStore((state) => state.user);
   return (
-    <View style={[styles.root, { borderBottomColor: theme.colors.divider }]}>
-      <View style={styles.brand} accessibilityRole="header" accessibilityLabel="DARKFANTASY">
-        <Text variant="heading" weight="bold" style={styles.wordmark}>
-          Darkfantasy
-        </Text>
-        <View style={[styles.dot, { backgroundColor: theme.colors.primary }]} />
-      </View>
-      <View style={styles.actions}>
-        <IconButton
-          icon="create-outline"
-          label="Create a post"
-          onPress={onCompose ?? (() => router.push('/create'))}
-        />
-      </View>
+    <View style={styles.root}>
+      <Header
+        title="Dark"
+        action={
+          <View style={styles.actions}>
+            <IconButton
+              icon="notifications-outline"
+              label="Notifications"
+              onPress={() => router.push('/notifications')}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Your profile"
+              onPress={() => router.push('/profile')}
+              style={({ pressed }) => [styles.avatar, { opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Avatar uri={user?.avatarUri ?? ''} label={user?.name ?? 'Your profile'} size={32} />
+            </Pressable>
+            <SettingsButton />
+          </View>
+        }
+      />
     </View>
   );
 }
 const styles = StyleSheet.create({
-  root: {
-    minHeight: 56,
-    flexDirection: 'row',
+  root: { paddingHorizontal: spacing.screen },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  avatar: {
+    minWidth: spacing.touch,
+    minHeight: spacing.touch,
     alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingLeft: spacing.screen,
-    paddingRight: spacing.sm,
+    justifyContent: 'center',
   },
-  brand: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  wordmark: { letterSpacing: -0.4 },
-  dot: { width: 6, height: 6, borderRadius: 999, marginLeft: 3, marginTop: -12 },
-  actions: { flexDirection: 'row', alignItems: 'center' },
 });

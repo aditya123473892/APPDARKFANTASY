@@ -1,9 +1,9 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { RefreshControl, ScrollView, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
-import { Avatar, Button, EmptyState, Loader, PostCard, Text } from '@/components/ui';
-import { InterestChips } from '../components/InterestChips';
+import { Button, EmptyState, IconButton, Loader } from '@/components/ui';
+import { ProfileGrid } from '../components/ProfileGrid';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useProfile } from '../hooks/useProfiles';
@@ -36,7 +36,7 @@ export function UserProfileScreen() {
   return (
     <Screen padded={false}>
       <ScrollView
-        contentContainerStyle={{ padding: spacing.screen, gap: spacing.lg }}
+        contentContainerStyle={{ paddingBottom: spacing.lg, gap: spacing.lg }}
         refreshControl={
           <RefreshControl
             refreshing={profile.isRefetching || posts.isRefetching}
@@ -48,11 +48,45 @@ export function UserProfileScreen() {
           />
         }
       >
-        <Header title="Profile" back backFallback="/discover" />
-        <Button label="Report user" variant="secondary" onPress={() => router.push({ pathname: '/report' as never, params: { targetType: 'user', targetId: id } })} />
+        <Header
+          title={profile.data?.name ?? 'Profile'}
+          back
+          backFallback="/discover"
+          action={
+            <IconButton
+              icon="ellipsis-horizontal"
+              label="Profile options"
+              onPress={() =>
+                Alert.alert('Profile options', undefined, [
+                  {
+                    text: 'Report user',
+                    onPress: () =>
+                      router.push({
+                        pathname: '/report' as never,
+                        params: { targetType: 'user', targetId: id },
+                      }),
+                  },
+                  ...(!blocked
+                    ? [
+                        {
+                          text: 'Block user',
+                          style: 'destructive' as const,
+                          onPress: () => block.confirm(id),
+                        },
+                      ]
+                    : []),
+                  { text: 'Cancel', style: 'cancel' },
+                ])
+              }
+            />
+          }
+        />
         {blocked ? (
           <>
-            <EmptyState title="You blocked this user" message="Unblock to see their profile again." />
+            <EmptyState
+              title="You blocked this user"
+              message="Unblock to see their profile again."
+            />
             <Button
               label="Unblock"
               variant="secondary"
@@ -69,50 +103,37 @@ export function UserProfileScreen() {
           <ErrorState onRetry={() => void profile.refetch()} />
         ) : (
           <>
-            <View style={{ gap: spacing.lg, alignItems: 'center' }}>
-              <Avatar uri={profile.data.avatarUri} label={profile.data.name} size={112} ring />
-              <View style={{ alignSelf: 'stretch' }}>
-                <ProfileHeader user={profile.data} centered />
-              </View>
+            <View style={{ paddingHorizontal: spacing.lg }}>
+              <ProfileHeader user={profile.data} posts={posts.data?.length ?? 0} />
             </View>
-            {profile.data.bio ? <Text center>{profile.data.bio}</Text> : null}
-            <InterestChips interests={profile.data.interests} />
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <Button
-                label="Message"
-                style={{ flex: 1 }}
-                onPress={() => router.push(`/chat/user:${id}`)}
-              />
+            <View style={{ flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg }}>
               <Button
                 label={follow.requested ? 'Requested' : 'Follow'}
                 variant="secondary"
-                style={{ flex: 1 }}
+                size="sm"
+                style={{ flex: 1, minHeight: 40 }}
                 loading={follow.pending}
                 disabled={follow.requested}
                 onPress={follow.follow}
               />
+              <Button
+                label="Message"
+                variant="secondary"
+                size="sm"
+                style={{ flex: 1, minHeight: 40 }}
+                onPress={() => router.push(`/chat/user:${id}`)}
+              />
             </View>
-            <Text variant="subheading">Posts</Text>
-            <Button
-              label="Block user"
-              variant="secondary"
-              disabled={block.isPending}
-              onPress={() => block.confirm(id)}
-            />
             {posts.isPending ? (
               <Loader />
             ) : posts.isError ? (
               <ErrorState onRetry={() => void posts.refetch()} />
             ) : posts.data?.length ? (
-              posts.data.map((post) => (
-                <PostCard
-                  key={post.id}
-                  post={post}
-                  onToggleLike={(item) =>
-                    toggleLike.mutate({ postId: item.id, liked: !item.liked })
-                  }
-                />
-              ))
+              <ProfileGrid
+                posts={posts.data}
+                showSaved={false}
+                onToggleLike={(item) => toggleLike.mutate({ postId: item.id, liked: !item.liked })}
+              />
             ) : (
               <EmptyState
                 compact

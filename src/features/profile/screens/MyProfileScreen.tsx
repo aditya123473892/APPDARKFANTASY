@@ -1,200 +1,103 @@
-import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
-import { Header, Screen } from '@/components/layout';
-import {
-  Avatar,
-  Button,
-  EmptyState,
-  IconButton,
-  Modal,
-  PostCard,
-  Skeleton,
-  Tabs,
-  Text,
-} from '@/components/ui';
-import { useAuthStore } from '@/features/auth/store/authStore';
-import { useConversations } from '@/features/chat/hooks/useChat';
-import { useDeletePost, useMyPosts, useToggleLike } from '@/features/feed/hooks/useFeed';
+import { useState } from 'react';
+import { RefreshControl, ScrollView, Share, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { getData } from '@/services/api/backend';
+import { Header, Screen, SettingsButton } from '@/components/layout';
+import { Button, Loader, Modal } from '@/components/ui';
 import { ErrorState } from '@/components/feedback/ErrorState';
-import type { Post } from '@/features/feed/types';
-import { radius, spacing } from '@/theme';
-import { useTheme } from '@/theme/useTheme';
+import { useAuthStore } from '@/features/auth/store/authStore';
+import { useDeletePost, useMyPosts, useToggleLike } from '@/features/feed/hooks/useFeed';
+import { getData } from '@/services/api/backend';
 import { toHandle } from '@/utils/formatters';
+import { spacing } from '@/theme';
+import { useTheme } from '@/theme/useTheme';
 import { EditProfileForm } from '../components/EditProfileForm';
-import { InterestChips } from '../components/InterestChips';
-import { PhotoGrid } from '../components/PhotoGrid';
 import { ProfileHeader } from '../components/ProfileHeader';
-import { SettingsGroup, SettingsRow } from '@/features/settings/components/SettingsRow';
+import { ProfileGrid } from '../components/ProfileGrid';
 
-type ProfileTab = 'Posts' | 'Photos';
-
-function Stat({ value, label }: { value: number | undefined; label: string }): React.JSX.Element {
-  const { theme } = useTheme();
-  return (
-    <View style={[styles.stat, { borderColor: theme.colors.border }]}>
-      {value === undefined ? (
-        <Skeleton style={styles.statSkeleton} />
-      ) : (
-        <Text variant="heading">{value}</Text>
-      )}
-      <Text variant="caption" color="secondary">
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-export function MyProfileScreen(): React.JSX.Element {
-  const router = useRouter();
+export function MyProfileScreen() {
   const { theme } = useTheme();
   const user = useAuthStore((state) => state.user);
   const [editing, setEditing] = useState(false);
-  const [tab, setTab] = useState<ProfileTab>('Posts');
   const feed = useMyPosts();
   const followers = useQuery({
     queryKey: ['followers'],
     queryFn: () => getData<{ followers: unknown[] }>('/users/follow/followers'),
   });
-  const conversations = useConversations();
-  const toggleLike = useToggleLike();
-  const removePost = useDeletePost();
-  const onDeletePost = useCallback((post: Post) => removePost.mutate(post.id), [removePost]);
-
-  const myPosts = useMemo(
-    () => feed.data?.filter((post) => post.user.id === user?.id),
-    [feed.data, user?.id],
-  );
-  const onToggleLike = useCallback(
-    (post: Post) => toggleLike.mutate({ postId: post.id, liked: !post.liked }),
-    [toggleLike],
-  );
-
-  if (!user) return <Screen>{null}</Screen>;
-  const photos = user.photos?.length ? user.photos : [user.avatarUri];
-
+  const following = useQuery({
+    queryKey: ['following'],
+    queryFn: () => getData<{ following: unknown[] }>('/users/follow/following'),
+  });
+  const toggle = useToggleLike();
+  const remove = useDeletePost();
+  if (!user)
+    return (
+      <Screen>
+        <Loader />
+      </Screen>
+    );
+  const posts = feed.data?.filter((post) => post.user.id === user.id) ?? [];
   return (
     <Screen padded={false}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={{ paddingBottom: spacing.xl }}
         refreshControl={
           <RefreshControl
             refreshing={feed.isRefetching}
             onRefresh={() => {
               void feed.refetch();
-              void conversations.refetch();
+              void followers.refetch();
+              void following.refetch();
             }}
             tintColor={theme.colors.primary}
-            colors={[theme.colors.primary]}
-            progressBackgroundColor={theme.colors.surfaceElevated}
           />
         }
       >
-        <View style={styles.padded}>
+        <View style={{ paddingHorizontal: spacing.lg, gap: spacing.lg }}>
           <Header
-            title="Profile"
-            align="left"
-            action={
-              <IconButton
-                icon="settings-outline"
-                label="Settings"
-                onPress={() => router.push('/settings')}
-              />
-            }
+            title={toHandle(user.name)}
+            back
+            backFallback="/home"
+            action={<SettingsButton />}
           />
-          <View style={styles.identity}>
-            <Avatar uri={user.avatarUri} label={`${user.name}'s photo`} size={112} ring />
-            <View style={styles.identityCopy}>
-              <ProfileHeader user={user} centered />
-              <Text variant="caption" color="muted" center>
-                @{toHandle(user.name)}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.bio}>{user.bio}</Text>
-          <View style={styles.stats}>
-            <Stat value={myPosts?.length} label="Posts" />
-            <Stat value={followers.data?.followers.length} label="Followers" />
-            <Stat value={user.interests.length} label="Interests" />
-          </View>
-          <View style={styles.buttons}>
+          <ProfileHeader
+            user={user}
+            posts={posts.length}
+            followers={followers.data?.followers.length}
+            following={following.data?.following.length}
+          />
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             <Button
               label="Edit profile"
-              icon="create-outline"
-              size="sm"
-              onPress={() => setEditing(true)}
-              style={styles.button}
-            />
-            <Button
-              label="Share"
-              icon="share-social-outline"
               variant="secondary"
               size="sm"
-              onPress={() => {
-                void Share.share({ message: `Meet ${user.name} on DARKFANTASY.` });
-              }}
-              style={styles.button}
+              style={{ flex: 1, minHeight: 40 }}
+              onPress={() => setEditing(true)}
+            />
+            <Button
+              label="Share profile"
+              variant="secondary"
+              size="sm"
+              style={{ flex: 1, minHeight: 40 }}
+              onPress={() =>
+                void Share.share({
+                  message: `Meet ${user.name} on DARKFANTASY. darkfantasy://profile/${user.id}`,
+                })
+              }
             />
           </View>
-          <View style={styles.section}>
-            <Text variant="label" color="muted">
-              INTERESTS
-            </Text>
-            <InterestChips interests={user.interests} />
-          </View>
-          <View style={styles.section}>
-            <SettingsGroup>
-              <SettingsRow
-                icon="settings-outline"
-                title="Settings & appearance"
-                subtitle="Make this space your own"
-                onPress={() => router.push('/settings')}
-              />
-              <SettingsRow
-                icon="shield-checkmark-outline"
-                title="Privacy"
-                onPress={() => router.push('/settings/privacy')}
-                last
-              />
-            </SettingsGroup>
-          </View>
         </View>
-
-        <View style={styles.tabs}>
-          <Tabs items={['Posts', 'Photos'] as const} value={tab} onChange={setTab} />
-        </View>
-        <View style={styles.padded}>
-          {tab === 'Photos' ? (
-            <PhotoGrid photos={photos} name={user.name} />
-          ) : feed.isPending ? (
-            <Skeleton style={styles.postSkeleton} />
-          ) : feed.isError ? (
-            <ErrorState onRetry={() => void feed.refetch()} />
-          ) : myPosts?.length ? (
-            <View style={styles.posts}>
-              {myPosts.map((post) => (
-                <PostCard
-                  key={post.id}
-                  post={post}
-                  onToggleLike={onToggleLike}
-                  onDelete={onDeletePost}
-                />
-              ))}
-            </View>
-          ) : (
-            <EmptyState
-              compact
-              icon="create-outline"
-              title="No posts yet"
-              message="Share a thought — it helps people get a feel for who you are."
-              actionLabel="Write a post"
-              onAction={() => router.push('/create')}
-            />
-          )}
-        </View>
+        {feed.isPending ? (
+          <Loader />
+        ) : feed.isError ? (
+          <ErrorState onRetry={() => void feed.refetch()} />
+        ) : (
+          <ProfileGrid
+            posts={posts}
+            onToggleLike={(post) => toggle.mutate({ postId: post.id, liked: !post.liked })}
+            onDelete={(post) => remove.mutate(post.id)}
+          />
+        )}
       </ScrollView>
       <Modal visible={editing} title="Edit profile" onClose={() => setEditing(false)}>
         <EditProfileForm user={user} onDone={() => setEditing(false)} />
@@ -202,25 +105,3 @@ export function MyProfileScreen(): React.JSX.Element {
     </Screen>
   );
 }
-const styles = StyleSheet.create({
-  scroll: { paddingBottom: spacing.xxxl },
-  padded: { paddingHorizontal: spacing.screen },
-  identity: { alignItems: 'center', gap: spacing.lg, paddingTop: spacing.xl },
-  identityCopy: { alignSelf: 'stretch', gap: spacing.xs },
-  bio: { paddingTop: spacing.lg, textAlign: 'center' },
-  stats: { flexDirection: 'row', gap: spacing.sm, paddingTop: spacing.lg },
-  stat: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 2,
-  },
-  statSkeleton: { width: 28, height: 26 },
-  buttons: { flexDirection: 'row', gap: spacing.sm, paddingTop: spacing.lg },
-  button: { flex: 1 },
-  section: { gap: spacing.sm, paddingTop: spacing.xl },
-  tabs: { paddingTop: spacing.xl, paddingBottom: spacing.lg },
-  posts: { gap: 0 },
-  postSkeleton: { height: 160, borderRadius: radius.lg },
-});

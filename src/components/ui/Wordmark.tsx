@@ -1,3 +1,4 @@
+import { radius, spacing } from '@/theme';
 import { StyleSheet, View } from 'react-native';
 import { Text } from './Text';
 import { useTheme } from '@/theme/useTheme';
@@ -25,14 +26,20 @@ export function Wordmark({ large = false }: { large?: boolean }): React.JSX.Elem
 }
 const styles = StyleSheet.create({
   row: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center' },
-  large: { flexDirection: 'column', gap: 16, marginTop: 24 },
+  large: { flexDirection: 'column', gap: spacing.lg, marginTop: spacing.xl },
   mark: {
     width: 72,
     height: 72,
-    borderRadius: 24,
+    borderRadius: radius.xl,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dot: { width: 6, height: 6, borderRadius: 999, marginLeft: 3, marginTop: -16 },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: radius.full,
+    marginLeft: spacing.xs,
+    marginTop: -spacing.lg,
+  },
 });

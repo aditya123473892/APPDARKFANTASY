@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { StyleSheet, View } from 'react-native';
@@ -124,4 +125,4 @@ export function RegisterForm({
     </View>
   );
 }
-const styles = StyleSheet.create({ form: { gap: 16 } });
+const styles = StyleSheet.create({ form: { gap: spacing.lg } });

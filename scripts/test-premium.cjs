@@ -22,6 +22,12 @@ function renderImage(locked, uri = 'https://cdn.test/previews/blur.jpg') {
   const pressed = [], navigation = [];
   const h = React.createElement;
   const { PostImage } = load('src/components/ui/PostImage.tsx', {
+    '@/theme': { spacing: load('src/theme/spacing.ts', {}).spacing },
+    '@/components/ui/Pressable': {
+      Pressable: ({ children, onPress, accessibilityLabel }) => {
+        pressed.push(onPress); return h('button', { 'aria-label': accessibilityLabel }, children);
+      },
+    },
     'react-native': {
       View: ({ children }) => h('div', null, children),
       Pressable: ({ children, onPress, accessibilityLabel }) => {

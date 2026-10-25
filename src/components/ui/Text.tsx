@@ -37,17 +37,20 @@ export const Text = forwardRef<ComponentRef<typeof RNText>, TextProps>(function 
         styles[variant],
         {
           color: colorValue,
-          fontFamily:
-            (serif ?? ['display', 'title', 'heading'].includes(variant))
-              ? typography.headingFamily
-              : typography.family[
-                  weight ??
-                    (variant === 'label' || variant === 'subheading'
+          fontFamily: serif
+            ? typography.headingFamily
+            : typography.family[
+                weight ??
+                  (variant === 'title' || variant === 'display'
+                    ? 'bold'
+                    : variant === 'heading'
                       ? 'semibold'
-                      : variant === 'caption'
-                        ? 'medium'
-                        : 'regular')
-                ],
+                      : variant === 'label' || variant === 'subheading'
+                        ? 'semibold'
+                        : variant === 'caption'
+                          ? 'medium'
+                          : 'regular')
+              ],
           fontWeight: undefined,
         },
         center && styles.center,
@@ -59,12 +62,20 @@ export const Text = forwardRef<ComponentRef<typeof RNText>, TextProps>(function 
 });
 
 const styles = StyleSheet.create({
-  display: { fontSize: 34, lineHeight: 40, fontWeight: '700', letterSpacing: -0.8 },
-  title: { fontSize: 26, lineHeight: 32, fontWeight: '700', letterSpacing: -0.4 },
-  heading: { fontSize: 20, lineHeight: 26, fontWeight: '700', letterSpacing: -0.2 },
-  subheading: { fontSize: 17, lineHeight: 23, fontWeight: '600' },
-  body: { fontSize: 15, lineHeight: 22, fontWeight: '400' },
-  label: { fontSize: 14, lineHeight: 19, fontWeight: '600' },
-  caption: { fontSize: 12, lineHeight: 16, fontWeight: '500' },
+  display: {
+    fontSize: typography.size.display,
+    lineHeight: typography.lineHeight.display,
+    letterSpacing: typography.letterSpacing.tight,
+  },
+  title: {
+    fontSize: typography.size.xxl,
+    lineHeight: typography.lineHeight.xxl,
+    letterSpacing: typography.letterSpacing.tight,
+  },
+  heading: { fontSize: typography.size.xl, lineHeight: typography.lineHeight.xl },
+  subheading: { fontSize: typography.size.lg, lineHeight: typography.lineHeight.lg },
+  body: { fontSize: typography.size.md, lineHeight: typography.lineHeight.md },
+  label: { fontSize: typography.size.sm, lineHeight: typography.lineHeight.sm },
+  caption: { fontSize: typography.size.xs, lineHeight: typography.lineHeight.xs },
   center: { textAlign: 'center' },
 });

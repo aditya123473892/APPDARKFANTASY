@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Can } from '@/features/auth/components/Access';
-import { LinearGradient } from 'expo-linear-gradient';
 import { memo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { FitImage, Text } from '@/components/ui';
 import type { ProfileView } from '@/features/profile/types';
 import { radius, spacing } from '@/theme';
@@ -54,12 +54,7 @@ export const ProfileCard = memo(function ProfileCard({
         pressed && styles.pressed,
       ]}
     >
-      <FitImage uri={profile.avatarUri} recyclingKey={profile.id} style={StyleSheet.absoluteFill} />
-      <LinearGradient
-        colors={[theme.colors.overlayTransparent, theme.colors.overlayStrong]}
-        locations={[0.35, 1]}
-        style={StyleSheet.absoluteFill}
-      />
+      <FitImage uri={profile.avatarUri} recyclingKey={profile.id} />
       {profile.relationship.status === 'incoming' ? (
         <View style={[styles.tag, { backgroundColor: theme.colors.primary }]}>
           <Text variant="caption" weight="bold" color="inverse">
@@ -73,24 +68,24 @@ export const ProfileCard = memo(function ProfileCard({
           serif
           weight="bold"
           numberOfLines={1}
-          style={{ color: theme.colors.onImage }}
+          style={{ color: theme.colors.text }}
         >
           {profile.name}, {profile.age}
         </Text>
         {subtitle ? (
           <View style={styles.row}>
-            <Ionicons name="location-outline" size={18} color={theme.colors.imageGold} />
+            <Ionicons name="location-outline" size={18} color={theme.colors.textSecondary} />
             <Text
               variant="caption"
               numberOfLines={1}
-              style={[styles.flex, { color: theme.colors.imageGold }]}
+              style={[styles.flex, { color: theme.colors.textSecondary }]}
             >
               {subtitle}
             </Text>
           </View>
         ) : null}
         {profile.interests[0] ? (
-          <Text variant="caption" numberOfLines={1} style={{ color: theme.colors.imageMuted }}>
+          <Text variant="caption" numberOfLines={1} style={{ color: theme.colors.textMuted }}>
             {profile.interests.slice(0, 2).join(' · ')}
           </Text>
         ) : null}
@@ -140,7 +135,6 @@ export const ProfileCard = memo(function ProfileCard({
 
 const styles = StyleSheet.create({
   card: {
-    aspectRatio: 0.68,
     borderRadius: radius.card,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
@@ -152,11 +146,11 @@ const styles = StyleSheet.create({
     top: spacing.sm,
     left: spacing.sm,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
+    paddingVertical: spacing.xs,
     borderRadius: radius.full,
   },
-  info: { padding: spacing.md, gap: 3 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  info: { padding: spacing.md, gap: spacing.xs },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   flex: { flex: 1 },
   action: {
     marginTop: spacing.sm,

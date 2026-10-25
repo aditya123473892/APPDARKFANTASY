@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { type Href } from 'expo-router';
@@ -164,7 +165,7 @@ export function VaultSettingsScreen(): React.JSX.Element {
   );
 }
 const styles = StyleSheet.create({
-  content: { gap: 16, paddingVertical: 16 },
-  form: { gap: 12 },
-  locked: { marginTop: 48 },
+  content: { gap: spacing.lg, paddingVertical: spacing.lg },
+  form: { gap: spacing.md },
+  locked: { marginTop: spacing.huge },
 });

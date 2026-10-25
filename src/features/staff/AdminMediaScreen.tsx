@@ -1,14 +1,7 @@
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  View,
-} from 'react-native';
-import { Image } from 'expo-image';
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
+import { FitImage } from '@/components/ui/FitImage';
 import { Ionicons } from '@expo/vector-icons';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Header, Screen } from '@/components/layout';
@@ -63,13 +56,20 @@ function PostTile({ post, onPress }: { post: AdminPost; onPress: () => void }) {
       onPress={onPress}
       style={styles.cell}
     >
-      <View style={[styles.thumb, { backgroundColor: theme.colors.surfaceMuted }]}>
+      <View
+        style={[
+          styles.thumb,
+          {
+            backgroundColor: theme.colors.surfaceMuted,
+            aspectRatio: first?.kind === 'photo' && first.uri ? undefined : 1,
+          },
+        ]}
+      >
         {first?.kind === 'photo' && first.uri ? (
-          <Image
-            source={{ uri: first.uri }}
-            contentFit="cover"
+          <FitImage
+            uri={first.uri}
             cachePolicy="none"
-            style={StyleSheet.absoluteFill}
+            accessibilityLabel={`Photo posted by ${post.owner}`}
           />
         ) : (
           <Ionicons
@@ -273,7 +273,9 @@ export function AdminMediaScreen(): React.JSX.Element {
             </Text>
           }
           ListFooterComponent={
-            query.isFetchingNextPage ? <ActivityIndicator color={theme.colors.textMuted} /> : undefined
+            query.isFetchingNextPage ? (
+              <ActivityIndicator color={theme.colors.textMuted} />
+            ) : undefined
           }
           contentContainerStyle={styles.grid}
         />
@@ -295,9 +297,8 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingVertical: spacing.sm },
   grid: { paddingBottom: spacing.xl },
-  cell: { width: '50%', padding: 4, gap: 4 },
+  cell: { width: '50%', padding: spacing.xs, gap: spacing.xs },
   thumb: {
-    aspectRatio: 1,
     borderRadius: radius.md,
     overflow: 'hidden',
     alignItems: 'center',
@@ -310,15 +311,15 @@ const styles = StyleSheet.create({
     right: 6,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 4,
+    gap: spacing.xs,
   },
   tag: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.full,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.none,
   },
-  empty: { marginTop: 48 },
+  empty: { marginTop: spacing.huge },
   sheet: { maxHeight: 620 },
   sheetContent: { gap: spacing.md },
   reasons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },

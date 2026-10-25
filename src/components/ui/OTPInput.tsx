@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 import { StyleSheet, TextInput, View, type TextInputInstance } from 'react-native';
 import { Text } from './Text';
 import { useTheme } from '@/theme/useTheme';
-import { typography, radius } from '@/theme';
+import { typography, radius, spacing } from '@/theme';
 
 /**
  * One real input drawn as digit cells, so the OS can fill the whole code from the
@@ -73,7 +73,7 @@ export const OTPInput = forwardRef<
   );
 });
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', justifyContent: 'space-between', gap: 6 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.xs },
   cell: {
     flex: 1,
     minWidth: 44,
@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  digit: { fontSize: 20, fontFamily: typography.family.bold },
+  digit: { fontSize: typography.size.xl, fontFamily: typography.family.bold },
   // Invisible but laid over the cells, so taps, long-press paste and autofill reach it.
   input: { ...StyleSheet.absoluteFill, opacity: 0.011, color: 'transparent' },
 });

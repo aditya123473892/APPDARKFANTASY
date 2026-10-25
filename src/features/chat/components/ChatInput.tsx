@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Text } from '@/components/ui';
 import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -17,6 +18,7 @@ export function ChatInput({
   canSendMessages = false,
   canShareMedia = false,
   placeholder = 'Write a message…',
+  minimal = false,
   draftValue,
   onDraftChange,
   timerLabel,
@@ -32,6 +34,7 @@ export function ChatInput({
   canSendMessages?: boolean;
   canShareMedia?: boolean;
   placeholder?: string;
+  minimal?: boolean;
   draftValue?: string;
   onDraftChange?: (text: string) => void;
   timerLabel?: string | null;
@@ -64,7 +67,7 @@ export function ChatInput({
         styles.root,
         {
           borderTopColor: theme.colors.divider,
-          backgroundColor: theme.colors.tabBar,
+          backgroundColor: theme.colors.chatBackground,
           paddingBottom: spacing.sm + bottomInset,
         },
       ]}
@@ -97,21 +100,23 @@ export function ChatInput({
           ) : null}
         </Pressable>
       ) : null}
-      <View style={[styles.field, { backgroundColor: theme.colors.surfaceMuted }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Insert smile emoji"
-          disabled={disabled || !canSendMessages}
-          hitSlop={4}
-          onPress={() => {
-            const next = `${value}😊`.slice(0, MAX_LENGTH);
-            setValue(next);
-            onChangeText?.(next);
-          }}
-          style={styles.fieldIcon}
-        >
-          <Ionicons name="happy-outline" size={23} color={theme.colors.textMuted} />
-        </Pressable>
+      <View style={[styles.field, { backgroundColor: theme.colors.surface }]}>
+        {!minimal ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Insert smile emoji"
+            disabled={disabled || !canSendMessages}
+            hitSlop={4}
+            onPress={() => {
+              const next = `${value}😊`.slice(0, MAX_LENGTH);
+              setValue(next);
+              onChangeText?.(next);
+            }}
+            style={styles.fieldIcon}
+          >
+            <Ionicons name="happy-outline" size={23} color={theme.colors.textMuted} />
+          </Pressable>
+        ) : null}
         <TextInput
           accessibilityLabel="Message"
           placeholder={placeholder}
@@ -185,20 +190,19 @@ export function ChatInput({
   );
 }
 
-const FIELD = 44;
+const FIELD = spacing.touch;
 const styles = StyleSheet.create({
   root: {
-    borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: spacing.sm,
-    paddingTop: spacing.sm - 2,
+    paddingTop: spacing.sm,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: spacing.sm - 2,
+    gap: spacing.sm,
   },
   field: {
     flex: 1,
     minHeight: FIELD,
-    borderRadius: FIELD / 2,
+    borderRadius: radius.xl,
     paddingHorizontal: spacing.xs,
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -206,19 +210,24 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontFamily: typography.fontFamily,
-    maxHeight: 140,
+    maxHeight: 120,
     minHeight: FIELD,
     paddingHorizontal: spacing.xs,
-    paddingTop: 11,
-    paddingBottom: 11,
-    fontSize: typography.size.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+    fontSize: 15,
     lineHeight: typography.lineHeight.md - 2,
   },
   counter: { position: 'absolute', right: spacing.md, top: 2 },
-  fieldIcon: { width: 38, height: FIELD, alignItems: 'center', justifyContent: 'center' },
-  attachIcon: { transform: [{ rotate: '45deg' }] },
-  timer: { width: 36, height: FIELD, justifyContent: 'center', alignItems: 'center' },
-  timerLabel: { fontSize: 10, lineHeight: 12, marginTop: -2 },
+  fieldIcon: {
+    width: spacing.touch,
+    height: FIELD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachIcon: {},
+  timer: { width: spacing.touch, height: FIELD, justifyContent: 'center', alignItems: 'center' },
+  timerLabel: { fontSize: typography.size.xs, lineHeight: 12, marginTop: -spacing.none },
   send: {
     width: FIELD,
     height: FIELD,
@@ -226,5 +235,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendIcon: { marginLeft: 2 },
+  sendIcon: { marginLeft: spacing.none },
 });

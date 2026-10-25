@@ -2,7 +2,8 @@ import { cleanupPickedAssets } from '@/services/api/photoUpload';
 import { useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Header, Screen } from '@/components/layout';
 import { Avatar, Button, EmptyState, Input, Loader, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
@@ -163,7 +164,7 @@ export default function GroupInfo(): React.JSX.Element {
             disabled={!owner || busy}
             onPress={() => photo.mutate()}
           >
-            <Avatar uri={mediaUrl(data.groupIcon)} label={data.name} size={88} />
+            <Avatar uri={mediaUrl(data.groupIcon)} label={data.name} size={96} />
           </Pressable>
           {owner ? (
             <Text variant="caption" color="primary">

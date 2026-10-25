@@ -1,9 +1,9 @@
 export const radius = {
   bubble: 16,
   tail: 4,
-  input: 22,
+  input: 12,
   pill: 16,
-  card: 12,
+  card: 16,
   xs: 4,
   sm: 8,
   md: 12,

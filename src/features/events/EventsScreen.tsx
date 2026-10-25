@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Header, Screen } from '@/components/layout';
-import { Button, EmptyState, Loader, SearchField, Text } from '@/components/ui';
+import { Header, Screen, SettingsButton } from '@/components/layout';
+import { Button, Chip, EmptyState, IconButton, Loader, SearchField, Text } from '@/components/ui';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { useCan } from '@/features/auth/hooks/useCurrentUser';
 import { mediaUrl } from '@/services/api/backend';
 import { describeError } from '@/services/errors';
 import { spacing, radius } from '@/theme';
+import { useContentInsets } from '@/components/layout/useContentInsets';
 import { useTheme } from '@/theme/useTheme';
 import { useEvents } from './hooks';
+import { EventCover } from './EventCover';
 
 export const eventTime = (value: string) =>
   Number.isFinite(Date.parse(value))
@@ -19,35 +20,63 @@ export const eventTime = (value: string) =>
 
 export function EventsScreen() {
   const router = useRouter();
+  const contentInsets = useContentInsets();
   const { theme } = useTheme();
   const admin = useCan('canViewAdminScreens');
   const query = useEvents();
   const [search, setSearch] = useState('');
-  const events = (query.data ?? []).filter((event) =>
-    `${event.name} ${event.theme ?? ''} ${event.location ?? ''}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase()),
-  );
+  const [filter, setFilter] = useState('All');
+  const events = (query.data ?? [])
+    .filter((event) =>
+      `${event.name} ${event.theme ?? ''} ${event.location ?? ''}`
+        .toLowerCase()
+        .includes(search.trim().toLowerCase()),
+    )
+    .filter((event) => {
+      if (filter === 'All') return true;
+      const now = new Date();
+      const start = new Date(event.startAt);
+      if (filter === 'Today') return start.toDateString() === now.toDateString();
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      return start >= weekStart && start < weekEnd;
+    });
   return (
     <Screen padded={false}>
       <View style={styles.top}>
-        <Header title="Events" subtitle="Find your next gathering" align="left" />
-        {admin && (
-          <Button
-            label="Create event"
-            icon="add"
-            size="sm"
-            fullWidth={false}
-            style={{ alignSelf: 'flex-start' }}
-            onPress={() => router.push('/events/new')}
-          />
-        )}
+        <Header
+          title="Events"
+          action={
+            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              {admin ? (
+                <IconButton
+                  icon="add"
+                  label="Create event"
+                  onPress={() => router.push('/events/new')}
+                />
+              ) : null}
+              <SettingsButton />
+            </View>
+          }
+        />
         <SearchField
           accessibilityLabel="Search events"
           placeholder="Search events, themes or places"
           value={search}
           onChangeText={setSearch}
         />
+        <View style={styles.filters}>
+          {['All', 'Today', 'This Week'].map((value) => (
+            <Chip
+              key={value}
+              label={value}
+              selected={filter === value}
+              onPress={() => setFilter(value)}
+            />
+          ))}
+        </View>
       </View>
       {query.isPending ? (
         <Loader />
@@ -61,7 +90,7 @@ export function EventsScreen() {
         <FlatList
           data={events}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: contentInsets.bottom }]}
           refreshControl={
             <RefreshControl
               refreshing={query.isRefetching}
@@ -92,28 +121,23 @@ export function EventsScreen() {
                 { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
               ]}
             >
-              {mediaUrl(item.cover?.url) ? (
-                <Image
-                  source={{ uri: mediaUrl(item.cover?.url) }}
-                  style={styles.cover}
-                  contentFit="cover"
-                  accessibilityLabel={`${item.name} cover`}
-                />
-              ) : null}
-              <Text color="primary" variant="caption">
-                {item.type === 'online' ? 'ONLINE' : 'IN PERSON'} · {item.status}
+              <EventCover
+                uri={mediaUrl(item.cover?.url)}
+                hasCover={Boolean(item.cover)}
+                label={`${item.name} cover`}
+                onRetry={query.refetch}
+              />
+              <Text variant="heading" numberOfLines={2}>
+                {item.name}
               </Text>
-              <Text variant="heading">{item.name}</Text>
-              {item.theme ? <Text color="secondary">{item.theme}</Text> : null}
               <Text color="secondary">{eventTime(item.startAt)}</Text>
               {item.location ? (
                 <Text color="muted" numberOfLines={2}>
                   {item.location}
                 </Text>
               ) : null}
-              <Text numberOfLines={3}>{item.description}</Text>
               <Button
-                label="View event"
+                label="View & RSVP"
                 icon="arrow-forward"
                 style={{ marginTop: spacing.sm }}
                 variant="secondary"
@@ -130,6 +154,6 @@ export function EventsScreen() {
 const styles = StyleSheet.create({
   top: { paddingHorizontal: spacing.screen, gap: spacing.sm, paddingBottom: spacing.md },
   list: { padding: spacing.screen, gap: spacing.lg, paddingBottom: spacing.xxxl },
-  card: { borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, gap: spacing.sm },
-  cover: { width: '100%', height: 180, borderRadius: radius.md },
+  filters: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  card: { borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
 });

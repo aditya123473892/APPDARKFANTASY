@@ -1,3 +1,4 @@
+import { spacing } from '@/theme';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Button, Modal, Text, TextField } from '@/components/ui';
@@ -50,4 +51,4 @@ export function VaultPinPrompt(): React.JSX.Element {
     </Modal>
   );
 }
-const styles = StyleSheet.create({ body: { gap: 12 } });
+const styles = StyleSheet.create({ body: { gap: spacing.md } });

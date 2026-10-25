@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
+import { StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
@@ -34,6 +35,7 @@ export function SearchField({
           accessibilityRole="button"
           accessibilityLabel="Clear search"
           hitSlop={10}
+          style={{ alignItems: 'center', justifyContent: 'center' }}
           onPress={() => onChangeText('')}
         >
           <Ionicons name="close-circle" size={18} color={theme.colors.textMuted} />
@@ -45,8 +47,8 @@ export function SearchField({
 
 const styles = StyleSheet.create({
   root: {
-    height: 40,
-    borderRadius: radius.full,
+    minHeight: spacing.control,
+    borderRadius: radius.input,
     paddingHorizontal: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -54,8 +56,8 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    height: 40,
-    paddingVertical: 0,
+    minHeight: spacing.touch,
+    paddingVertical: spacing.none,
     fontSize: typography.size.md,
     fontFamily: typography.fontFamily,
   },

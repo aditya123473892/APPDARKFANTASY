@@ -16,10 +16,12 @@ import {
   deletePost,
   listComments,
   listMyPosts,
+  getPost,
 } from '../services/feedService.real';
 import type { CommentPage, CreatePostInput, FeedPage, Post, PostComment } from '../types';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { useAuthStore } from '@/features/auth/store/authStore';
+import { usePostPresentation } from '../presentation';
 
 /** The public feed, loaded page by page. `data` is the flattened, de-duplicated list. */
 export function useFeed() {
@@ -44,6 +46,15 @@ export function useMyPosts() {
   return useQuery({ queryKey: queryKeys.myPosts, queryFn: listMyPosts });
 }
 
+export function useRefreshPost() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: getPost,
+    onSuccess: (fresh) => updateCachedPost(client, fresh.id, () => fresh),
+    onError: (error) => toast.error(describeError(error, "Couldn't refresh this post.")),
+  });
+}
+
 /**
  * Applies a change to one post in every cached list that shows it (feed,
  * own profile, other profiles). Returning null removes the post.
@@ -53,12 +64,23 @@ export function updateCachedPost(
   postId: string,
   update: (post: Post) => Post | null,
 ): void {
+  const saved = usePostPresentation.getState().saved;
+  if (saved[postId]) {
+    const next = { ...saved };
+    const updated = update(saved[postId]);
+    if (updated) next[postId] = updated;
+    else delete next[postId];
+    usePostPresentation.setState({ saved: next });
+  }
   const apply = (posts: Post[]) =>
     posts.flatMap((post) => (post.id === postId ? (update(post) ?? []) : [post]));
   client.setQueriesData<InfiniteData<FeedPage>>({ queryKey: queryKeys.feed }, (data) =>
     data
       ? { ...data, pages: data.pages.map((page) => ({ ...page, posts: apply(page.posts) })) }
       : data,
+  );
+  client.setQueriesData<Post>({ queryKey: ['posts'] }, (post) =>
+    post?.id === postId ? (update(post) ?? undefined) : post,
   );
   for (const queryKey of [queryKeys.myPosts, ['user-posts']])
     client.setQueriesData<Post[]>({ queryKey }, (posts) => (posts ? apply(posts) : posts));
@@ -112,9 +134,14 @@ export function useToggleLike() {
     scope: { id: 'post-like' },
     mutationFn: ({ postId, liked }: { postId: string; liked: boolean }) =>
       feedService.setLiked(postId, liked),
-    onMutate: ({ postId, liked }) => {
+    onMutate: async ({ postId, liked }) => {
       likeIntent.set(postId, liked);
-      show(postId, liked);
+      await Promise.all(
+        [queryKeys.feed, queryKeys.myPosts, ['user-posts'], ['posts', postId]].map((queryKey) =>
+          queryClient.cancelQueries({ queryKey }),
+        ),
+      );
+      if (likeIntent.get(postId) === liked) show(postId, liked);
     },
     onSuccess: (state, { postId }) => {
       if (state && likeIntent.get(postId) === state.liked)

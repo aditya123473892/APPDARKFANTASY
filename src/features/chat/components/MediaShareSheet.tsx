@@ -1,20 +1,14 @@
-import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Pressable, ScrollView, View, StyleSheet } from 'react-native';
-import { BottomSheet, Button, Text } from '@/components/ui';
+import { useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
+import { Button, Text } from '@/components/ui';
+import { SocialSheet } from '@/components/ui/SocialSheet';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
 export type MediaShareChoice = { viewOnce?: boolean; viewDurationSeconds?: number };
-const options = [
-  { key: 'unlimited', label: 'Unlimited views', choice: {} },
-  { key: 'once', label: 'View once', choice: { viewOnce: true } },
-  ...[3, 10, 30, 60].map((seconds) => ({
-    key: String(seconds),
-    label: `${seconds} seconds`,
-    choice: { viewOnce: true, viewDurationSeconds: seconds },
-  })),
-];
 
 export function MediaShareSheet({
   visible,
@@ -30,67 +24,151 @@ export function MediaShareSheet({
   onChoose: (choice: MediaShareChoice | null) => void;
 }): React.JSX.Element {
   const { theme } = useTheme();
-  const [selected, setSelected] = useState('unlimited');
-  const option = options.find((item) => item.key === selected)!;
+  const [once, setOnce] = useState(false);
+  const [seconds, setSeconds] = useState<number>();
+  const restricted = once && canViewOnce && count === 1;
+  const modes: {
+    value: boolean;
+    title: string;
+    detail: string;
+    icon: keyof typeof Ionicons.glyphMap;
+  }[] = [
+    { value: false, title: 'Keep in chat', detail: 'Open again anytime', icon: 'image-outline' },
+    ...(canViewOnce && count === 1
+      ? [
+          {
+            value: true,
+            title: 'View once',
+            detail: 'One opening, then it disappears',
+            icon: 'eye-off-outline' as const,
+          },
+        ]
+      : []),
+  ];
   return (
-    <BottomSheet visible={visible} onClose={() => onChoose(null)}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.copy}>
-        <Text variant="heading">Share {count === 1 ? 'photo' : `${count} photos`}</Text>
+    <SocialSheet visible={visible} onClose={() => onChoose(null)} title="Send photo">
+      <ScrollView contentContainerStyle={styles.content}>
         {previewUri ? (
           <Image
             source={{ uri: previewUri }}
-            cachePolicy="none"
             contentFit="contain"
-            style={styles.preview}
+            cachePolicy="none"
+            style={{
+              width: '100%',
+              height: 200,
+              borderRadius: radius.lg,
+              backgroundColor: theme.colors.mediaBackground,
+            }}
+            accessibilityLabel="Selected photo preview"
           />
         ) : null}
-        <Text color="muted">Choose how your photos can be viewed.</Text>
-        <View style={styles.options}>
-          {options
-            .filter((item) => canViewOnce || item.key === 'unlimited')
-            .map((item) => (
-              <Pressable
-                key={item.key}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: item.key === selected }}
-                onPress={() => setSelected(item.key)}
-                style={[
-                  styles.option,
-                  {
-                    borderColor: item.key === selected ? theme.colors.primary : theme.colors.border,
-                  },
-                ]}
-              >
-                <Text weight={item.key === selected ? 'semibold' : undefined}>{item.label}</Text>
-              </Pressable>
-            ))}
-        </View>
-        <Text variant="caption" color="muted">
-          {selected === 'unlimited'
-            ? 'Open again anytime. No photos are saved to your gallery.'
-            : selected === 'once'
-              ? 'One opening. Closing the photo or leaving the app uses the view.'
-              : 'One opening. The countdown starts when the photo loads. Closing early also uses the view.'}
+        <Text weight="semibold" style={{ fontSize: 14 }}>
+          How can this photo be viewed?
+        </Text>
+        {modes.map((mode) => (
+          <Pressable
+            key={String(mode.value)}
+            accessibilityRole="radio"
+            accessibilityLabel={mode.title}
+            accessibilityState={{ checked: restricted === mode.value }}
+            onPress={() => setOnce(mode.value)}
+            style={[
+              styles.option,
+              {
+                backgroundColor:
+                  restricted === mode.value ? theme.colors.primarySoft : theme.colors.surfaceMuted,
+              },
+            ]}
+          >
+            <Ionicons name={mode.icon} size={22} color={theme.colors.primaryText} />
+            <View style={{ flex: 1, minWidth: 0, gap: spacing.xs }}>
+              <Text weight="semibold" style={{ fontSize: 14 }}>
+                {mode.title}
+              </Text>
+              <Text variant="caption" weight="regular" color="muted">
+                {mode.detail}
+              </Text>
+            </View>
+            <Ionicons
+              name={restricted === mode.value ? 'radio-button-on' : 'radio-button-off'}
+              size={20}
+              color={restricted === mode.value ? theme.colors.primaryText : theme.colors.textMuted}
+            />
+          </Pressable>
+        ))}
+        {restricted ? (
+          <View style={{ gap: spacing.sm }}>
+            <Text variant="caption" weight="regular" color="muted">
+              Close automatically after opening
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: spacing.sm }}
+            >
+              {[undefined, 3, 10, 30, 60].map((value) => (
+                <Pressable
+                  key={String(value)}
+                  accessibilityRole="radio"
+                  accessibilityLabel={value ? `${value} seconds` : 'No timer'}
+                  accessibilityState={{ checked: seconds === value }}
+                  onPress={() => setSeconds(value)}
+                  style={[
+                    styles.timer,
+                    {
+                      backgroundColor:
+                        seconds === value ? theme.colors.primarySoft : theme.colors.surfaceMuted,
+                    },
+                  ]}
+                >
+                  <Text
+                    variant="caption"
+                    weight="semibold"
+                    color={seconds === value ? 'primary' : 'muted'}
+                  >
+                    {value ? `${value}s` : 'No timer'}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+        <Text variant="caption" weight="regular" color="muted">
+          {restricted
+            ? 'Closing the photo or leaving the app uses the view. A timer starts only when the photo loads.'
+            : 'The photo stays in this conversation until it expires or is removed.'}
         </Text>
       </ScrollView>
-      <Button
-        label={`Send ${count === 1 ? 'photo' : 'photos'}`}
-        onPress={() => onChoose(option.choice)}
-      />
-      <Button label="Cancel" variant="ghost" onPress={() => onChoose(null)} />
-    </BottomSheet>
+      <View style={{ padding: spacing.lg }}>
+        <Button
+          label={`Send ${count === 1 ? 'photo' : `${count} photos`}${restricted ? ' · View once' : ''}`}
+          onPress={() =>
+            onChoose(
+              restricted
+                ? { viewOnce: true, ...(seconds ? { viewDurationSeconds: seconds } : {}) }
+                : {},
+            )
+          }
+        />
+      </View>
+    </SocialSheet>
   );
 }
-
 const styles = StyleSheet.create({
-  scroll: { maxHeight: 480 },
-  copy: { gap: spacing.md },
-  preview: { width: '100%', height: 160, borderRadius: radius.md },
-  options: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  content: { padding: spacing.lg, gap: spacing.lg },
   option: {
-    borderWidth: 1,
-    borderRadius: radius.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    minHeight: 72,
+    padding: spacing.md,
+    borderRadius: radius.md,
+  },
+  timer: {
+    minWidth: 56,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
   },
 });

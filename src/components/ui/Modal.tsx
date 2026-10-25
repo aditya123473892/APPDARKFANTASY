@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   Modal as RNModal,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from './Text';
 import { radius, spacing } from '@/theme';

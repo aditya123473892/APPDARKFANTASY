@@ -1,6 +1,8 @@
+import { radius, spacing } from '@/theme';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { Image } from 'expo-image';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
+import { FitImage } from '@/components/ui/FitImage';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '@/components/ui';
 import { useTheme } from '@/theme/useTheme';
@@ -70,6 +72,8 @@ export function VaultPhotoTile({
         style={[
           styles.photo,
           {
+            aspectRatio: !video && uri ? undefined : 0.85,
+            borderWidth: selected ? 2 : 0,
             backgroundColor: colors.surfaceMuted,
             borderColor: selected ? colors.primary : colors.surfaceMuted,
           },
@@ -83,15 +87,12 @@ export function VaultPhotoTile({
             </Text>
           </View>
         ) : uri ? (
-          <Image
+          <FitImage
             key={photo.sha256}
-            source={{ uri }}
+            uri={uri}
             accessibilityLabel="Private photo"
-            contentFit="cover"
             cachePolicy="none"
             recyclingKey={`${photo.id}:${photo.sha256}`}
-            transition={0}
-            style={StyleSheet.absoluteFill}
             onError={() => {
               setUri(undefined);
               setFailed(true);
@@ -127,17 +128,33 @@ export function VaultPhotoTile({
   );
 }
 const styles = StyleSheet.create({
-  cell: { width: '33.3333%', padding: 3 },
+  cell: { width: '33.3333%', padding: spacing.xs },
   photo: {
-    aspectRatio: 0.85,
-    borderRadius: 12,
+    borderRadius: radius.md,
     overflow: 'hidden',
-    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  placeholder: { alignItems: 'center', gap: 6, padding: 6 },
-  hidden: { position: 'absolute', left: 6, bottom: 6, borderRadius: 12, padding: 5 },
-  selected: { position: 'absolute', top: 6, right: 6, borderRadius: 14, padding: 3 },
-  rejected: { position: 'absolute', right: 6, bottom: 6, borderRadius: 12, padding: 5 },
+  placeholder: { alignItems: 'center', gap: spacing.xs, padding: spacing.xs },
+  hidden: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+    borderRadius: radius.md,
+    padding: spacing.xs,
+  },
+  selected: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    borderRadius: radius.md,
+    padding: spacing.xs,
+  },
+  rejected: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    borderRadius: radius.md,
+    padding: spacing.xs,
+  },
 });

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 
@@ -22,7 +23,7 @@ export function IconButton({
   onPress,
   active,
   filled,
-  size = 22,
+  size = 24,
   dot,
   disabled,
 }: IconButtonProps): React.JSX.Element {

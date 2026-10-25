@@ -141,6 +141,40 @@ test('real backend mappings preserve identities, media types, like state and con
   );
 });
 
+test('carousel publishing uploads every photo in order and reports whole-post progress', async () => {
+  const uploads = [];
+  const progress = [];
+  const h = harness({
+    '@/services/api/photoUpload': {
+      uploadPhoto: async (asset, notify) => {
+        uploads.push(asset.uri);
+        notify({ stage: 'transfer', percent: 100, attempt: 1 });
+        notify({ stage: 'confirm', attempt: 1 });
+        notify({ stage: 'complete', percent: 100, attempt: 1 });
+        return `upload-${asset.uri}`;
+      },
+    },
+  });
+  const me = '111111111111111111111111';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  h.apiClient.defaults.adapter = async config => {
+    assert.equal(config.url, '/posts');
+    const payload = JSON.parse(config.data);
+    assert.deepEqual(payload.photoIds, ['upload-first', 'upload-second', 'upload-third']);
+    assert.equal(payload.videoIds, undefined);
+    return h.ok(config, { _id: '333333333333333333333333', user: me, createdAt: '2026-10-25T10:00:00Z', images: uploads.map((uri, index) => ({ id: `${index}`, url: `https://media.test/${uri}.jpg`, width: 1080, height: 1350 })), likes: [], caption: payload.caption });
+  };
+  const post = await h.load('src/features/feed/services/feedService.real.ts').realFeedService.create({
+    body: 'Three photos', audience: 'everyone', clientId: 'same-draft',
+    assets: ['first', 'second', 'third'].map(uri => ({ uri, name: `${uri}.jpg`, type: 'image/jpeg' })),
+    onUploadProgress: event => progress.push(event.percent),
+  });
+  assert.deepEqual(uploads, ['first', 'second', 'third']);
+  assert.deepEqual(Array.from(post.media, item => item.uri), ['first', 'second', 'third'].map(uri => `https://media.test/${uri}.jpg`));
+  assert.equal(progress.at(-1), 100);
+  assert.ok(progress.every((value, index) => index === 0 || value >= progress[index - 1]));
+});
+
 test('paginated real user directory never falls back to fixtures and excludes current/blocked accounts', async () => {
   const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
   const me = '111111111111111111111111';
@@ -1197,6 +1231,8 @@ function harness(overrides = {}) {
       },
     },
   };
+  // UI wrappers are opaque primitives in these behavior-focused component tests.
+  stubs['@/components/ui/Pressable'] = { Pressable: 'Pressable' };
   Object.assign(stubs, overrides);
   function load(filename) {
     filename = path.resolve(filename);
@@ -1878,9 +1914,12 @@ test('post images come from the current images[] shape with real sizes, falling 
   });
   assert.deepEqual(
     current.media.map(({ width, height }) => [width, height]),
-    [[1080, 1350], [0, 0]],
+    [[1080, 1350], [0, 0], [0, 0]],
   );
   assert.match(current.media[0].uri, /a.jpg$/);
+  // Keep an explicitly unavailable image in place so a legacy post can refresh it
+  // without silently substituting a different photo.
+  assert.equal(current.media[2].uri, '');
   const legacy = mapPost({ ...base, media: [{ url: 'https://cdn.example.com/c.jpg', mimetype: 'image/png' }] });
   assert.equal(legacy.media.length, 1);
   assert.equal(legacy.media[0].width, 0);
@@ -1941,6 +1980,94 @@ test('posts use the server like state and cached posts update in every list', ()
     store.get('user-posts').map((post) => post.id),
     ['p3'],
   );
+});
+
+test('like mutations accept confirmed current and legacy replies and never treat failed responses as success', async () => {
+  const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
+  h.runtime.setSessionIdentity(h.user._id, h.token());
+  const { mapLikeResponse, realFeedService } = h.load('src/features/feed/services/feedService.real.ts');
+  for (const body of [
+    { data: { liked: true, likeCount: 4 }, error: false },
+    { post: { likeCount: 4, likedByMe: true } },
+    { data: { post: { likes: ['a', 'b', 'c', 'd'] } } },
+  ]) assert.deepEqual(JSON.parse(JSON.stringify(mapLikeResponse(body, true))), { liked: true, likeCount: 4 });
+  assert.throws(() => mapLikeResponse({ error: true, statusCode: 500, data: { liked: true, likeCount: 4 } }, true));
+  assert.throws(() => mapLikeResponse({ message: 'OK' }, true));
+  const calls = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    calls.push([config.method, config.url]);
+    return h.ok(config, { liked: config.method === 'post', likeCount: config.method === 'post' ? 4 : 3 });
+  };
+  assert.equal((await realFeedService.setLiked('post', true)).likeCount, 4);
+  assert.equal((await realFeedService.setLiked('post', false)).liked, false);
+  assert.deepEqual(calls, [['post', '/posts/post/like'], ['delete', '/posts/post/unlike']]);
+});
+
+test('optimistic likes cancel stale reads, reconcile server counts and roll back errors across feed/profile/post/saved', async () => {
+  const rows = new Map();
+  const client = {
+    cancelQueries: async () => {},
+    setQueriesData: ({ queryKey }, update) => {
+      for (const [key, value] of rows) {
+        const actual = JSON.parse(key);
+        if (queryKey.every((part, index) => actual[index] === part)) rows.set(key, update(value));
+      }
+    },
+  };
+  const h = harness({ '@tanstack/react-query': { useQueryClient: () => client, useMutation: (options) => options }, '@/components/ui/Toast': { toast: { error() {}, success() {} } } });
+  const { usePostPresentation } = h.load('src/features/feed/presentation.ts');
+  const post = { id: 'post', liked: false, likes: 3 };
+  rows.set(JSON.stringify(['feed']), { pages: [{ posts: [post] }], pageParams: [0] });
+  rows.set(JSON.stringify(['my-posts']), [post]);
+  rows.set(JSON.stringify(['posts', 'post']), post);
+  const comments = { pages: [{ comments: [] }] };
+  rows.set(JSON.stringify(['posts', 'post', 'comments']), comments);
+  usePostPresentation.setState({ saved: { post } });
+  const mutation = h.load('src/features/feed/hooks/useFeed.ts').useToggleLike();
+  await mutation.onMutate({ postId: 'post', liked: true });
+  assert.equal(rows.get(JSON.stringify(['feed'])).pages[0].posts[0].likes, 4);
+  assert.equal(usePostPresentation.getState().saved.post.liked, true);
+  mutation.onSuccess({ liked: true, likeCount: 8 }, { postId: 'post' });
+  assert.equal(rows.get(JSON.stringify(['posts', 'post'])).likes, 8);
+  assert.equal(rows.get(JSON.stringify(['my-posts']))[0].likes, 8);
+  assert.equal(rows.get(JSON.stringify(['posts', 'post', 'comments'])), comments);
+  await mutation.onMutate({ postId: 'post', liked: false });
+  mutation.onError(new Error('offline'), { postId: 'post', liked: false });
+  assert.equal(usePostPresentation.getState().saved.post.liked, true);
+  assert.equal(usePostPresentation.getState().saved.post.likes, 8);
+});
+
+test('local chat history loads over authenticated HTTP without waiting for a socket', async () => {
+  let socketCalls = 0;
+  const h = harness({
+    '@/config/env': { env: { apiUrl: 'https://api.example.test/api', localApiProxy: true } },
+    './socketSession': { getHistory: async () => { socketCalls++; throw Error('Socket unavailable'); } },
+  });
+  const me = '111111111111111111111111', other = '222222222222222222222222';
+  const sessionToken = h.token(me);
+  h.runtime.setSessionIdentity(me, sessionToken);
+  const message = { _id: '444444444444444444444444', sender: other, receiver: me, sentAt: '2026-10-25T00:00:00Z', message: 'Hello' };
+  h.apiClient.defaults.adapter = async (config) => {
+    assert.equal(config.url, '/chats/messages');
+    assert.equal(config.params.receiver, other);
+    assert.equal(config.headers.Authorization, `Bearer ${sessionToken}`);
+    return h.ok(config, [message]);
+  };
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  const rows = await service.listMessages(`user:${other}`);
+  assert.equal(rows[0].text, 'Hello');
+  assert.equal(socketCalls, 0);
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, [{ ...message, sender: '333333333333333333333333' }]);
+  await assert.rejects(service.listMessages(`user:${other}`));
+});
+
+test('unavailable normal media stays retryable without being labelled as premium locked', () => {
+  const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
+  const { mapPostMedia } = h.load('src/features/feed/services/feedService.real.ts');
+  const video = mapPostMedia({ videos: [{ url: '', contentType: 'video/mp4' }], locked: false })[0];
+  assert.equal(video.locked, false);
+  assert.equal(video.mimetype, 'video/mp4');
+  assert.equal(mapPostMedia({ images: [{ id: 'original', url: '' }] })[0].id, 'original');
 });
 
 test('C edit/delete own messages use confirmed events and merge incoming changes', async () => {
@@ -2706,6 +2833,41 @@ test('a failed S3 POST is never confirmed and scratch files are removed', async 
   h.runtime.teardownSession();
 });
 
+test('selected vault uploads avoid reimport and keep the draft for retry until explicitly cleaned', async () => {
+  const deleted = [];
+  let attempts = 0, imports = 0;
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    '@/features/vault/vaultService': { publishPhoto: async () => { imports++; throw Error('Must not reimport'); } },
+    'expo-image-manipulator': { ImageManipulator: { manipulate: () => { throw Error('Already prepared'); } } },
+    'expo-file-system/legacy': {
+      cacheDirectory: 'file:///cache/',
+      getInfoAsync: async () => ({ exists: true, size: 1000 }),
+      deleteAsync: async (uri) => deleted.push(uri),
+      FileSystemUploadType: { MULTIPART: 1 },
+      createUploadTask: () => ({
+        uploadAsync: async () => ({ status: ++attempts === 1 ? 403 : 204 }),
+        cancelAsync: async () => {},
+      }),
+    },
+  });
+  h.runtime.setSessionIdentity('111111111111111111111111', h.token('111111111111111111111111'));
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, config.url === '/photos/upload-url'
+    ? { uploadId: 'vault-copy', status: 'pending', url: 'https://private.example/', fields: { key: 'temp/server' } }
+    : { uploadId: 'vault-copy', status: 'approved' });
+  const upload = h.load('src/services/api/photoUpload.ts');
+  const asset = { uri: 'file:///cache/media-drafts/selected.jpg', name: 'selected.jpg', type: 'image/jpeg', fromVault: true };
+  await assert.rejects(upload.uploadPhoto(asset), /S3 storage/);
+  assert.equal(deleted.length, 0);
+  assert.equal(await upload.uploadPhoto(asset), 'vault-copy');
+  assert.equal(imports, 0);
+  assert.equal(attempts, 2);
+  assert.equal(deleted.length, 0);
+  await upload.cleanupPickedAssets([asset]);
+  assert.deepEqual(deleted, [asset.uri]);
+  h.runtime.teardownSession();
+});
+
 test('Android gallery chat uploads bypass a locked vault and clean only temporary files', async () => {
   const deleted = [], requests = [];
   let vaultCalls = 0;
@@ -2816,6 +2978,7 @@ function photoViewerHarness(seconds) {
     '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
     '../services/chatState': { acceptMessage() {} },
     './ChatPhotoViewer': { ChatPhotoViewer: 'Viewer' },
+    './AttachmentCard': { AttachmentCard: 'AttachmentCard' },
     __date: Clock,
     __setInterval: (fn) => { intervals.set(++intervalId, fn); return intervalId; },
     __clearInterval: (id) => intervals.delete(id),

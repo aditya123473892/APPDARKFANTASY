@@ -11,6 +11,7 @@ import {
   Body,
   ValidationPipe,
   Header,
+  BadRequestException,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
@@ -38,6 +39,19 @@ export class ChatsController {
     private readonly chatService: ChatService,
     private readonly chatGateway: ChatGateway,
   ) {}
+
+  @Get('messages')
+  async history(
+    @AuthUser() user: IAuthUser,
+    @Query(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })) query: ChatMediaQueryDto,
+  ) {
+    if (Boolean(query.receiver) === Boolean(query.groupId))
+      throw new BadRequestException('Choose one conversation');
+    const messages = query.groupId
+      ? await this.chatService.getChatGroupHistory(user.id, query.groupId)
+      : await this.chatService.getChatHistory(user.id, query.receiver);
+    return successGetRes(messages);
+  }
 
   @Post('messages')
   async createMessage(

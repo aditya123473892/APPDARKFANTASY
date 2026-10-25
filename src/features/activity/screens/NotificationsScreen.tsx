@@ -1,12 +1,13 @@
 import { FlashList } from '@shopify/flash-list';
-import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
 import { Button, EmptyState, Loader, Text } from '@/components/ui';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { toast } from '@/components/ui/Toast';
-import { spacing } from '@/theme';
+import { spacing, radius } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { NotificationRow } from '../components/NotificationRow';
 import { useMarkNotificationsRead, useNotifications } from '../hooks/useActivity';
@@ -17,9 +18,9 @@ export function NotificationsScreen({ embedded = false }: { embedded?: boolean }
   const router = useRouter();
   const { theme } = useTheme();
   return (
-    <Screen padded={false} edges={embedded ? [] : ['left', 'right']}>
+    <Screen padded={false} edges={embedded ? [] : ['top', 'left', 'right', 'bottom']}>
       <View style={{ paddingHorizontal: spacing.screen }}>
-        {!embedded && <Header title="Activity" subtitle="Your notifications" align="left" />}
+        {!embedded && <Header title="Notifications" back backFallback="/home" />}
         <View style={styles.toolbar}>
           <Text variant="label" color="secondary" style={{ flex: 1 }}>
             {query.data?.unreadCount ? `${query.data.unreadCount} unread` : 'Notifications'}
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     minHeight: 44,
     paddingHorizontal: spacing.sm,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     flexShrink: 1,
   },
 });

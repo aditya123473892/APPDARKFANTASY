@@ -1,77 +1,72 @@
-import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, View } from 'react-native';
-import { Text } from '@/components/ui';
-import type { UserView as User } from '@/features/auth/types';
+import { View } from 'react-native';
+import { Avatar } from '@/components/ui/Avatar';
+import { Text } from '@/components/ui/Text';
+import type { UserView } from '@/features/auth/types';
 import { spacing } from '@/theme';
-import { useTheme } from '@/theme/useTheme';
 
-/** Name, age, presence and the work/location line. Shared by "my profile" and other people's profiles. */
 export function ProfileHeader({
   user,
+  posts = 0,
+  followers,
+  following,
   presence,
   distance,
-  centered = false,
 }: {
-  user: User;
+  user: UserView;
+  posts?: number;
+  followers?: number;
+  following?: number;
   presence?: string | null;
   distance?: string | null;
   centered?: boolean;
-}): React.JSX.Element {
-  const { theme } = useTheme();
-  const meta: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [];
-  if (user.occupation) meta.push({ icon: 'briefcase-outline', text: user.occupation });
-  if (distance ?? user.location)
-    meta.push({ icon: 'location-outline', text: (distance ?? user.location)! });
+}) {
   return (
-    <View style={[styles.root, centered && { alignItems: 'center' }]}>
-      <Text variant="title" center={centered} accessibilityRole="header">
-        {user.name}
-        {user.age > 0 ? `, ${user.age}` : ''}
-      </Text>
-      {presence ? (
-        <View style={styles.row}>
-          <View
-            style={[
-              styles.dot,
-              {
-                backgroundColor:
-                  presence === 'Online now' ? theme.colors.success : theme.colors.textMuted,
-              },
-            ]}
-          />
-          <Text variant="caption" color={presence === 'Online now' ? 'success' : 'secondary'}>
-            {presence}
-          </Text>
-        </View>
-      ) : null}
-      {meta.length ? (
-        <View style={styles.meta}>
-          {meta.map((item) => (
-            <View key={item.icon} style={styles.row}>
-              <Ionicons
-                name={item.icon}
-                size={18}
-                color={
-                  item.icon === 'location-outline' ? theme.colors.gold : theme.colors.textSecondary
-                }
-              />
+    <View style={{ gap: spacing.md }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.lg }}>
+        <Avatar uri={user.avatarUri} label={user.name} size={96} />
+        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-evenly' }}>
+          {[
+            [posts, 'Posts'],
+            [followers, 'Followers'],
+            [following, 'Following'],
+          ].map(([value, label]) => (
+            <View key={label} style={{ flex: 1, alignItems: 'center', minWidth: 0 }}>
               <Text
-                variant="label"
-                weight="regular"
-                color={item.icon === 'location-outline' ? 'gold' : 'secondary'}
+                weight="semibold"
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={{ fontSize: 18, fontVariant: ['tabular-nums'] }}
               >
-                {item.text}
+                {typeof value === 'number' ? value.toLocaleString() : '—'}
+              </Text>
+              <Text
+                variant="caption"
+                weight="regular"
+                color="muted"
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {label}
               </Text>
             </View>
           ))}
         </View>
-      ) : null}
+      </View>
+      <View style={{ gap: spacing.xs }}>
+        <Text weight="semibold" numberOfLines={1} style={{ fontSize: 14 }}>
+          {user.name}
+        </Text>
+        {user.bio ? (
+          <Text numberOfLines={4} style={{ fontSize: 14 }}>
+            {user.bio}
+          </Text>
+        ) : null}
+        {presence || distance ? (
+          <Text variant="caption" weight="regular" color="muted">
+            {[presence, distance].filter(Boolean).join(' · ')}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }
-const styles = StyleSheet.create({
-  root: { gap: spacing.xs + 2 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
-  meta: { flexDirection: 'row', flexWrap: 'wrap', columnGap: spacing.lg, rowGap: spacing.xs },
-  dot: { width: 8, height: 8, borderRadius: 999 },
-});

@@ -32,22 +32,19 @@ function selected(asset: ImagePicker.ImagePickerAsset): UploadAsset {
     file: asset.file,
   };
 }
-/** Up to five items for a post: photos plus at most one video (two minutes). */
+/** One media item per post or attachment. */
 export async function pickMedia(): Promise<UploadAsset[]> {
   if (!(await permission())) return [];
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images', 'videos'],
-    videoMaxDuration: 120,
-    allowsMultipleSelection: true,
-    selectionLimit: 5,
+    videoMaxDuration: 60,
+    allowsMultipleSelection: false,
     quality: 0.85,
     base64: false,
     exif: false,
   });
   if (result.canceled) return [];
-  const assets = result.assets.map(selected);
-  if (assets.filter((asset) => asset.type.startsWith('video/')).length > 1)
-    throw new Error('A post can include one video.');
+  const assets = result.assets.slice(0, 1).map(selected);
   return assets;
 }
 /** One photo (JPEG/PNG/WebP), e.g. a group picture. Resolves null when cancelled. */

@@ -1,5 +1,12 @@
 import { forwardRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View, type TextInputProps, type TextInputInstance } from 'react-native';
+import {
+  StyleSheet,
+  TextInput,
+  View,
+  type TextInputProps,
+  type TextInputInstance,
+} from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Text } from './Text';
@@ -11,76 +18,75 @@ type PasswordInputProps = Omit<TextInputProps, 'secureTextEntry'> & {
   error?: string;
 };
 
-export const PasswordInput = forwardRef<TextInputInstance, PasswordInputProps>(function PasswordInput(
-  { label, error, style, onFocus, onBlur, ...props },
-  ref,
-) {
-  const [visible, setVisible] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const { theme } = useTheme();
-  return (
-    <View style={styles.group}>
-      {label ? (
-        <Text variant="label" color="secondary">
-          {label}
-        </Text>
-      ) : null}
-      <View
-        style={[
-          styles.wrapper,
-          {
-            backgroundColor: theme.colors.surfaceElevated,
-            borderColor: error
-              ? theme.colors.danger
-              : focused
-                ? theme.colors.primary
-                : theme.colors.border,
-          },
-        ]}
-      >
-        <Ionicons name="lock-closed-outline" size={19} color={theme.colors.textMuted} />
-        <TextInput
-          ref={ref}
-          secureTextEntry={!visible}
-          autoCapitalize="none"
-          autoCorrect={false}
-          textContentType="password"
-          autoComplete="current-password"
-          placeholderTextColor={theme.colors.textMuted}
-          selectionColor={theme.colors.primary}
-          cursorColor={theme.colors.primary}
-          style={[styles.input, { color: theme.colors.text }, style]}
-          onFocus={(event) => {
-            setFocused(true);
-            onFocus?.(event);
-          }}
-          onBlur={(event) => {
-            setFocused(false);
-            onBlur?.(event);
-          }}
-          {...props}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={visible ? 'Hide password' : 'Show password'}
-          hitSlop={12}
-          onPress={() => setVisible((value) => !value)}
+export const PasswordInput = forwardRef<TextInputInstance, PasswordInputProps>(
+  function PasswordInput({ label, error, style, onFocus, onBlur, ...props }, ref) {
+    const [visible, setVisible] = useState(false);
+    const [focused, setFocused] = useState(false);
+    const { theme } = useTheme();
+    return (
+      <View style={styles.group}>
+        {label ? (
+          <Text variant="label" color="secondary">
+            {label}
+          </Text>
+        ) : null}
+        <View
+          style={[
+            styles.wrapper,
+            {
+              backgroundColor: theme.colors.surfaceElevated,
+              borderColor: error
+                ? theme.colors.danger
+                : focused
+                  ? theme.colors.primary
+                  : theme.colors.border,
+            },
+          ]}
         >
-          <Ionicons
-            name={visible ? 'eye-off-outline' : 'eye-outline'}
-            size={21}
-            color={theme.colors.textMuted}
+          <Ionicons name="lock-closed-outline" size={19} color={theme.colors.textMuted} />
+          <TextInput
+            ref={ref}
+            secureTextEntry={!visible}
+            autoCapitalize="none"
+            autoCorrect={false}
+            textContentType="password"
+            autoComplete="current-password"
+            placeholderTextColor={theme.colors.textMuted}
+            selectionColor={theme.colors.primary}
+            cursorColor={theme.colors.primary}
+            style={[styles.input, { color: theme.colors.text }, style]}
+            onFocus={(event) => {
+              setFocused(true);
+              onFocus?.(event);
+            }}
+            onBlur={(event) => {
+              setFocused(false);
+              onBlur?.(event);
+            }}
+            {...props}
           />
-        </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={visible ? 'Hide password' : 'Show password'}
+            hitSlop={12}
+            onPress={() => setVisible((value) => !value)}
+          >
+            <Ionicons
+              name={visible ? 'eye-off-outline' : 'eye-outline'}
+              size={21}
+              color={theme.colors.textMuted}
+            />
+          </Pressable>
+        </View>
+        {error ? (
+          <Text variant="caption" color="danger">
+            {error}
+          </Text>
+        ) : null}
       </View>
-      {error ? (
-        <Text variant="caption" color="danger">
-          {error}
-        </Text>
-      ) : null}
-    </View>
-  );
-});
+    );
+  },
+);
 
 const styles = StyleSheet.create({
   group: { gap: spacing.sm },

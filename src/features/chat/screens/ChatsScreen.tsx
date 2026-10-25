@@ -4,11 +4,11 @@ import { AppState, RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
-import { Header, Screen } from '@/components/layout';
+import { Header, Screen, SettingsButton } from '@/components/layout';
 import { EmptyState, IconButton, SearchField, Skeleton } from '@/components/ui';
 import { Can } from '@/features/auth/components/Access';
 import { useDebounce } from '@/hooks/useDebounce';
-import { spacing } from '@/theme';
+import { spacing, radius } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { CHAT_AVATAR, ChatListItem } from '../components/ChatListItem';
 import { useConversations, useMyId, useChatVisibility } from '../hooks/useChat';
@@ -17,6 +17,7 @@ import { INBOX_POLL_MS, LOCAL_SEARCH_LABEL, localSearch, prefetchInbox } from '.
 import { chatService } from '../services';
 import type { Conversation } from '../types';
 import { describeError } from '@/services/errors';
+import { useContentInsets } from '@/components/layout/useContentInsets';
 
 function ChatsSkeleton(): React.JSX.Element {
   return (
@@ -36,6 +37,7 @@ function ChatsSkeleton(): React.JSX.Element {
 
 export function ChatsScreen(): React.JSX.Element {
   const router = useRouter();
+  const contentInsets = useContentInsets();
   const { theme } = useTheme();
   const myId = useMyId();
   const showPresence = usePreferences((state) => state.showActiveStatus);
@@ -92,7 +94,7 @@ export function ChatsScreen(): React.JSX.Element {
     <Screen padded={false}>
       <View style={styles.top}>
         <Header
-          title="Chats"
+          title="Messages"
           align="left"
           action={
             <View style={styles.actions}>
@@ -108,13 +110,14 @@ export function ChatsScreen(): React.JSX.Element {
                 label="New message"
                 onPress={() => router.push('/chat/new')}
               />
+              <SettingsButton />
             </View>
           }
         />
         <SearchField
           accessibilityLabel={LOCAL_SEARCH_LABEL}
           accessibilityHint="Searches loaded names and messages only"
-          placeholder="Search loaded chats and messages"
+          placeholder="Search messages"
           value={search}
           onChangeText={setSearch}
         />
@@ -135,7 +138,10 @@ export function ChatsScreen(): React.JSX.Element {
           keyExtractor={(item) => item.id}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          contentContainerStyle={conversations.length ? styles.list : styles.emptyList}
+          contentContainerStyle={[
+            conversations.length ? styles.list : styles.emptyList,
+            { paddingBottom: contentInsets.bottom },
+          ]}
           ItemSeparatorComponent={() => (
             <View style={[styles.separator, { backgroundColor: theme.colors.divider }]} />
           )}
@@ -185,7 +191,7 @@ export function ChatsScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  top: { paddingHorizontal: spacing.screen, paddingBottom: spacing.sm + 2, gap: spacing.xs },
+  top: { paddingHorizontal: spacing.screen, paddingBottom: spacing.sm, gap: spacing.xs },
   actions: { flexDirection: 'row', alignItems: 'center', marginRight: -spacing.sm },
   list: { paddingBottom: spacing.xxl },
   emptyList: { flexGrow: 1 },
@@ -195,7 +201,7 @@ const styles = StyleSheet.create({
   },
   skeleton: { paddingHorizontal: spacing.screen, paddingTop: spacing.md, gap: spacing.xl },
   skeletonRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  skeletonAvatar: { width: CHAT_AVATAR, height: CHAT_AVATAR, borderRadius: 999 },
+  skeletonAvatar: { width: CHAT_AVATAR, height: CHAT_AVATAR, borderRadius: radius.full },
   skeletonCopy: { flex: 1, gap: spacing.sm },
   skeletonName: { width: '35%' },
   skeletonLine: { width: '75%' },

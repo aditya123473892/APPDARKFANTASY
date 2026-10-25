@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Text } from './Text';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -25,6 +26,7 @@ export function Chip({
       style={({ pressed }) => [
         styles.base,
         size === 'sm' && styles.sm,
+        onPress && { minHeight: spacing.touch },
         {
           backgroundColor: selected ? theme.colors.primarySoft : theme.colors.surfaceElevated,
           borderColor: selected ? theme.colors.primary : theme.colors.border,
@@ -47,9 +49,9 @@ const styles = StyleSheet.create({
     minHeight: 36,
     borderRadius: radius.pill,
     borderWidth: 1,
-    paddingHorizontal: spacing.md + 2,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sm: { minHeight: 26, paddingHorizontal: spacing.sm + 2 },
+  sm: { minHeight: 26, paddingHorizontal: spacing.sm },
 });

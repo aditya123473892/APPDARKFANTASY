@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { Pressable } from '@/components/ui/Pressable';
 import { Avatar, Chip, FitImage, Text } from '@/components/ui';
 import type { ProfileView } from '@/features/profile/types';
 import { useFollowUser } from '@/features/requests/hooks/useRequests';
@@ -113,7 +114,7 @@ export const ProfilePost = memo(function ProfilePost({
         <Avatar
           uri={profile.avatarUri}
           label={profile.name}
-          size={42}
+          size={40}
           online={showPresence && Boolean(profile.presence?.online)}
         />
       </Pressable>
@@ -163,11 +164,7 @@ export const ProfilePost = memo(function ProfilePost({
             onPress={open}
             style={[styles.photo, { backgroundColor: theme.colors.surfaceMuted }]}
           >
-            <FitImage
-              uri={mediaUrl(photo)}
-              recyclingKey={`${profile.id}-${photo}`}
-              style={StyleSheet.absoluteFill}
-            />
+            <FitImage uri={mediaUrl(photo)} recyclingKey={`${profile.id}-${photo}`} />
           </Pressable>
         ) : null}
 
@@ -232,39 +229,43 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  body: { flex: 1, minWidth: 0, gap: spacing.sm + 2 },
-  header: { gap: 2 },
-  nameRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs + 2 },
+  body: { flex: 1, minWidth: 0, gap: spacing.sm },
+  header: { gap: spacing.xs },
+  nameRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
   name: { flexShrink: 1 },
   tag: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    paddingHorizontal: spacing.sm + 2,
+    paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radius.full,
   },
   bio: { marginTop: -spacing.xxs },
-  photo: { width: '100%', aspectRatio: 4 / 5, borderRadius: radius.md, overflow: 'hidden' },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs + 2 },
+  photo: {
+    width: '100%',
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs },
   common: { marginLeft: spacing.xs },
   actions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   pill: {
-    minHeight: 38,
+    minHeight: spacing.touch,
     flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs + 2,
+    gap: spacing.xs,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.full,
     borderWidth: 1,
   },
   chevron: {
     marginLeft: 'auto',
-    width: 40,
-    height: 40,
+    width: spacing.touch,
+    height: spacing.touch,
     borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',

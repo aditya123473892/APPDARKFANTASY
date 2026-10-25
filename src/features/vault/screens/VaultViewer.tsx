@@ -1,3 +1,4 @@
+import { radius, spacing } from '@/theme';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Alert, Image, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -266,13 +267,19 @@ export function VaultViewer(): React.JSX.Element {
 }
 const styles = StyleSheet.create({
   grow: { flex: 1 },
-  content: { flex: 1, gap: 12, paddingBottom: 12 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 18, padding: 24 },
-  image: { flex: 1, minHeight: 180, borderRadius: 16, overflow: 'hidden' },
+  content: { flex: 1, gap: spacing.md, paddingBottom: spacing.md },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.lg,
+    padding: spacing.xl,
+  },
+  image: { flex: 1, minHeight: 180, borderRadius: radius.lg, overflow: 'hidden' },
   actions: {
     flexDirection: 'row',
-    gap: 12,
-    paddingTop: 12,
+    gap: spacing.md,
+    paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
 });

@@ -31,3 +31,4 @@ export const darkTheme: AppTheme = {
 };
 
 export { accentGradient, darkColors, lightColors, palette, radius, shadows, spacing, typography };
+export { media } from './media';

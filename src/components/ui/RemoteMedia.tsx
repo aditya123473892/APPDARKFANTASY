@@ -4,6 +4,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { View } from 'react-native';
 import { Text } from './Text';
 import { useTheme } from '@/theme/useTheme';
+import { imageAspectRatio } from '@/utils/imageLayout';
 function Video({ uri, width, height }: { uri: string; width: number; height: number }) {
   const player = useVideoPlayer({ uri, useCaching: false });
   return (
@@ -30,6 +31,7 @@ export function RemoteMedia({
   onSize?: (width: number, height: number) => void;
 }) {
   const [failedUri, setFailedUri] = useState<string | null>(null);
+  const [natural, setNatural] = useState<{ uri: string; ratio: number }>();
   const { theme } = useTheme();
   if (failedUri === uri || !uri)
     return (
@@ -50,17 +52,23 @@ export function RemoteMedia({
     <Image
       source={{ uri }}
       onError={() => setFailedUri(uri)}
-      onLoad={
-        onSize
-          ? ({ source }) => {
-              if (source.width > 0 && source.height > 0) onSize(source.width, source.height);
-            }
-          : undefined
-      }
+      onLoad={({ source }) => {
+        const ratio = imageAspectRatio(source.width, source.height);
+        if (ratio) {
+          setNatural((current) =>
+            current?.uri === uri && current.ratio === ratio ? current : { uri, ratio },
+          );
+          onSize?.(source.width, source.height);
+        }
+      }}
       recyclingKey={uri}
       contentFit="contain"
       cachePolicy={privateMedia ? 'none' : 'memory'}
-      style={{ width, height, backgroundColor: theme.colors.surfaceElevated }}
+      style={{
+        width,
+        height: natural?.uri === uri ? width / natural.ratio : height,
+        backgroundColor: theme.colors.surfaceElevated,
+      }}
     />
   );
 }

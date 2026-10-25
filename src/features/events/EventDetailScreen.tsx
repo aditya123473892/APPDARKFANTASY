@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { Image } from 'expo-image';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Header, Screen } from '@/components/layout';
@@ -17,6 +16,7 @@ import { eventsService } from './service';
 import { applicationsClosed, referenceId } from './types';
 import { isSessionCurrent } from '@/features/auth/sessionRuntime';
 import { eventTime } from './EventsScreen';
+import { EventCover } from './EventCover';
 
 export function EventDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -111,13 +111,12 @@ export function EventDetailScreen() {
           }
         >
           {query.isError && <Text color="danger">Could not refresh. Pull down to try again.</Text>}
-          {mediaUrl(event.cover?.url) ? (
-            <Image
-              source={{ uri: mediaUrl(event.cover?.url) }}
-              style={styles.cover}
-              contentFit="cover"
-            />
-          ) : null}
+          <EventCover
+            uri={mediaUrl(event.cover?.url)}
+            hasCover={Boolean(event.cover)}
+            label={`${event.name} cover`}
+            onRetry={query.refetch}
+          />
           <Text variant="caption" color="primary">
             {event.type === 'online' ? 'Online' : 'In person'} · {event.status}
           </Text>
@@ -278,6 +277,5 @@ export function EventDetailScreen() {
 const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.screen },
   content: { padding: spacing.screen, gap: spacing.md, paddingBottom: spacing.xxxl },
-  cover: { width: '100%', height: 220, borderRadius: radius.lg },
   member: { padding: spacing.md, borderWidth: 1, borderRadius: radius.md, gap: spacing.sm },
 });
