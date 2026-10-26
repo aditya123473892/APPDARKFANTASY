@@ -1,30 +1,30 @@
-import { spacing } from '@/theme';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Header, Screen } from '@/components/layout';
-import { Text, Wordmark } from '@/components/ui';
+import { AuthPrompt, AuthScaffold } from '../components/AuthScaffold';
 import { PhoneOtpFlow } from '../components/PhoneOtpFlow';
 import { RegisterForm } from '../components/RegisterForm';
 import { phoneAuth } from '../services/phoneAuth';
 
 /** Signup verifies the phone first, then collects the profile and creates the account. */
 export function RegisterScreen(): React.JSX.Element {
+  const router = useRouter();
   const [signupToken, setSignupToken] = useState<string | null>(null);
   return (
-    <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
-      <Header title="Create account" back />
-      <Wordmark large />
-      <View style={styles.copy}>
-        <Text variant="title" center>
-          Meet your next favorite person.
-        </Text>
-        <Text color="muted" center>
-          {signupToken
-            ? "Number verified. A few details and you're in."
-            : "First, verify your phone number. You'll use it to sign in."}
-        </Text>
-      </View>
+    <AuthScaffold
+      title={signupToken ? 'A little about you' : 'Create your account'}
+      subtitle={
+        signupToken
+          ? "Number verified. A few details and you're in."
+          : "Start with your mobile number. You'll use it to sign in."
+      }
+      footer={
+        <AuthPrompt
+          question="Already have an account?"
+          action="Sign in"
+          onPress={() => router.replace('/login')}
+        />
+      }
+    >
       {signupToken ? (
         <RegisterForm signupToken={signupToken} onSignupExpired={() => setSignupToken(null)} />
       ) : (
@@ -33,21 +33,11 @@ export function RegisterScreen(): React.JSX.Element {
           verifyCode={async (phone, code) =>
             setSignupToken(await phoneAuth.verifySignupCode(phone, code))
           }
+          sendLabel="Continue"
           verifyLabel="Verify number"
+          autoFocus={false}
         />
       )}
-      <View style={styles.footer}>
-        <Text color="muted">Already have an account? </Text>
-        <Link href="/login" asChild>
-          <Text color="primary" weight="bold">
-            Sign in
-          </Text>
-        </Link>
-      </View>
-    </Screen>
+    </AuthScaffold>
   );
 }
-const styles = StyleSheet.create({
-  copy: { gap: spacing.xs, marginTop: spacing.lg, marginBottom: spacing.xl },
-  footer: { flexDirection: 'row', justifyContent: 'center', marginVertical: spacing.xl },
-});

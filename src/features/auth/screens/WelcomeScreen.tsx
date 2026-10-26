@@ -1,65 +1,76 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { Screen } from '@/components/layout';
-import { Button, Text, Wordmark } from '@/components/ui';
+import { Button, IconButton, Text } from '@/components/ui';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
-import { APP_NAME } from '@/utils/constants';
 import { getPrimaryLoginStrategy } from '../strategies/loginStrategies';
 
+/** Brand moment up top, then the two choices that matter: create an account or sign in. */
 export function WelcomeScreen(): React.JSX.Element {
   const router = useRouter();
   const { theme } = useTheme();
   const strategy = getPrimaryLoginStrategy();
   return (
     <Screen scroll style={styles.root}>
-      <Wordmark large />
+      <View style={styles.top}>
+        {/* The offline Photo Vault stays reachable while signed out. */}
+        <IconButton
+          icon="lock-closed-outline"
+          label="Open offline Photo Vault"
+          size={20}
+          onPress={() => router.push('/vault' as Href)}
+        />
+      </View>
       <View style={styles.hero}>
-        <View style={[styles.icon, { backgroundColor: theme.colors.primarySoft }]}>
-          <Ionicons name="heart-outline" size={30} color={theme.colors.primary} />
-        </View>
-        <Text variant="title" center>
-          Closer starts with a conversation.
+        <Text
+          serif
+          center
+          accessibilityRole="header"
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          style={styles.brand}
+        >
+          Darkfantasy
         </Text>
-        <Text color="muted" center>
-          Thoughtful profiles, genuine conversations, and space to be yourself.
+        <View style={[styles.rule, { backgroundColor: theme.colors.primary }]} />
+        <Text color="secondary" center style={styles.tagline}>
+          Real conversations with people worth meeting.
         </Text>
       </View>
       <View style={styles.actions}>
         <Button
-          label={strategy.id === 'invite_code' ? 'Enter invite code' : 'Sign in'}
-          onPress={() => router.push(strategy.route)}
+          label="Create account"
+          onPress={() => router.push('/register')}
+          style={styles.pill}
         />
         <Button
-          label="Create an account"
+          label={strategy.id === 'invite_code' ? 'Enter invite code' : 'Sign in'}
           variant="secondary"
-          onPress={() => router.push('/register')}
+          onPress={() => router.push(strategy.route)}
+          style={styles.pill}
         />
-        <Text variant="caption" color="muted" center>
-          By continuing, you agree to {APP_NAME}'s Terms and Privacy Policy.
+        <Text variant="caption" color="muted" center style={styles.legal}>
+          By continuing, you agree to our Terms and Privacy Policy.
         </Text>
       </View>
     </Screen>
   );
 }
 const styles = StyleSheet.create({
-  root: { paddingVertical: spacing.xxl, justifyContent: 'space-between', gap: spacing.xxl },
+  root: { paddingBottom: spacing.xl },
+  top: { alignItems: 'flex-end', paddingTop: spacing.sm },
   hero: {
     flex: 1,
-    maxWidth: 360,
-    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md,
+    gap: spacing.lg,
+    paddingVertical: spacing.huge,
   },
-  icon: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.sm,
-  },
+  brand: { fontSize: 44, lineHeight: 54, letterSpacing: -0.5 },
+  rule: { width: 32, height: 2, borderRadius: radius.full },
+  tagline: { maxWidth: 280, fontSize: 17, lineHeight: 24 },
   actions: { gap: spacing.md },
+  pill: { borderRadius: radius.full },
+  legal: { marginTop: spacing.sm, paddingHorizontal: spacing.xl },
 });

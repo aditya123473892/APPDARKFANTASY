@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { RegisterScreen } from '@/features/auth/screens/RegisterScreen';
 export default function RegisterRoute(): React.JSX.Element {
-  return <Redirect href="/login" />;
+  return <RegisterScreen />;
 }

@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { ForgotPasswordScreen } from '@/features/auth/screens/ForgotPasswordScreen';
 export default function ForgotPasswordRoute(): React.JSX.Element {
-  return <Redirect href="/login" />;
+  return <ForgotPasswordScreen />;
 }
