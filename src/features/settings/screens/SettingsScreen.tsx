@@ -200,6 +200,14 @@ export function SettingsScreen(): React.JSX.Element {
                 title="Media review"
                 subtitle="All uploaded photos and videos: flag or make subscriber-only"
                 onPress={() => router.push('/admin/media' as Href)}
+              />
+            )}
+            {canAdmin && (
+              <SettingsRow
+                icon="sparkles-outline"
+                title="God chat sessions"
+                subtitle="Watch members' chats with God and take over to answer"
+                onPress={() => router.push('/admin/god-chat' as Href)}
                 last={!canModerate}
               />
             )}

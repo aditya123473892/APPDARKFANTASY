@@ -1,38 +1,55 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, StyleSheet, View } from 'react-native';
 import { Header, KeyboardAvoidingScreen, Screen, SettingsButton } from '@/components/layout';
 import { useContentInsets } from '@/components/layout/useContentInsets';
-import { Button, EmptyState, Text } from '@/components/ui';
+import { Button, EmptyState, IconButton, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { ChatInput } from '@/features/chat/components/ChatInput';
 import { TypingDots } from '@/features/chat/components/TypingDots';
+import { useChatVisibility } from '@/features/chat/hooks/useChat';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { describeError } from '@/services/errors';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { createClientId } from '@/utils/clientId';
+import { GodChatBubble } from '../components/GodChatBubble';
 import {
-  askGod,
   godChatAvailable,
   GOD_CHAT_MAX_CHARS,
+  loadGodSession,
+  sendToGod,
+  startNewGodChat,
   type GodChatMessage,
 } from '../godChatService';
+
+const SESSION_KEY = ['god-chat-session'] as const;
+/** Faster while a team member is answering, so their replies feel live. */
+const STAFF_POLL_MS = 3_000;
+const AI_POLL_MS = 8_000;
 
 const GREETING: GodChatMessage = {
   id: 'greeting',
   role: 'assistant',
+  by: 'ai',
+  at: '',
   content:
     'Welcome, wanderer. I know the ways of DARKFANTASY: posts, chats, events, the Vault and more. What do you seek?',
 };
 
-/** Stateless AI guide: the conversation lives only while this screen is open. */
+const authorLabel = (message: GodChatMessage) =>
+  message.by === 'staff' ? 'DARKFANTASY team' : 'God';
+
+/** The conversation is stored on the server, where an admin may take it over and answer in person. */
 export function GodChatScreen(): React.JSX.Element {
   const { theme } = useTheme();
+  const queryClient = useQueryClient();
   const contentInsets = useContentInsets();
   const keyboardVisible = useKeyboard();
+  const visible = useChatVisibility();
   const listRef = useRef<FlatList<GodChatMessage>>(null);
-  const [messages, setMessages] = useState<GodChatMessage[]>([]);
+  // The message being sent; kept after a failure so "Try again" reuses its id.
+  const [pending, setPending] = useState<{ id: string; content: string } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const status = useQuery({
     queryKey: ['god-chat-status'],
@@ -40,19 +57,39 @@ export function GodChatScreen(): React.JSX.Element {
     staleTime: 60_000,
     retry: 1,
   });
-  // Only a confirmed "not configured" disables the chat; a failed check still lets the user try.
-  const unavailable = status.data === false;
+  const session = useQuery({
+    queryKey: SESSION_KEY,
+    queryFn: loadGodSession,
+    refetchInterval: (query) =>
+      visible ? (query.state.data?.mode === 'staff' ? STAFF_POLL_MS : AI_POLL_MS) : false,
+  });
+  const withTeam = session.data?.mode === 'staff';
+  // Only a confirmed "not configured" disables the chat; a team member can still answer then.
+  const unavailable = status.data === false && !withTeam;
 
   const ask = useMutation({
-    mutationFn: askGod,
-    onSuccess: (reply) => {
+    mutationFn: (message: { id: string; content: string }) =>
+      sendToGod(message.id, message.content),
+    onSuccess: (next) => {
       setFailure(null);
-      setMessages((current) => [
-        ...current,
-        { id: createClientId(), role: 'assistant', content: reply },
-      ]);
+      setPending(null);
+      queryClient.setQueryData(SESSION_KEY, next);
     },
-    onError: (error) => setFailure(describeError(error)),
+    onError: (error) => {
+      setFailure(describeError(error));
+      // The message itself may have been stored even though the reply failed.
+      void session.refetch();
+    },
+  });
+
+  const fresh = useMutation({
+    mutationFn: startNewGodChat,
+    onSuccess: () => {
+      setPending(null);
+      setFailure(null);
+      queryClient.setQueryData(SESSION_KEY, null);
+    },
+    onError: () => toast.error('Couldn’t start a new chat. Please try again.'),
   });
 
   const send = (text: string) => {
@@ -60,17 +97,43 @@ export function GodChatScreen(): React.JSX.Element {
       toast.error(`Keep your question under ${GOD_CHAT_MAX_CHARS} characters.`);
       return;
     }
-    const next = [...messages, { id: createClientId(), role: 'user' as const, content: text }];
-    setMessages(next);
+    const message = { id: createClientId(), content: text };
+    setPending(message);
     setFailure(null);
-    ask.mutate(next);
+    ask.mutate(message);
   };
 
-  const data = [GREETING, ...messages];
+  const confirmNewChat = () =>
+    Alert.alert('Start a new chat?', 'Your current conversation will be closed.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'New chat', onPress: () => fresh.mutate() },
+    ]);
+
+  const stored = session.data?.messages ?? [];
+  const data: GodChatMessage[] = [GREETING, ...stored];
+  if (pending && !stored.some((message) => message.id === pending.id))
+    data.push({ ...pending, role: 'user', by: 'user', at: '' });
+
   return (
     <Screen padded={false}>
       <View style={styles.header}>
-        <Header title="Chat with God" subtitle="AI guide to the app" action={<SettingsButton />} />
+        <Header
+          title="Chat with God"
+          subtitle={withTeam ? 'A team member is with you' : 'AI guide to the app'}
+          action={
+            <View style={styles.actions}>
+              {stored.length > 0 && (
+                <IconButton
+                  icon="create-outline"
+                  label="Start a new chat"
+                  disabled={fresh.isPending || ask.isPending}
+                  onPress={confirmNewChat}
+                />
+              )}
+              <SettingsButton />
+            </View>
+          }
+        />
       </View>
       <KeyboardAvoidingScreen>
         {unavailable ? (
@@ -88,37 +151,24 @@ export function GodChatScreen(): React.JSX.Element {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-            renderItem={({ item }) => {
-              const mine = item.role === 'user';
-              return (
-                <View
-                  style={[
-                    styles.bubble,
-                    mine
-                      ? [styles.mine, { backgroundColor: theme.colors.primary }]
-                      : [styles.theirs, { backgroundColor: theme.colors.bubbleIn }],
-                  ]}
-                >
-                  {!mine ? (
-                    <Text variant="label" color="primary" style={styles.sender}>
-                      God
-                    </Text>
-                  ) : null}
-                  <Text
-                    selectable
-                    style={{ color: mine ? theme.colors.onPrimary : theme.colors.text }}
-                  >
-                    {item.content}
-                  </Text>
-                </View>
-              );
-            }}
+            ListHeaderComponent={
+              <Text variant="caption" color="muted" center style={styles.notice}>
+                Chats are saved. The DARKFANTASY team can read them and may join to help you.
+              </Text>
+            }
+            renderItem={({ item }) => (
+              <GodChatBubble
+                message={item}
+                mine={item.role === 'user'}
+                label={item.role === 'assistant' ? authorLabel(item) : undefined}
+              />
+            )}
             ListFooterComponent={
-              ask.isPending ? (
+              ask.isPending && !withTeam ? (
                 <View style={styles.typing}>
                   <TypingDots />
                 </View>
-              ) : failure ? (
+              ) : failure && pending ? (
                 <View style={styles.failure}>
                   <Text color="danger" center>
                     {failure}
@@ -126,8 +176,19 @@ export function GodChatScreen(): React.JSX.Element {
                   <Button
                     label="Try again"
                     variant="secondary"
-                    onPress={() => ask.mutate(messages)}
+                    onPress={() => ask.mutate(pending)}
                   />
+                </View>
+              ) : withTeam ? (
+                <View
+                  style={[
+                    styles.teamBanner,
+                    { borderColor: theme.colors.gold, backgroundColor: theme.colors.overlay },
+                  ]}
+                >
+                  <Text variant="caption" style={{ color: theme.colors.gold }} center>
+                    You’re chatting with a person from the DARKFANTASY team, not the AI.
+                  </Text>
                 </View>
               ) : undefined
             }
@@ -137,9 +198,9 @@ export function GodChatScreen(): React.JSX.Element {
           minimal
           onSend={send}
           canSendMessages
-          disabled={unavailable || ask.isPending}
+          disabled={unavailable || ask.isPending || fresh.isPending}
           bottomInset={keyboardVisible || contentInsets.inTabs ? 0 : contentInsets.bottom}
-          placeholder="Ask God anything about the app…"
+          placeholder={withTeam ? 'Message the team…' : 'Ask God anything about the app…'}
         />
       </KeyboardAvoidingScreen>
     </Screen>
@@ -147,18 +208,16 @@ export function GodChatScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   header: { paddingHorizontal: spacing.screen },
+  actions: { flexDirection: 'row', alignItems: 'center' },
   list: { padding: spacing.screen, gap: spacing.md },
-  bubble: {
-    maxWidth: '85%',
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  mine: { alignSelf: 'flex-end', borderBottomRightRadius: radius.sm },
-  theirs: { alignSelf: 'flex-start', borderBottomLeftRadius: radius.sm },
-  sender: { marginBottom: spacing.none },
+  notice: { paddingHorizontal: spacing.lg },
   typing: { alignSelf: 'flex-start', marginTop: spacing.sm },
   failure: { gap: spacing.sm, marginTop: spacing.md },
+  teamBanner: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
+  },
 });
