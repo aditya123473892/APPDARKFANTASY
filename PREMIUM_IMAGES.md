@@ -1,6 +1,6 @@
 # Premium images: implementation and rollout
 
-Active backend: `backenddf/df-backend-pm-be`. Mobile: repository root. The nested
+Active backend: `dfbackend`. Mobile: repository root. The nested
 `darkfantasy-share/` duplicate is not part of this change.
 
 Existing work was snapshotted on `snapshot/pre-premium-20261020` at `27e9471`.
@@ -9,7 +9,7 @@ only this feature. Do not deploy any real `.env` file from a workstation.
 
 ## File manifest
 
-In this manifest, `B/` means `backenddf/df-backend-pm-be/`.
+In this manifest, `B/` means `dfbackend/`.
 
 Created:
 
@@ -128,7 +128,7 @@ guard and serializer; it is not a social post response.
 
 ## Environment variables
 
-Both are documented in `backenddf/df-backend-pm-be/.env.example`:
+Both are documented in `dfbackend/.env.example`:
 
 | Variable | Setting |
 | --- | --- |
@@ -301,7 +301,7 @@ Mobile sharing previously sent caption text only; locked posts now disable it.
 
 ## Verification
 
-Backend, from `backenddf/df-backend-pm-be`:
+Backend, from `dfbackend`:
 
 ```powershell
 npx tsc --noEmit --incremental false

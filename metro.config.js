@@ -39,7 +39,6 @@ const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const existing = config.resolver.blockList;
 // These are separate server/desktop projects, not mobile dependencies.
 const folders = [
-  'backenddf',
   'dfbackend',
   'Df-Fortend-pm-fe',
   'darkfantasy-runtime',

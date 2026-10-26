@@ -8,8 +8,9 @@ backend does not enforce these contracts. Set
 message TTL and atomic recipient consumption. Ordinary messages retain the existing
 wire format, local drafts, message actions, and explicit resend/resync behavior.
 
-The incoming `dfbackend` Git link has no `.gitmodules` repository URL. It does not
-update the canonical backend at `backenddf/df-backend-pm-be`.
+The backend is the separate repository https://github.com/aditya123473892/dfbackend,
+checked out at `dfbackend/` (its own Git repo, not part of this one). Run only that backend;
+the old in-app copy (`backenddf/`) was removed from this repository.
 
 An Expo Router mobile app connected to the Dark Fantasy backend. Active authentication, profiles, feeds, follow requests, direct chats, and groups use backend data only. See [REAL_DATA_INTEGRATION.md](REAL_DATA_INTEGRATION.md) for current endpoints, validation, and limitations. The older scaffold notes below describe unused fixture services and are superseded by that integration report.
 
@@ -42,7 +43,7 @@ opens separate Command Prompt terminals for the canonical backend and mobile app
 These launchers use backend port **9001** and Metro port **8081**. Configure
 `.env.mobile` with the proxy settings below and `EXPO_DEV_API_PORT=9001` to match.
 MongoDB must already be running as a replica set and configured in
-`backenddf/df-backend-pm-be/.env`. The launchers require Node.js 22.13+ and `rtk`
+`dfbackend/.env`. The launchers require Node.js 22.13+ and `rtk`
 on PATH.
 
 Set `EXPO_PUBLIC_API_URL` in `.env.mobile` to `http://<PC-Wi-Fi-IP>:9000/api`.
@@ -82,7 +83,7 @@ password login from the app). Signup verifies the phone first, then calls `/auth
 with the profile fields. Accounts created with email and password use **Set up phone
 sign-in** on the sign-in screen once. Change the number under **Settings → Account → Phone
 number**. Backend setup, migration and trial-account testing are covered in
-[backenddf/df-backend-pm-be/README.md](backenddf/df-backend-pm-be/README.md#phone-otp-sign-in-twilio-verify).
+[dfbackend/README.md](dfbackend/README.md#phone-otp-sign-in-twilio-verify).
 
 Mock login accepts the prefilled credentials. To test a generic auth failure, use `error@example.com` or password `wrongpass`. The mock invitation code is `NIGHT42`.
 

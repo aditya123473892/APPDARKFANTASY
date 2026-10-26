@@ -1,7 +1,7 @@
 // Read-only audit. Never prints credentials, object keys, signed URLs or image content.
 const path = require('node:path');
 const { createRequire } = require('node:module');
-const backend = path.resolve(__dirname, '../backenddf/df-backend-pm-be');
+const backend = path.resolve(__dirname, '../dfbackend');
 const backendRequire = createRequire(path.join(backend, 'package.json'));
 backendRequire('dotenv').config({ path: path.join(backend, '.env'), quiet: true });
 backendRequire('dotenv').config({

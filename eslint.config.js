@@ -8,7 +8,7 @@ module.exports = defineConfig([
       'dist/**',
       '.expo/**',
       'darkfantasy-runtime/**',
-      'backenddf/**',
+      'dfbackend/**',
       'Df-Fortend-pm-fe/**',
       'darkfantasy-share/**',
     ],
