@@ -29,7 +29,8 @@
     "premium:backfill": "ts-node -r tsconfig-paths/register scripts/backfill-premium.ts",
     "premium:test-user": "ts-node -r tsconfig-paths/register scripts/set-test-premium.ts",
     "s3:test": "node scripts/s3-smoke-test.js --sample",
-    "otp:indexes": "ts-node -r tsconfig-paths/register scripts/phone-otp-indexes.ts"
+    "otp:indexes": "ts-node -r tsconfig-paths/register scripts/phone-otp-indexes.ts",
+    "groups:indexes": "ts-node -r tsconfig-paths/register scripts/group-indexes.ts"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.1152.0",

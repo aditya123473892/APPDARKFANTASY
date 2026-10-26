@@ -13,6 +13,8 @@ export type PostImageResponse = {
   blurhash: string | null;
   width: number | null;
   height: number | null;
+  /** width / height, null until the server has the size (older posts before backfill). */
+  aspectRatio?: number | null;
 };
 export type PostMedia = {
   id?: string;

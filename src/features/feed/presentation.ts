@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Post, PostMedia } from './types';
 import { registerSessionTeardown } from '@/features/auth/sessionRuntime';
+import { FEED_MIN_RATIO, feedFrame, type ImageFit } from '@/utils/imageLayout';
 
 /** Presentation state only; the backend post shape remains unchanged. */
 export const usePostPresentation = create<{
@@ -26,15 +27,17 @@ export type MediaPreview = {
 export const mediaPreviews = new Map<string, MediaPreview>();
 export const singleMedia = (post: Post): PostMedia | undefined => post.media?.[0];
 export const isVideo = (media?: PostMedia) => Boolean(media?.mimetype?.startsWith('video/'));
-export const postRatio = (media?: PostMedia) => {
-  const explicit = mediaPreviews.get(media?.uri ?? '')?.ratio;
-  if (explicit) return explicit;
-  const ratio = media?.width && media.height ? media.width / media.height : 0.8;
-  return [1, 0.8, 16 / 9].reduce(
-    (best, value) => (Math.abs(value - ratio) < Math.abs(best - ratio) ? value : best),
-    0.8,
-  );
-};
+/**
+ * Feed frame from the stored size, clamped to 4:5…1.91:1 (never snapped to a
+ * few presets, which cropped most photos). Videos of unknown size keep the
+ * portrait 4:5 frame they always had.
+ */
+export const mediaFrame = (media?: PostMedia): { ratio: number; fit: ImageFit } =>
+  isVideo(media) && !(media?.width && media.height)
+    ? { ratio: FEED_MIN_RATIO, fit: 'cover' }
+    : feedFrame(media?.width, media?.height);
+export const postRatio = (media?: PostMedia) =>
+  mediaPreviews.get(media?.uri ?? '')?.ratio ?? mediaFrame(media).ratio;
 export const durationLabel = (seconds = 0) =>
   `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60)
     .toString()

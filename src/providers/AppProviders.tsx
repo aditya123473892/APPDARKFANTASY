@@ -12,16 +12,20 @@ import { beforeLogout } from '@/features/vault/logout';
 import { lock } from '@/features/vault/lock';
 import { localOwner, rememberOwner } from '@/features/vault/vaultService';
 import { VaultPinPrompt } from '@/features/vault/components/VaultPinPrompt';
-registerLocalVaultLifecycle({
-  logout: beforeLogout,
-  pause: lock,
-  signIn: async (owner) => {
-    const previous = await localOwner();
-    if (previous && previous !== owner) await beforeLogout();
-    lock();
-    await rememberOwner(owner);
-  },
-});
+// The local Photo Vault is device-only: it needs SecureStore and on-device
+// files, neither of which exists on web, where registering it made every
+// sign-in fail after the server had accepted the code.
+if (Platform.OS !== 'web')
+  registerLocalVaultLifecycle({
+    logout: beforeLogout,
+    pause: lock,
+    signIn: async (owner) => {
+      const previous = await localOwner();
+      if (previous && previous !== owner) await beforeLogout();
+      lock();
+      await rememberOwner(owner);
+    },
+  });
 
 /** Lets TanStack Query pause polling in the background and refetch stale data on resume. */
 function useAppFocusManager(): void {

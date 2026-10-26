@@ -97,18 +97,46 @@ test('event cover retries with a fresh URL and distinguishes missing covers from
   assert.equal(nodes(tree).some(node => node.type === 'Button'), false);
 });
 
-test('post media keeps its crop stable after decode and renders exactly one cover image', () => {
+test('post media reserves its frame from the stored size and crops only beyond 4:5…1.91:1', () => {
   const r = renderer('src/components/ui/PostMedia.tsx');
-  const props = { media: { uri: 'photo', width: 0, height: 0 } };
+  const frame = (media) => {
+    const tree = r.render(r.exports.PostMedia, { media: { uri: `${media.width}x${media.height}`, ...media } });
+    const [image] = nodes(tree).filter((node) => node.type === 'Image');
+    return [tree.props.style.aspectRatio, image.props.contentFit];
+  };
+  assert.deepEqual(frame({ width: 1080, height: 1350 }), [0.8, 'contain']); // 4:5 shows whole
+  assert.deepEqual(frame({ width: 1080, height: 1080 }), [1, 'contain']);
+  assert.deepEqual(frame({ width: 1920, height: 1080 }), [1920 / 1080, 'contain']); // 16:9 shows whole
+  assert.deepEqual(frame({ width: 1080, height: 1920 }), [0.8, 'cover']); // 9:16 clamped to 4:5
+  assert.deepEqual(frame({ width: 3000, height: 600 }), [1.91, 'cover']); // panorama clamped
+});
+
+test('post media of unknown size starts square and uncropped, then adopts its decoded shape', () => {
+  const r = renderer('src/components/ui/PostMedia.tsx');
+  const props = { media: { uri: 'legacy', width: 0, height: 0 } };
   let tree = r.render(r.exports.PostMedia, props);
-  assert.equal(tree.props.style.aspectRatio, 0.8);
+  assert.equal(tree.props.style.aspectRatio, 1);
   let images = nodes(tree).filter((node) => node.type === 'Image');
   assert.equal(images.length, 1);
-  assert.equal(images[0].props.contentFit, 'cover');
+  assert.equal(images[0].props.contentFit, 'contain');
   images[0].props.onLoad({ source: { width: 3000, height: 600 } });
   tree = r.render(r.exports.PostMedia, props);
-  assert.equal(tree.props.style.aspectRatio, 0.8);
-  assert.equal(nodes(tree).filter((node) => node.type === 'ScrollView').length, 0);
+  assert.equal(tree.props.style.aspectRatio, 1.91);
+  assert.equal(nodes(tree).filter((node) => node.type === 'Image')[0].props.contentFit, 'cover');
+  // A frame forced by the carousel is kept; the photo then fits inside it.
+  tree = r.render(r.exports.PostMedia, { media: { uri: 'p', width: 1080, height: 1920 }, ratio: 1 });
+  assert.equal(tree.props.style.aspectRatio, 1);
+  assert.equal(nodes(tree).filter((node) => node.type === 'Image')[0].props.contentFit, 'contain');
+});
+
+test('frame math: clamping and centered crops', () => {
+  const layout = renderer('src/utils/imageLayout.ts').exports;
+  assert.deepEqual({ ...layout.feedFrame(undefined, undefined) }, { ratio: 1, fit: 'contain' });
+  assert.deepEqual({ ...layout.feedFrame(800, 1000) }, { ratio: 0.8, fit: 'contain' });
+  assert.deepEqual({ ...layout.feedFrame(1000, 2000) }, { ratio: 0.8, fit: 'cover' });
+  assert.deepEqual({ ...layout.centerCrop(4000, 3000, 1) }, { originX: 500, originY: 0, width: 3000, height: 3000 });
+  assert.deepEqual({ ...layout.centerCrop(3000, 4000, 16 / 9) }, { originX: 0, originY: 1156, width: 3000, height: 1688 });
+  assert.deepEqual({ ...layout.centerCrop(1080, 1920, 0.8) }, { originX: 0, originY: 285, width: 1080, height: 1350 });
 });
 
 test('inactive and locked videos have no mounted player; only an active video mounts one', () => {

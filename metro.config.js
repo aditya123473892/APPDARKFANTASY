@@ -40,16 +40,24 @@ const existing = config.resolver.blockList;
 // These are separate server/desktop projects, not mobile dependencies.
 const folders = [
   'backenddf',
+  'dfbackend',
   'Df-Fortend-pm-fe',
   'darkfantasy-runtime',
   'darkfantasy-share',
   'mongo-init',
   '.npm-cache',
+  // Tool/agent state that shares this directory; it changes constantly and
+  // kept Metro's watcher busy enough to time out web font loading.
+  '.sandbox',
+  '.tmp',
+  'tmp',
+  'skills',
 ];
 config.resolver.blockList = [
   ...(Array.isArray(existing) ? existing : existing ? [existing] : []),
   ...folders.map(
     (folder) => new RegExp(`^${escape(path.resolve(__dirname, folder))}(?:[/\\\\].*)?$`),
   ),
+  /\.sqlite(?:-wal|-shm)?$/,
 ];
 module.exports = config;

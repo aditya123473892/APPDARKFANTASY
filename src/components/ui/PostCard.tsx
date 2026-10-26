@@ -7,7 +7,13 @@ import { Alert, Share, View } from 'react-native';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useBlock } from '@/features/safety/useBlock';
 import type { Post } from '@/features/feed/types';
-import { mediaPreviews, singleMedia, usePostPresentation } from '@/features/feed/presentation';
+import {
+  isVideo,
+  mediaPreviews,
+  singleMedia,
+  usePostPresentation,
+} from '@/features/feed/presentation';
+import { ImageViewer } from './ImageViewer';
 import { formatRelativeTime } from '@/utils/formatters';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -44,6 +50,9 @@ export const PostCard = memo(function PostCard({
   const [likes, setLikes] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [localLiked, setLocalLiked] = useState(post.liked);
+  const [viewing, setViewing] = useState<number | null>(null);
+  // The viewer pages through photos only; videos keep their inline player.
+  const photos = (post.media ?? []).filter((item) => item.uri && !isVideo(item));
   const saved = usePostPresentation((state) => Boolean(state.saved[post.id]));
   const toggleSaved = usePostPresentation((state) => state.toggleSaved);
   const media = singleMedia(post);
@@ -149,8 +158,17 @@ export const PostCard = memo(function PostCard({
           onDoubleTap={() => {
             if (!liked) like();
           }}
+          onOpen={
+            post.locked
+              ? undefined
+              : (index) => {
+                  const photo = photos.indexOf(post.media![index]!);
+                  if (photo >= 0) setViewing(photo);
+                }
+          }
         />
       ) : null}
+      <ImageViewer images={photos} index={viewing} onClose={() => setViewing(null)} />
       <PostActions
         liked={liked}
         saved={saved}

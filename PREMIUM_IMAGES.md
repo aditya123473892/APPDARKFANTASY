@@ -74,8 +74,10 @@ own images. The existing guarded `AdminPostsController` gets full image access;
 admin roles on ordinary social routes do not bypass premium locking.
 
 All post responses use `PostMapper.toResponse` through the global photo response
-interceptor. Post media is now `images: [{ id, url, blurhash, width, height }]` and
-`locked: boolean`, for every viewer. Internal keys/filenames never appear in these
+interceptor. Post media is now `images: [{ id, url, blurhash, width, height, aspectRatio }]`
+and `locked: boolean`, for every viewer. `width`/`height` are the stored pixel size after
+EXIF orientation; `aspectRatio` is `width / height` (4 decimals) or `null` for legacy rows
+until `npm run premium:backfill -- --apply` fills their size. A post holds up to 10 photos. Internal keys/filenames never appear in these
 images. The mobile adapter reads this contract and retains normal-only fallback
 support for old API media. Update other consumers of the old `media` field before
 deploying the backend. Captions remain visible to the audience; optional caption

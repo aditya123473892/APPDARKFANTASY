@@ -1,8 +1,10 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { CountryCode } from 'libphonenumber-js';
 import { Button, Input, OTPInput, Text } from '@/components/ui';
-import { spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/useTheme';
 import { AuthError } from '../types';
 import { DEFAULT_COUNTRY, formatPhone, toE164 } from '../phone';
 import { phoneErrorMessage } from '../services/phoneAuth';
@@ -22,6 +24,7 @@ export function PhoneOtpFlow({
   sendLabel = 'Send code',
   verifyLabel = 'Verify',
   phoneHint,
+  autoFocus = true,
 }: {
   /** Resolves with the server's resend cooldown in seconds. */
   sendCode: (phone: string) => Promise<number>;
@@ -29,12 +32,17 @@ export function PhoneOtpFlow({
   sendLabel?: string;
   verifyLabel?: string;
   phoneHint?: string;
+  /** Focus the number field on mount (the code field always focuses). */
+  autoFocus?: boolean;
 }): React.JSX.Element {
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [country, setCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [national, setNational] = useState('');
+  // Inline validation appears once the field was left or submitted, not while typing.
+  const [touched, setTouched] = useState(false);
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  // Server and network failures; validation messages are derived below.
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resendAt, setResendAt] = useState(0);
@@ -89,13 +97,18 @@ export function PhoneOtpFlow({
       setResendAt(Date.now() + Math.max(1, seconds) * 1000);
     });
 
+  const e164 = toE164(national, country);
+  const phoneError = !touched
+    ? undefined
+    : !national.trim()
+      ? 'Enter your mobile number.'
+      : !e164
+        ? 'Enter a valid mobile number for the selected country.'
+        : undefined;
+
   const submitPhone = () => {
-    const e164 = toE164(national, country);
-    if (!e164) {
-      setError('Enter a valid mobile number for the selected country.');
-      return;
-    }
-    void send(e164);
+    setTouched(true);
+    if (e164) void send(e164);
   };
 
   const verify = (value = code) => {
@@ -109,44 +122,60 @@ export function PhoneOtpFlow({
   if (step === 'phone')
     return (
       <View style={styles.form}>
-        <Text variant="label" color="secondary">
-          Mobile number
-        </Text>
-        <View style={styles.phoneRow}>
-          <CountryPicker value={country} onChange={setCountry} disabled={loading} />
-          <View style={styles.phoneInput}>
-            <Input
-              accessibilityLabel="Mobile number"
-              placeholder="98765 43210"
-              keyboardType="phone-pad"
-              textContentType="telephoneNumber"
-              autoComplete="tel-national"
-              returnKeyType="send"
-              maxLength={20}
-              value={national}
-              onChangeText={setNational}
-              onSubmitEditing={submitPhone}
-              editable={!loading}
-              autoFocus
+        <View style={styles.field}>
+          <Text variant="label" color="secondary" nativeID="phone-label">
+            Mobile number
+          </Text>
+          <View style={styles.phoneRow}>
+            <CountryPicker
+              value={country}
+              onChange={(next) => {
+                setCountry(next);
+                setError(null);
+              }}
+              disabled={loading}
             />
+            <View style={styles.phoneInput}>
+              <Input
+                accessibilityLabel="Mobile number"
+                accessibilityLabelledBy="phone-label"
+                accessibilityHint={phoneHint}
+                icon="call-outline"
+                placeholder="98765 43210"
+                keyboardType="phone-pad"
+                textContentType="telephoneNumber"
+                autoComplete="tel-national"
+                importantForAutofill="yes"
+                returnKeyType="send"
+                enablesReturnKeyAutomatically
+                maxLength={20}
+                value={national}
+                onChangeText={(value) => {
+                  setNational(value);
+                  if (error) setError(null);
+                }}
+                onBlur={() => setTouched(Boolean(national.trim()))}
+                onSubmitEditing={submitPhone}
+                editable={!loading}
+                error={phoneError}
+                autoFocus={autoFocus}
+              />
+            </View>
           </View>
+          {phoneHint && !phoneError ? (
+            <Text variant="caption" color="muted">
+              {phoneHint}
+            </Text>
+          ) : null}
         </View>
-        {phoneHint ? (
-          <Text variant="caption" color="muted">
-            {phoneHint}
-          </Text>
-        ) : null}
-        {error ? (
-          <Text
-            color="danger"
-            variant="label"
-            accessibilityRole="alert"
-            accessibilityLiveRegion="polite"
-          >
-            {error}
-          </Text>
-        ) : null}
-        <Button label={sendLabel} loading={loading} onPress={submitPhone} />
+        <FormAlert message={error} />
+        <Button
+          label={sendLabel}
+          loading={loading}
+          disabled={!e164}
+          accessibilityLabel={e164 ? sendLabel : `${sendLabel}. Enter a valid mobile number first`}
+          onPress={submitPhone}
+        />
       </View>
     );
 
@@ -168,17 +197,13 @@ export function PhoneOtpFlow({
         editable={!loading}
         autoFocus
       />
-      {error ? (
-        <Text
-          color="danger"
-          variant="label"
-          accessibilityRole="alert"
-          accessibilityLiveRegion="polite"
-        >
-          {error}
-        </Text>
-      ) : null}
-      <Button label={verifyLabel} loading={loading} onPress={() => verify()} />
+      <FormAlert message={error} />
+      <Button
+        label={verifyLabel}
+        loading={loading}
+        disabled={code.length !== CODE_LENGTH}
+        onPress={() => verify()}
+      />
       <Button
         label={remaining > 0 ? `Resend code in ${remaining}s` : 'Resend code'}
         variant="ghost"
@@ -201,8 +226,39 @@ export function PhoneOtpFlow({
     </View>
   );
 }
+/** Server, network and rate-limit failures, announced to screen readers. */
+function FormAlert({ message }: { message: string | null }): React.JSX.Element | null {
+  const { theme } = useTheme();
+  if (!message) return null;
+  return (
+    <View
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+      style={[
+        styles.alert,
+        { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger },
+      ]}
+    >
+      <Ionicons name="alert-circle-outline" size={20} color={theme.colors.danger} />
+      <Text color="danger" variant="label" style={styles.alertText}>
+        {message}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   form: { gap: spacing.lg },
+  field: { gap: spacing.sm },
+  alert: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  alertText: { flex: 1 },
   phoneRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   phoneInput: { flex: 1 },
 });

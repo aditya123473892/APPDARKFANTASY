@@ -1,16 +1,28 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { queryKeys } from '@/services/queryKeys';
 import { profileService } from '../services';
 import type { UpdateProfileInput } from '../types';
 import type { UploadAsset } from '@/features/feed/types';
 
+/**
+ * Server-side search, 20 people per page. Pickers must pass the search term and
+ * load more pages: the first page alone covers only the newest accounts.
+ */
 export function useDiscoverProfiles(search = '') {
   return useInfiniteQuery({
     queryKey: [...queryKeys.discover, search],
     queryFn: ({ pageParam }) => profileService.discoverPage(pageParam, search),
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextSkip,
+    // Keep showing the last results while a new search term loads.
+    placeholderData: keepPreviousData,
     select: (data) => {
       const seen = new Set<string>();
       return data.pages.flatMap((page) =>

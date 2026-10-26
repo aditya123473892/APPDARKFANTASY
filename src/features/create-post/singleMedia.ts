@@ -6,8 +6,8 @@ import { createVideoThumbnail } from './videoThumbnail';
 
 export const VIDEO_MAX_SECONDS = 60;
 export const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
-/** Matches the confirmed-photo API limit. */
-export const POST_MAX_PHOTOS = 5;
+/** Matches the backend POST_MAX_IMAGES limit (PhotoPostDto.photoIds). */
+export const POST_MAX_PHOTOS = 10;
 export type SelectedMedia = {
   asset: UploadAsset;
   selectionUri?: string;

@@ -2,26 +2,39 @@ import { useRef, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 import type { PostMedia as Media } from '@/features/feed/types';
 import { postRatio } from '@/features/feed/presentation';
+import type { ImageFit } from '@/utils/imageLayout';
 import { useTheme } from '@/theme/useTheme';
 import { PostMedia } from './PostMedia';
 import { Text } from './Text';
 
-/** One shared crop for every page; only the visible page may mount a video player. */
+/**
+ * Instagram-style: the first image's (clamped) ratio sets one frame for every
+ * page and later images fit inside it uncropped. Only the visible page may
+ * mount a video player.
+ */
 export function PostCarousel({
   items,
   active = false,
   locked,
-  ratio = postRatio(items[0]),
+  ratio: ratioOverride,
+  fit,
   onDoubleTap,
+  onOpen,
   onRetry,
 }: {
   items: Media[];
   active?: boolean;
   locked?: boolean;
+  /** Forces a frame ratio (the create-post crop preview); defaults to the first image's. */
   ratio?: number;
+  /** Forces how every image fills the frame (the crop preview uses cover). */
+  fit?: ImageFit;
   onDoubleTap?: () => void;
+  /** Tap on page `index`: open the full-screen viewer. */
+  onOpen?: (index: number) => void;
   onRetry?: () => void;
 }) {
+  const ratio = ratioOverride ?? postRatio(items[0]);
   const { theme } = useTheme();
   const [width, setWidth] = useState(0);
   const [index, setIndex] = useState(0);
@@ -34,8 +47,10 @@ export function PostCarousel({
         media={items[0]!}
         active={active}
         locked={locked}
-        ratio={ratio}
+        ratio={ratioOverride}
+        fit={fit}
         onDoubleTap={onDoubleTap}
+        onOpen={onOpen ? () => onOpen(0) : undefined}
         onRetry={onRetry}
       />
     );
@@ -89,16 +104,20 @@ export function PostCarousel({
                 <PostMedia
                   media={item}
                   ratio={ratio}
+                  fit={
+                    fit ?? (itemIndex === 0 && ratioOverride === undefined ? undefined : 'contain')
+                  }
                   locked={locked}
                   active={active && !dragging && itemIndex === page}
                   onDoubleTap={onDoubleTap}
+                  onOpen={onOpen ? () => onOpen(itemIndex) : undefined}
                   onRetry={onRetry}
                 />
               </View>
             )}
           />
         ) : null}
-        <View pointerEvents="none" style={styles.counter}>
+        <View pointerEvents="none" style={styles.counter} accessibilityElementsHidden>
           <Text style={{ color: 'white', fontSize: 12, fontVariant: ['tabular-nums'] }}>
             {page + 1}/{items.length}
           </Text>

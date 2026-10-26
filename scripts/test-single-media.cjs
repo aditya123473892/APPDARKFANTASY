@@ -52,19 +52,19 @@ test('images never generate video thumbnails, and missing file sizes are checked
   assert.equal(picker.thumbnails(), 1);
 });
 
-test('post picker keeps photo selection order, enforces five photos and rejects mixed video selections', async () => {
+test('post picker keeps photo selection order, enforces ten photos and rejects mixed video selections', async () => {
   const picker = pickerHarness();
   assert.equal(await picker.pickPostMedia(), null);
   assert.equal(picker.options().allowsMultipleSelection, true);
   assert.equal(picker.options().orderedSelection, true);
-  assert.equal(picker.options().selectionLimit, 5);
-  const photos = Array.from({ length: 5 }, (_, index) => ({ uri: `photo-${index}.jpg`, type: 'image', width: 1080, height: 1350 }));
+  assert.equal(picker.options().selectionLimit, 10);
+  const photos = Array.from({ length: 10 }, (_, index) => ({ uri: `photo-${index}.jpg`, type: 'image', width: 1080, height: 1350 }));
   picker.result({ canceled: false, assets: photos });
   const selected = await picker.pickPostMedia();
   assert.deepEqual(Array.from(selected, item => item.asset.uri), photos.map(item => item.uri));
   assert.equal(picker.thumbnails(), 0);
   picker.result({ canceled: false, assets: [...photos, photos[0]] });
-  await assert.rejects(picker.pickPostMedia(), /up to 5/);
+  await assert.rejects(picker.pickPostMedia(), /up to 10/);
   picker.result({ canceled: false, assets: [photos[0], clip] });
   await assert.rejects(picker.pickPostMedia(), /one video/);
   picker.result({ canceled: false, assets: [clip] });

@@ -4,7 +4,8 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, View } from 'react-native';
 import type { PostMedia as Media } from '@/features/feed/types';
-import { durationLabel, isVideo, mediaPreviews, postRatio } from '@/features/feed/presentation';
+import { durationLabel, isVideo, mediaFrame, mediaPreviews } from '@/features/feed/presentation';
+import type { ImageFit } from '@/utils/imageLayout';
 import { useTheme } from '@/theme/useTheme';
 import { radius, spacing } from '@/theme';
 import { Pressable } from './Pressable';
@@ -129,20 +130,30 @@ function ActiveVideo({
   );
 }
 
-/** Only the visible video mounts a player; useVideoPlayer releases it on unmount. */
+/**
+ * Only the visible video mounts a player; useVideoPlayer releases it on unmount.
+ * Photos fill a frame reserved from their stored size (no layout jump); they
+ * show whole unless `fit` (or a frame beyond 4:5…1.91:1) requires cropping.
+ */
 export function PostMedia({
   media,
   active = false,
   locked = false,
   onDoubleTap,
+  onOpen,
   ratio,
+  fit,
   onRetry,
 }: {
   media?: Media;
   active?: boolean;
   locked?: boolean;
   onDoubleTap?: () => void;
+  /** Single tap on a photo (after the double-tap window): open the full-screen viewer. */
+  onOpen?: () => void;
+  /** Frame ratio; defaults to the photo's own clamped ratio. */
   ratio?: number;
+  fit?: ImageFit;
   onRetry?: () => void;
 }) {
   const { theme } = useTheme();
@@ -151,9 +162,18 @@ export function PostMedia({
   const [failedUri, setFailedUri] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const [thumbnail, setThumbnail] = useState<{ source: string; uri: string }>();
+  // Legacy rows without a stored size: measured once the image decodes.
+  const [decoded, setDecoded] = useState<{ uri: string; width: number; height: number }>();
   const [heart] = useState(() => new Animated.Value(0));
   const lastTap = useRef(0);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(openTimer.current), []);
   const video = isVideo(media);
+  const size =
+    media?.width && media.height ? media : decoded?.uri === media?.uri ? decoded : undefined;
+  const frame = mediaFrame(size ? { ...media!, ...size } : media);
+  const frameRatio = ratio ?? mediaPreviews.get(media?.uri ?? '')?.ratio ?? frame.ratio;
+  const imageFit: ImageFit = fit ?? (frameRatio === frame.ratio ? frame.fit : 'contain');
   const preview = mediaPreviews.get(media?.uri ?? '');
   const thumbnailUri =
     preview?.thumbnail ?? (thumbnail?.source === media?.uri ? thumbnail?.uri : undefined);
@@ -185,15 +205,20 @@ export function PostMedia({
   const tapImage = () => {
     const now = Date.now();
     if (now - lastTap.current < 280) {
+      clearTimeout(openTimer.current);
       pop();
       lastTap.current = 0;
-    } else lastTap.current = now;
+    } else {
+      lastTap.current = now;
+      // Wait out the double-tap window so a like never also opens the viewer.
+      if (onOpen && !video) openTimer.current = setTimeout(onOpen, 280);
+    }
   };
   return (
     <View
       style={{
         width: '100%',
-        aspectRatio: ratio ?? postRatio(media),
+        aspectRatio: frameRatio,
         backgroundColor: theme.colors.surfaceMuted,
         overflow: 'hidden',
       }}
@@ -233,9 +258,17 @@ export function PostMedia({
               key={attempt}
               source={{ uri: video ? thumbnailUri : media.uri }}
               placeholder={media.blurhash ? { blurhash: media.blurhash } : undefined}
-              contentFit="cover"
+              placeholderContentFit="cover"
+              contentFit={video ? 'cover' : imageFit}
+              transition={{ duration: 180, effect: 'cross-dissolve' }}
+              // Decodes at the frame's size, not the source's, to keep memory low.
+              allowDownscaling
               cachePolicy="memory-disk"
-              onLoad={() => setLoadedUri(media.uri)}
+              onLoad={({ source }) => {
+                setLoadedUri(media.uri);
+                if (!video && !(media.width && media.height) && source.width && source.height)
+                  setDecoded({ uri: media.uri, width: source.width, height: source.height });
+              }}
               onError={() => setFailedUri(media.uri)}
               style={StyleSheet.absoluteFill}
               recyclingKey={media.uri}
@@ -267,9 +300,9 @@ export function PostMedia({
             <Pressable
               accessibilityLabel={
                 failed
-                  ? 'Tap to retry image'
+                  ? 'Image failed to load. Tap to retry'
                   : onDoubleTap
-                    ? 'Post image. Double tap to like'
+                    ? `Post image.${onOpen ? ' Tap to view full screen.' : ''} Double tap to like`
                     : 'Selected image preview'
               }
               onPress={() => {
@@ -282,7 +315,13 @@ export function PostMedia({
               style={styles.center}
             >
               {failed ? (
-                <Text>Tap to retry</Text>
+                <View style={[styles.broken, { backgroundColor: theme.colors.surfaceMuted }]}>
+                  <Ionicons name="refresh" size={28} color={theme.colors.textMuted} />
+                  <Text color="muted">Couldn't load photo</Text>
+                  <Text variant="caption" color="muted">
+                    Tap to retry
+                  </Text>
+                </View>
               ) : !media ? (
                 <Text color="muted">Media unavailable</Text>
               ) : null}
@@ -313,6 +352,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  broken: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   duration: {
     position: 'absolute',

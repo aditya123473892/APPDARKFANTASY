@@ -61,13 +61,11 @@ export default function GroupInfo(): React.JSX.Element {
     [data?.members],
   );
   const memberIds = useMemo(() => new Set(members.map((member) => senderId(member))), [members]);
-  const directory = useDiscoverProfiles();
+  // Server-side search over every account; more pages load on request.
+  const directory = useDiscoverProfiles(query);
   const candidates = useMemo(
-    () =>
-      (directory.data ?? []).filter(
-        (user) => !memberIds.has(user.id) && (!query || user.name.toLowerCase().includes(query)),
-      ),
-    [directory.data, memberIds, query],
+    () => (directory.data ?? []).filter((user) => !memberIds.has(user.id)),
+    [directory.data, memberIds],
   );
 
   const refresh = () => {
@@ -311,23 +309,37 @@ export default function GroupInfo(): React.JSX.Element {
                   <Loader />
                 ) : directory.isError ? (
                   <ErrorState onRetry={() => void directory.refetch()} />
-                ) : candidates.length ? (
-                  candidates.slice(0, 50).map((user) => (
-                    <View key={user.id} style={styles.candidate}>
-                      <Avatar uri={user.avatarUri} label={user.name} />
-                      <Text style={styles.rowCopy} numberOfLines={1}>
-                        {user.name}
-                      </Text>
+                ) : candidates.length || directory.hasNextPage ? (
+                  <>
+                    {candidates.map((user) => (
+                      <View key={user.id} style={styles.candidate}>
+                        <Avatar uri={user.avatarUri} label={user.name} />
+                        <Text style={styles.rowCopy} numberOfLines={1}>
+                          {user.name}
+                        </Text>
+                        <Button
+                          label="Add"
+                          size="sm"
+                          fullWidth={false}
+                          disabled={busy}
+                          accessibilityLabel={`Add ${user.name}`}
+                          onPress={() => membership.mutate({ member: user.id })}
+                        />
+                      </View>
+                    ))}
+                    {directory.hasNextPage ? (
                       <Button
-                        label="Add"
-                        size="sm"
-                        fullWidth={false}
-                        disabled={busy}
-                        accessibilityLabel={`Add ${user.name}`}
-                        onPress={() => membership.mutate({ member: user.id })}
+                        label={
+                          directory.isFetchNextPageError
+                            ? 'Try loading more people again'
+                            : 'Load more people'
+                        }
+                        variant="secondary"
+                        loading={directory.isFetchingNextPage}
+                        onPress={() => void directory.fetchNextPage()}
                       />
-                    </View>
-                  ))
+                    ) : null}
+                  </>
                 ) : (
                   <EmptyState
                     compact

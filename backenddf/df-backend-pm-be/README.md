@@ -62,6 +62,21 @@ hostname directly. Start the backend after MongoDB has elected its primary.
 => Ensure `.env` variables are set correctly.
 => Restart the server after modifying environment variables
 
+## Groups
+
+Any signed-in user can create a group (`POST /api/groups/create-group`) and becomes its
+owner; member changes, renames and the group photo are owner-only (checked in
+`GroupService`, not by staff role). Create is idempotent per owner through `clientId`.
+Build its unique index once per database (autoIndex is off):
+
+```powershell
+npm run groups:indexes            # report duplicates only
+npm run groups:indexes -- --apply # create group_admin_client_id_unique
+```
+
+Validation failures return 400 with the usual `message` list plus `errors`, a map of
+field name to messages.
+
 ## Phone OTP sign-in (Twilio Verify)
 
 The mobile app signs in with a phone number and SMS code only. The web app's

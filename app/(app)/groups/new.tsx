@@ -11,12 +11,14 @@ import { Avatar, Button, EmptyState, Input, Loader, Text } from '@/components/ui
 import { toast } from '@/components/ui/Toast';
 import { ProtectedRoute } from '@/features/auth/components/Access';
 import { createClientId } from '@/features/chat/hooks/useChat';
+import { groupConversation } from '@/features/chat/services/chatService.real';
 import {
   GROUP_DESCRIPTION_MAX,
   GROUP_MEMBERS_MAX,
   GROUP_NAME_MAX,
   groupService,
 } from '@/features/chat/services/groupService';
+import type { Conversation } from '@/features/chat/types';
 import { pickImage } from '@/features/create-post/pickMedia';
 import type { UploadAsset } from '@/features/feed/types';
 import { useDiscoverProfiles } from '@/features/profile/hooks/useProfiles';
@@ -34,7 +36,6 @@ function NewGroup(): React.JSX.Element {
   const router = useRouter();
   const client = useQueryClient();
   const { theme } = useTheme();
-  const users = useDiscoverProfiles();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [photo, setPhoto] = useState<UploadAsset | null>(null);
@@ -45,15 +46,15 @@ function NewGroup(): React.JSX.Element {
   // One key per group being created: a retry after a lost response returns the
   // group the server already made instead of creating a duplicate.
   const clientId = useRef(createClientId());
-  const query = useDebounce(search.trim().toLowerCase(), 150);
+  const query = useDebounce(search.trim(), 250);
+  // Searches every account on the server and pages through results; selections
+  // made under an earlier search term are kept.
+  const users = useDiscoverProfiles(query);
+  const results = users.data ?? [];
 
   const nameError = submitted && !name.trim() ? 'Give the group a name.' : undefined;
   const membersError = submitted && !selected.length ? 'Choose at least one member.' : undefined;
   const selectedIds = useMemo(() => new Set(selected.map((user) => user.id)), [selected]);
-  const results = useMemo(
-    () => (users.data ?? []).filter((user) => !query || user.name.toLowerCase().includes(query)),
-    [query, users.data],
-  );
 
   const create = useMutation({
     mutationFn: async () => {
@@ -74,6 +75,11 @@ function NewGroup(): React.JSX.Element {
       return { group, photoFailed };
     },
     onSuccess: ({ group, photoFailed }) => {
+      // Show the group in Chats immediately; the refetch then fills in server state.
+      const conversation = groupConversation(group);
+      client.setQueryData<Conversation[]>(queryKeys.conversations, (rows) =>
+        rows && !rows.some((row) => row.id === conversation.id) ? [conversation, ...rows] : rows,
+      );
       void client.invalidateQueries({ queryKey: queryKeys.conversations });
       if (photoFailed)
         toast.error('Group created, but the photo could not be uploaded. Add it from group info.');
@@ -208,71 +214,82 @@ function NewGroup(): React.JSX.Element {
         <Header title="New group" back backFallback="/chats" />
       </View>
       <KeyboardAvoidingScreen>
-        {users.isPending ? (
-          <>
-            {form}
-            <Loader />
-          </>
-        ) : users.isError ? (
-          <>
-            {form}
-            <ErrorState
-              onRetry={() => void users.refetch()}
-              message={describeError(users.error, "We couldn't load people to add.")}
-            />
-          </>
-        ) : (
-          <FlatList
-            data={results}
-            keyExtractor={(user) => user.id}
-            ListHeaderComponent={form}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            contentContainerStyle={styles.list}
-            onRefresh={() => void users.refetch()}
-            refreshing={users.isRefetching}
-            ListEmptyComponent={
+        {/* One list in every state, so the form (and a focused search field) never remounts. */}
+        <FlatList
+          data={users.isError && !users.data ? [] : results}
+          keyExtractor={(user) => user.id}
+          ListHeaderComponent={form}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={styles.list}
+          onRefresh={() => void users.refetch()}
+          refreshing={users.isRefetching && !users.isFetchingNextPage && !users.isPlaceholderData}
+          onEndReached={() => {
+            if (users.hasNextPage && !users.isFetching && !users.isFetchNextPageError)
+              void users.fetchNextPage();
+          }}
+          onEndReachedThreshold={0.5}
+          ListEmptyComponent={
+            users.isPending ? (
+              <Loader label="Loading people" />
+            ) : users.isError ? (
+              <ErrorState
+                onRetry={() => void users.refetch()}
+                message={describeError(users.error, "We couldn't load people to add.")}
+              />
+            ) : (
               <EmptyState
                 compact
                 icon="people-outline"
                 title={query ? 'No one matches that name' : 'No people to add yet'}
                 message={query ? 'Try a different spelling.' : 'Pull down to refresh.'}
               />
-            }
-            renderItem={({ item }) => {
-              const checked = selectedIds.has(item.id);
-              return (
-                <Pressable
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked, disabled: busy }}
-                  accessibilityLabel={item.name}
-                  disabled={busy}
-                  onPress={() => toggle(item)}
-                  style={({ pressed }) => [
-                    styles.row,
-                    {
-                      backgroundColor: checked
-                        ? theme.colors.primarySoft
-                        : pressed
-                          ? theme.colors.surfacePressed
-                          : theme.colors.surface,
-                    },
-                  ]}
-                >
-                  <Avatar uri={item.avatarUri} label={item.name} />
-                  <Text style={styles.rowName} numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  <Ionicons
-                    name={checked ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={32}
-                    color={checked ? theme.colors.primary : theme.colors.textMuted}
-                  />
-                </Pressable>
-              );
-            }}
-          />
-        )}
+            )
+          }
+          ListFooterComponent={
+            users.isFetchingNextPage ? (
+              <Loader label="Loading more people" />
+            ) : users.isFetchNextPageError ? (
+              <Button
+                label="Try loading more people again"
+                variant="secondary"
+                onPress={() => void users.fetchNextPage()}
+              />
+            ) : undefined
+          }
+          renderItem={({ item }) => {
+            const checked = selectedIds.has(item.id);
+            return (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked, disabled: busy }}
+                accessibilityLabel={item.name}
+                disabled={busy}
+                onPress={() => toggle(item)}
+                style={({ pressed }) => [
+                  styles.row,
+                  {
+                    backgroundColor: checked
+                      ? theme.colors.primarySoft
+                      : pressed
+                        ? theme.colors.surfacePressed
+                        : theme.colors.surface,
+                  },
+                ]}
+              >
+                <Avatar uri={item.avatarUri} label={item.name} />
+                <Text style={styles.rowName} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Ionicons
+                  name={checked ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={32}
+                  color={checked ? theme.colors.primary : theme.colors.textMuted}
+                />
+              </Pressable>
+            );
+          }}
+        />
         <View style={[styles.footer, { borderTopColor: theme.colors.divider }]}>
           <Button
             label={busy ? 'Creating group…' : 'Create group'}

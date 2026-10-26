@@ -29,13 +29,12 @@ import {
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { successRes } from 'src/common/interceptors';
 import { JwtAuthGuard, RolesGuard } from 'src/common/guards';
-import { AuthUser, Roles } from 'src/common/decorators';
+import { AuthUser } from 'src/common/decorators';
 import { IAuthUser } from 'src/common/interfaces';
 import { successGetRes } from 'src/common/interceptors/response.handlers';
 import { UpdateGroupDto } from './dtos/update-group.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3BucketService } from 'src/s3-bucket/s3-bucket.service';
-import { ERole } from 'src/common/enums';
 
 @ApiTags('Groups')
 @ApiBearerAuth()
@@ -47,31 +46,20 @@ export class GroupController {
     private readonly s3BucketService: S3BucketService,
   ) {}
 
-  @Roles(ERole.ADMIN)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  // Any signed-in user may create a group and becomes its owner. Member and
+  // detail changes are owner-only, enforced in GroupService, not by staff roles.
+  @UseGuards(JwtAuthGuard)
   @Post('create-group')
-  @ApiOperation({ summary: 'Create a new group' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' },
-        admin: { type: 'string' },
-        members: {
-          type: 'array',
-          items: {
-            type: 'string',
-          },
-        },
-      },
-    },
-  })
+  @ApiOperation({ summary: 'Create a group owned by the caller' })
+  @ApiBody({ type: CreateGroupDto })
   @ApiResponse({
     status: 201,
-    description: 'Group created successfully',
+    description: 'Group created, or the existing group for a retried clientId',
     type: Group,
   })
-  @ApiResponse({ status: 400, description: 'Bad Request' })
+  @ApiResponse({ status: 400, description: 'Validation failed; `errors` maps fields to messages' })
+  @ApiResponse({ status: 401, description: 'Missing, expired or rejected session' })
+  @ApiResponse({ status: 409, description: 'clientId was already used for a different group' })
   async createGroup(
     @Body() createGroupDto: CreateGroupDto,
     @AuthUser() user: IAuthUser,
@@ -84,10 +72,9 @@ export class GroupController {
     return successRes(createGroup);
   }
 
-  @Roles(ERole.ADMIN)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('add-members')
-  @ApiOperation({ summary: 'Add members into the group' })
+  @ApiOperation({ summary: 'Add members to a group (owner only)' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -120,10 +107,9 @@ export class GroupController {
     return successRes(addMembers);
   }
 
-  @Roles(ERole.ADMIN)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('remove-members')
-  @ApiOperation({ summary: 'Remove members from the group' })
+  @ApiOperation({ summary: 'Remove members from a group (owner only)' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -174,9 +160,8 @@ export class GroupController {
   }
 
   @Put(':groupId')
-  @Roles(ERole.ADMIN)
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiOperation({ summary: 'Update group details' })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Update group details (owner only)' })
   @ApiBody({ type: UpdateGroupDto })
   @ApiResponse({
     status: 200,

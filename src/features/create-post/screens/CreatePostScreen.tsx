@@ -10,23 +10,29 @@ import { PostCarousel } from '@/components/ui/PostCarousel';
 import { Pressable } from '@/components/ui/Pressable';
 import { toast } from '@/components/ui/Toast';
 import { useCreatePost } from '@/features/feed/hooks/useFeed';
-import type { ContentVisibility, PostAudience } from '@/features/feed/types';
+import type { ContentVisibility, PostAudience, UploadAsset } from '@/features/feed/types';
 import { mediaPreviews } from '@/features/feed/presentation';
 import { usePhotoDraftCleanup } from '@/hooks/usePhotoDraftCleanup';
 import { createClientId } from '@/utils/clientId';
-import { describeError } from '@/services/errors';
+import { describeError, ServiceError } from '@/services/errors';
 import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { pickPostMedia, POST_MAX_PHOTOS, type SelectedMedia } from '../singleMedia';
 import { RecentMediaGrid } from '../RecentMediaGrid';
 import { uploadPostMedia } from '../uploadSingleMedia';
+import { ASPECTS, aspectRatioOf, cropToAspect, type AspectChoice } from '../cropMedia';
+
+const isVideoAsset = (item: SelectedMedia) => item.asset.type.startsWith('video/');
 
 export function CreatePostScreen() {
   const close = useSafeBack('/home');
   const { theme } = useTheme();
   const [step, setStep] = useState(1);
   const [selected, setSelected] = useState<SelectedMedia[]>([]);
-  const [ratio, setRatio] = useState(0.8);
+  const [aspect, setAspect] = useState<AspectChoice>('original');
+  // Cropped copies by "uri|aspect": a retried publish reuses the same files (and uploads).
+  const crops = useRef(new Map<string, UploadAsset>());
+  const [cropped, setCropped] = useState<UploadAsset[]>([]);
   const [caption, setCaption] = useState('');
   const [location, setLocation] = useState('');
   const [audience, setAudience] = useState<PostAudience>('everyone');
@@ -38,7 +44,9 @@ export function CreatePostScreen() {
   const [submitted, setSubmitted] = useState(false);
   const clientId = useRef(createClientId());
   const create = useCreatePost();
-  usePhotoDraftCleanup(selected.map((item) => item.asset));
+  usePhotoDraftCleanup([...selected.map((item) => item.asset), ...cropped]);
+  const photosOnly = selected.length > 0 && !selected.some((item) => isVideoAsset(item));
+  const cropRatio = photosOnly ? aspectRatioOf(aspect) : undefined;
   const disablePrevention = usePreventRemove(
     Boolean(selected.length || caption.trim()) && !submitted,
     ({ repeat }) =>
@@ -74,8 +82,25 @@ export function CreatePostScreen() {
     mediaPreviews.set(media.asset.uri, {
       thumbnail: media.thumbnail,
       duration: media.duration,
-      ratio,
     });
+  };
+  /** The upload for each item: the photo itself, or its crop to the chosen shape. */
+  const uploadAssets = async (): Promise<UploadAsset[]> => {
+    if (!cropRatio) return selected.map((item) => item.asset);
+    const made: UploadAsset[] = [];
+    const assets = [];
+    for (const item of selected) {
+      const key = `${item.asset.uri}|${aspect}`;
+      let asset = crops.current.get(key);
+      if (!asset) {
+        asset = await cropToAspect(item.asset, cropRatio);
+        crops.current.set(key, asset);
+        made.push(asset);
+      }
+      assets.push(asset);
+    }
+    if (made.length) setCropped((current) => [...current, ...made]);
+    return assets;
   };
   const select = (media: SelectedMedia) => {
     const existing = selected.findIndex((item) => item.asset.uri === media.asset.uri);
@@ -101,10 +126,16 @@ export function CreatePostScreen() {
     setProgress(0);
     setError('');
     try {
+      const assets = await uploadAssets().catch(() => {
+        throw new ServiceError(
+          'VALIDATION',
+          "Couldn't crop your photos. Choose Original or try again.",
+        );
+      });
       const post = await uploadPostMedia(
         {
           body: caption.trim(),
-          assets: selected.map((item) => item.asset),
+          assets,
           audience,
           contentVisibility: visibility,
           clientId: clientId.current,
@@ -112,12 +143,12 @@ export function CreatePostScreen() {
         create.mutateAsync,
         setProgress,
       );
+      // The stored width/height now carry the chosen shape, so no ratio override is kept.
       post.media?.forEach((item, index) => {
         if (item.uri)
           mediaPreviews.set(item.uri, {
             thumbnail: selected[index]?.thumbnail,
             duration: selected[index]?.duration,
-            ratio,
             location: location.trim(),
           });
       });
@@ -176,7 +207,9 @@ export function CreatePostScreen() {
                 height: item.height,
                 mimetype: item.asset.type,
               }))}
-              ratio={step === 1 ? 1 : ratio}
+              // Exactly the feed frame: the chosen crop, or each photo's own shape.
+              ratio={cropRatio}
+              fit={cropRatio ? 'cover' : undefined}
             />
           ) : (
             <View
@@ -195,6 +228,50 @@ export function CreatePostScreen() {
               </Text>
             </View>
           )}
+          {photosOnly && step === 1 ? (
+            <View
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Photo shape"
+              style={{
+                flexDirection: 'row',
+                gap: spacing.sm,
+                paddingHorizontal: spacing.lg,
+                paddingTop: spacing.md,
+              }}
+            >
+              {ASPECTS.map((option) => {
+                const checked = aspect === option.key;
+                return (
+                  <Pressable
+                    key={option.key}
+                    accessibilityRole="radio"
+                    accessibilityLabel={option.a11y}
+                    accessibilityState={{ checked, disabled: publishing }}
+                    disabled={publishing}
+                    onPress={() => {
+                      setAspect(option.key);
+                      clientId.current = createClientId();
+                    }}
+                    style={{
+                      flex: 1,
+                      borderRadius: radius.sm,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1,
+                      borderColor: checked ? theme.colors.primary : theme.colors.border,
+                      backgroundColor: checked
+                        ? theme.colors.primarySoft
+                        : theme.colors.surfaceMuted,
+                    }}
+                  >
+                    <Text variant="label" color={checked ? 'primary' : 'secondary'}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
           {selected.length > 0 ? (
             <View
               style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.sm }}
@@ -339,41 +416,6 @@ export function CreatePostScreen() {
             </>
           ) : (
             <View style={{ padding: spacing.lg, gap: spacing.lg }}>
-              <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-                <Text weight="semibold" style={{ flex: 1 }}>
-                  Aspect ratio
-                </Text>
-                {[1, 0.8].map((value) => (
-                  <Pressable
-                    key={value}
-                    accessibilityRole="radio"
-                    accessibilityLabel={value === 1 ? 'Square 1:1' : 'Portrait 4:5'}
-                    accessibilityState={{ checked: ratio === value }}
-                    disabled={publishing}
-                    onPress={() => {
-                      setRatio(value);
-                      selected.forEach((item) =>
-                        mediaPreviews.set(item.asset.uri, {
-                          thumbnail: item.thumbnail,
-                          duration: item.duration,
-                          ratio: value,
-                        }),
-                      );
-                    }}
-                    style={{
-                      borderRadius: radius.sm,
-                      paddingHorizontal: spacing.lg,
-                      justifyContent: 'center',
-                      backgroundColor:
-                        ratio === value ? theme.colors.primarySoft : theme.colors.surfaceMuted,
-                    }}
-                  >
-                    <Text color={ratio === value ? 'primary' : 'muted'}>
-                      {value === 1 ? '1:1' : '4:5'}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
               <TextInput
                 accessibilityLabel="Caption"
                 multiline
