@@ -18,7 +18,21 @@ export type GodChatSession = {
   id: string;
   /** 'staff' while an admin has taken over; the AI does not answer then. */
   mode: 'ai' | 'staff';
+  /** False for a past chat the member closed with "New chat". */
+  open?: boolean;
+  createdAt?: string;
+  closedAt?: string | null;
   messages: GodChatMessage[];
+};
+/** A closed chat in the member's history list. */
+export type PastGodChat = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  messageCount: number;
+  /** The member's first message. */
+  preview: string;
 };
 
 /** Mirrors the backend limit so requests are never rejected for size. */
@@ -44,6 +58,20 @@ export async function godChatAvailable(): Promise<boolean> {
 
 export async function loadGodSession(): Promise<GodChatSession | null> {
   const data = await getData<{ session?: GodChatSession | null }>('/god-chat/session');
+  return data.session ?? null;
+}
+
+/** Past chats, newest first; pass the previous page's `next` to load older ones. */
+export async function loadGodHistory(before?: string) {
+  const data = await getData<{ sessions: PastGodChat[]; next: string | null }>(
+    '/god-chat/history',
+    before ? { before } : undefined,
+  );
+  return { sessions: data.sessions, next: data.next ?? undefined };
+}
+
+export async function loadPastGodChat(id: string): Promise<GodChatSession | null> {
+  const data = await getData<{ session?: GodChatSession | null }>(`/god-chat/history/${id}`);
   return data.session ?? null;
 }
 

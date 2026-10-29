@@ -1,21 +1,29 @@
 import { useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
-import { useRouter, type Href } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Header, Screen } from '@/components/layout';
 import { Avatar, Button, Tabs, Text } from '@/components/ui';
 import { useChatVisibility } from '@/features/chat/hooks/useChat';
 import { useTheme } from '@/theme/useTheme';
 import { radius, spacing } from '@/theme';
-import { listGodSessions, type AdminGodSession, type GodSessionFilter } from './godChatAdmin';
+import {
+  flagLabels,
+  listGodSessions,
+  type AdminGodSession,
+  type GodSessionFilter,
+} from './godChatAdmin';
 
-const sections = ['Ongoing', 'Live now', 'Taken over'] as const;
+// Short labels so five segments fit on a phone.
+const sections = ['Ongoing', 'Live', 'Staff', 'Flagged', 'Ended'] as const;
 type Section = (typeof sections)[number];
 const filterFor: Record<Section, GodSessionFilter> = {
   Ongoing: 'open',
-  'Live now': 'live',
-  'Taken over': 'staff',
+  Live: 'live',
+  Staff: 'staff',
+  Flagged: 'flagged',
+  Ended: 'ended',
 };
 const LIST_POLL_MS = 10_000;
 const when = (value: string) => new Date(value).toLocaleString();
@@ -27,12 +35,16 @@ function SessionRow({ item, onPress }: { item: AdminGodSession; onPress: () => v
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`God chat with ${item.user.name}${item.live ? ', live' : ''}${item.mode === 'staff' ? ', taken over' : ''}`}
+      accessibilityLabel={`God chat with ${item.user.name}${item.live ? ', live' : ''}${item.mode === 'staff' ? ', taken over' : ''}${item.flagged ? ', flagged' : ''}`}
       onPress={onPress}
       style={[
         styles.row,
         {
-          borderColor: item.mode === 'staff' ? theme.colors.gold : theme.colors.border,
+          borderColor: item.flagged
+            ? theme.colors.danger
+            : item.mode === 'staff'
+              ? theme.colors.gold
+              : theme.colors.border,
           backgroundColor: theme.colors.surface,
         },
       ]}
@@ -47,9 +59,18 @@ function SessionRow({ item, onPress }: { item: AdminGodSession; onPress: () => v
             variant="caption"
             style={{ color: item.mode === 'staff' ? theme.colors.gold : theme.colors.textMuted }}
           >
-            {item.mode === 'staff' ? `With ${item.staff?.name ?? 'staff'}` : 'AI'}
+            {!item.open
+              ? 'Ended'
+              : item.mode === 'staff'
+                ? `With ${item.staff?.name ?? 'staff'}`
+                : 'AI'}
           </Text>
         </View>
+        {item.flagged && item.flags.length > 0 ? (
+          <Text variant="caption" color="danger" numberOfLines={1}>
+            ⚑ {item.flags.map((flag) => flagLabels[flag] ?? flag).join(' · ')}
+          </Text>
+        ) : null}
         {last ? (
           <Text variant="caption" color="secondary" numberOfLines={2}>
             {who}
@@ -65,12 +86,12 @@ function SessionRow({ item, onPress }: { item: AdminGodSession; onPress: () => v
   );
 }
 
-function Sessions({ filter }: { filter: GodSessionFilter }) {
+function Sessions({ filter, userId }: { filter: GodSessionFilter; userId?: string }) {
   const router = useRouter();
   const visible = useChatVisibility();
   const query = useInfiniteQuery({
-    queryKey: ['admin-god-sessions', filter],
-    queryFn: ({ pageParam }) => listGodSessions(filter, pageParam),
+    queryKey: ['admin-god-sessions', filter, userId],
+    queryFn: ({ pageParam }) => listGodSessions(filter, pageParam, userId),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.next,
     refetchInterval: visible ? LIST_POLL_MS : false,
@@ -112,9 +133,27 @@ function Sessions({ filter }: { filter: GodSessionFilter }) {
   );
 }
 
-/** Admin console: every open "Chat with God" conversation, newest activity first. */
+/**
+ * Admin console: "Chat with God" conversations, newest activity first. Opened with `userId`
+ * (and `name`), it lists every chat that member has had, past and present.
+ */
 export function GodSessionsScreen(): React.JSX.Element {
+  const { userId, name } = useLocalSearchParams<{ userId?: string; name?: string }>();
   const [section, setSection] = useState<Section>('Ongoing');
+  if (userId)
+    return (
+      <Screen edges={['top', 'left', 'right', 'bottom']}>
+        <Header
+          title={name ? `${name}’s chats` : 'Member’s chats'}
+          subtitle="Every Chat with God session, past and present"
+          back
+          backFallback={'/admin/god-chat' as Href}
+        />
+        <View style={styles.body}>
+          <Sessions filter="all" userId={userId} />
+        </View>
+      </Screen>
+    );
   return (
     <Screen edges={['top', 'left', 'right', 'bottom']}>
       <Header title="God chat sessions" back backFallback="/settings" />

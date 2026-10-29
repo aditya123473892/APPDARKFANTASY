@@ -1,20 +1,22 @@
 import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, type Href } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Header, KeyboardAvoidingScreen, Screen } from '@/components/layout';
-import { Button, Text } from '@/components/ui';
+import { Button, IconButton, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { ChatInput } from '@/features/chat/components/ChatInput';
 import { useChatVisibility, useMyId } from '@/features/chat/hooks/useChat';
 import { GodChatBubble } from '@/features/god-chat/components/GodChatBubble';
 import { useKeyboard } from '@/hooks/useKeyboard';
 import { describeError } from '@/services/errors';
-import { spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { createClientId } from '@/utils/clientId';
 import {
+  flagLabels,
   godSessionDetail,
+  markGodSessionReviewed,
   releaseGodSession,
   replyToGodSession,
   takeOverGodSession,
@@ -29,6 +31,7 @@ const MAX_REPLY_CHARS = 2000;
 export function GodSessionScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { theme } = useTheme();
+  const router = useRouter();
   const myId = useMyId();
   const visible = useChatVisibility();
   const keyboardVisible = useKeyboard();
@@ -60,8 +63,13 @@ export function GodSessionScreen(): React.JSX.Element {
     mutationFn: () => releaseGodSession(id),
     onSuccess: (next) => {
       update(next);
-      toast.success('Handed back to God (AI)');
+      toast.success('Handed back to God (AI). It will carry on from this conversation.');
     },
+    onError: fail,
+  });
+  const reviewed = useMutation({
+    mutationFn: () => markGodSessionReviewed(id),
+    onSuccess: update,
     onError: fail,
   });
   const reply = useMutation({
@@ -109,7 +117,7 @@ export function GodSessionScreen(): React.JSX.Element {
   if (pending && !messages.some((message) => message.id === pending.id))
     messages.push({ ...pending, role: 'assistant', by: 'staff', staffId: myId, at: '' });
 
-  const label = (message: AdminGodMessage) =>
+  const author = (message: AdminGodMessage) =>
     message.role === 'user'
       ? data.user.name
       : message.by === 'staff'
@@ -117,6 +125,11 @@ export function GodSessionScreen(): React.JSX.Element {
           ? 'You'
           : 'Team'
         : 'God (AI)';
+  // Flags are shown to staff only, next to the author.
+  const label = (message: AdminGodMessage) =>
+    message.flags?.length
+      ? `${author(message)} · ⚑ ${message.flags.map((flag) => flagLabels[flag] ?? flag).join(', ')}`
+      : author(message);
 
   const confirmTakeOver = () =>
     heldByOther
@@ -152,8 +165,40 @@ export function GodSessionScreen(): React.JSX.Element {
           }
           back
           backFallback={'/admin/god-chat' as Href}
+          action={
+            data.user.id ? (
+              <IconButton
+                icon="time-outline"
+                label={`All of ${data.user.name}’s chats`}
+                onPress={() =>
+                  router.push(
+                    `/admin/god-chat?userId=${data.user.id}&name=${encodeURIComponent(data.user.name)}` as Href,
+                  )
+                }
+              />
+            ) : undefined
+          }
         />
       </View>
+      {data.flagged ? (
+        <View
+          style={[
+            styles.flagged,
+            { borderColor: theme.colors.danger, backgroundColor: theme.colors.dangerSoft },
+          ]}
+        >
+          <Text variant="caption" color="danger" style={styles.grow}>
+            ⚑ Flagged: {data.flags.map((flag) => flagLabels[flag] ?? flag).join(', ')}
+          </Text>
+          <Button
+            label="Mark reviewed"
+            variant="secondary"
+            fullWidth={false}
+            loading={reviewed.isPending}
+            onPress={() => reviewed.mutate()}
+          />
+        </View>
+      ) : null}
       <KeyboardAvoidingScreen>
         <FlatList
           ref={listRef}
@@ -185,7 +230,8 @@ export function GodSessionScreen(): React.JSX.Element {
           <>
             <View style={[styles.bar, { borderColor: theme.colors.border }]}>
               <Text variant="caption" color="secondary" style={styles.grow}>
-                The member sees your replies as “DARKFANTASY team”.
+                The member sees your replies as “DARKFANTASY team”. When you hand back, God
+                continues with your replies as context.
               </Text>
               <Button
                 label="Hand back to AI"
@@ -233,6 +279,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   grow: { flex: 1 },
+  flagged: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.screen,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+  },
   takeover: {
     padding: spacing.screen,
     borderTopWidth: StyleSheet.hairlineWidth,

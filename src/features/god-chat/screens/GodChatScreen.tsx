@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Alert, FlatList, StyleSheet, View } from 'react-native';
+import { useRouter, type Href } from 'expo-router';
 import { Header, KeyboardAvoidingScreen, Screen, SettingsButton } from '@/components/layout';
 import { useContentInsets } from '@/components/layout/useContentInsets';
 import { Button, EmptyState, IconButton, Text } from '@/components/ui';
@@ -43,6 +44,7 @@ const authorLabel = (message: GodChatMessage) =>
 /** The conversation is stored on the server, where an admin may take it over and answer in person. */
 export function GodChatScreen(): React.JSX.Element {
   const { theme } = useTheme();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const contentInsets = useContentInsets();
   const keyboardVisible = useKeyboard();
@@ -88,6 +90,7 @@ export function GodChatScreen(): React.JSX.Element {
       setPending(null);
       setFailure(null);
       queryClient.setQueryData(SESSION_KEY, null);
+      void queryClient.invalidateQueries({ queryKey: ['god-chat-history'] });
     },
     onError: () => toast.error('Couldn’t start a new chat. Please try again.'),
   });
@@ -104,10 +107,14 @@ export function GodChatScreen(): React.JSX.Element {
   };
 
   const confirmNewChat = () =>
-    Alert.alert('Start a new chat?', 'Your current conversation will be closed.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'New chat', onPress: () => fresh.mutate() },
-    ]);
+    Alert.alert(
+      'Start a new chat?',
+      'Your current conversation will be closed and kept in Past chats.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'New chat', onPress: () => fresh.mutate() },
+      ],
+    );
 
   const stored = session.data?.messages ?? [];
   const data: GodChatMessage[] = [GREETING, ...stored];
@@ -122,6 +129,11 @@ export function GodChatScreen(): React.JSX.Element {
           subtitle={withTeam ? 'A team member is with you' : 'AI guide to the app'}
           action={
             <View style={styles.actions}>
+              <IconButton
+                icon="time-outline"
+                label="Past chats"
+                onPress={() => router.push('/god-history' as Href)}
+              />
               {stored.length > 0 && (
                 <IconButton
                   icon="create-outline"
