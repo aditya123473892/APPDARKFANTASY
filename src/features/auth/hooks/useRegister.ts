@@ -9,7 +9,7 @@ export function useRegister(signupToken: string, onSignupExpired?: () => void) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const register = async (input: RegisterInput): Promise<boolean> => {
+  const register = async (input: Pick<RegisterInput, 'email' | 'password'>): Promise<boolean> => {
     if (submitting.current) return false;
     submitting.current = true;
     setLoading(true);

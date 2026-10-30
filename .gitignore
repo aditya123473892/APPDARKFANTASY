@@ -15,6 +15,9 @@ web-build/
 !.env.mobile.example
 npm-debug.log*
 expo-proxy.*.log
+artifacts/*.log
+artifacts/*.pid
+artifacts/expo-go-qr.png
 
 # Keep this repository mobile-only.
 # Keep backend dependencies/data/credentials ignored, while reviewing source.

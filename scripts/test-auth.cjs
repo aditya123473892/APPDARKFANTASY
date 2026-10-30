@@ -261,6 +261,8 @@ test('password recovery clears loading and shows an error when the request fails
       formState: { errors: {} }, handleSubmit: fn => () => fn({ email: 'member@example.test' }) }) },
     '@hookform/resolvers/zod': { zodResolver: () => ({}) },
     '@/components/layout': { Header: 'Header', Screen: 'Screen' },
+    '../components/AuthScaffold': { AuthScaffold: 'AuthScaffold', AuthLink: 'AuthLink', AuthPrompt: 'AuthPrompt' },
+    'expo-router': { useRouter: () => ({ push() {}, replace() {} }) },
     '@/components/ui': { Button: 'Button', Input: 'Input', Text: 'Text' },
     '../services': { authService: { requestPasswordReset: async () => { throw new Error('offline'); } } },
   });
@@ -3178,6 +3180,48 @@ test('phone sign-in maps server OTP errors to stable codes', async () => {
     await assert.rejects(phoneAuth.verifyLoginCode('+919876543210', '000000'), (caught) => caught.code === expected);
     assert.equal(h.useAuthStore.getState().session, null);
   }
+});
+
+test('mobile password login omits stale auth, validates the issued identity and persists the session', async () => {
+  const h = harness();
+  h.runtime.setRuntimeToken('stale-session');
+  const requests = [];
+  h.apiClient.defaults.adapter = async config => {
+    requests.push(config.url);
+    if (config.url === '/auth/password/login') {
+      assert.equal(config.headers.Authorization, undefined);
+      assert.deepEqual(JSON.parse(config.data), { identifier: 'member@example.test', password: 'Private123' });
+      return h.ok(config, { accessToken: h.token(), user: h.user });
+    }
+    assert.equal(config.url, '/auth/me');
+    assert.equal(config.headers.Authorization, `Bearer ${h.token()}`);
+    return h.ok(config, h.user);
+  };
+  const phoneAuth = h.load('src/features/auth/services/phoneAuth.ts').phoneAuth;
+  await h.load('src/features/auth/phoneSignIn.ts').completePhoneSignIn(() =>
+    phoneAuth.loginWithPassword(' member@example.test ', 'Private123'));
+  assert.deepEqual(requests, ['/auth/password/login', '/auth/me']);
+  assert.equal(h.useAuthStore.getState().status, 'authenticated');
+  assert.equal(h.writes.at(-1).value, h.token());
+  h.runtime.teardownSession();
+});
+
+test('mobile signup sends only verified phone proof, email and password and checks confirmation', async () => {
+  const h = harness();
+  const { mobileSignupSchema } = h.load('src/features/auth/schemas/authSchemas.ts');
+  assert.equal(mobileSignupSchema.safeParse({ email: 'member@example.test', password: 'Private123', confirmPassword: 'different' }).success, false);
+  const values = mobileSignupSchema.parse({ email: ' MEMBER@example.test ', password: 'Private123', confirmPassword: 'Private123' });
+  assert.equal(values.email, 'member@example.test');
+  h.apiClient.defaults.adapter = async config => {
+    assert.equal(config.url, '/auth/otp/signup');
+    assert.deepEqual(JSON.parse(config.data), { signupToken: 'verified-phone-proof', username: values.email, password: 'Private123' });
+    return h.ok(config, { emailVerificationRequired: true });
+  };
+  const input = { email: values.email, password: values.password };
+  const result = await h.load('src/features/auth/services/phoneAuth.ts').phoneAuth.completeSignup(input, 'verified-phone-proof');
+  assert.equal(result, null);
+  assert.equal(input.password, '');
+  assert.equal(h.secure.size, 0);
 });
 
 test('existing-user phone setup: password once, bootstrap token only on phone calls, then an OTP session', async () => {

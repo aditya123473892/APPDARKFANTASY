@@ -63,8 +63,16 @@ async function signIn(result: Session): Promise<AuthResult> {
   }
 }
 
-/** Phone number + Twilio Verify OTP: the only sign-in method in the mobile app. */
+/** Mobile authentication with verified phone signup, OTP or password sign-in. */
 export const phoneAuth = {
+  async loginWithPassword(identifier: string, password: string): Promise<AuthResult> {
+    const body = { identifier: identifier.trim(), password };
+    try {
+      return await signIn(await post<Session>('/auth/password/login', body));
+    } finally {
+      body.password = '';
+    }
+  },
   /** Same response whether or not the number has an account. */
   async sendLoginCode(phone: string): Promise<number> {
     return (
@@ -86,15 +94,14 @@ export const phoneAuth = {
       .signupToken;
   },
   /** Null when the account exists but its email must be verified before sign-in. */
-  async completeSignup(input: RegisterInput, signupToken: string): Promise<AuthResult | null> {
+  async completeSignup(
+    input: Pick<RegisterInput, 'email' | 'password'>,
+    signupToken: string,
+  ): Promise<AuthResult | null> {
     const body = {
       signupToken,
       username: input.email.trim(),
       password: input.password,
-      firstName: input.name.trim(),
-      lastName: input.lastName.trim(),
-      age: Number(input.age),
-      gender: input.gender.trim(),
     };
     input.password = '';
     try {
@@ -163,16 +170,18 @@ export function phoneErrorMessage(error: unknown): string {
     case 'SIGNUP_SESSION_INVALID':
       return 'Your phone verification expired. Verify your number again.';
     case 'EMAIL_IN_USE':
-      return 'An account with this email already exists. Set up phone sign-in from the sign-in screen.';
+      return 'An account with this email already exists. Sign in instead.';
     case 'INVALID_CREDENTIALS':
-      return 'Unable to sign in. Check your email and password.';
+      return 'Unable to sign in. Check your email or mobile number and password.';
     case 'UNVERIFIED':
       return 'Verify your email first, then sign in with your phone number.';
     case 'BLOCKED':
       return 'This account is blocked. Contact support through the desktop website.';
     case 'NETWORK':
       return 'Unable to reach the server. Check your connection and try again.';
-    default:
+    case 'OTP_UNAVAILABLE':
       return 'Phone verification is unavailable. Please try again later.';
+    default:
+      return 'Unable to complete your request. Please try again later.';
   }
 }

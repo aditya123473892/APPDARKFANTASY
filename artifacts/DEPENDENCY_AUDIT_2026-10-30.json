@@ -1,0 +1,1351 @@
+{
+  "date": "2026-10-30",
+  "command": "npm audit --omit=dev --json",
+  "note": "Registry advisories for installed lockfile trees; counts include transitive meta-vulnerabilities and do not prove runtime exploitability.",
+  "mobile": {
+    "counts": {
+      "info": 0,
+      "low": 5,
+      "moderate": 0,
+      "high": 4,
+      "critical": 0,
+      "total": 9
+    },
+    "packages": [
+      {
+        "name": "@expo/cli",
+        "severity": "high",
+        "direct": false,
+        "range": ">=0.19.0-canary-20240625-2333e70",
+        "fixAvailable": {
+          "name": "expo",
+          "version": "51.0.39",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@expo/config",
+        "severity": "low",
+        "direct": false,
+        "range": ">=9.1.0-canary-20240628-1ba8152",
+        "fixAvailable": {
+          "name": "expo",
+          "version": "51.0.39",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@expo/local-build-cache-provider",
+        "severity": "low",
+        "direct": false,
+        "range": "*",
+        "fixAvailable": {
+          "name": "expo",
+          "version": "51.0.39",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@expo/metro-config",
+        "severity": "low",
+        "direct": false,
+        "range": ">=0.19.0-canary-20240625-2333e70",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "@expo/prebuild-config",
+        "severity": "low",
+        "direct": false,
+        "range": ">=7.1.0-canary-20240904-69100c1",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "deepmerge",
+        "severity": "low",
+        "direct": false,
+        "range": ">=4.2.0",
+        "fixAvailable": {
+          "name": "expo",
+          "version": "51.0.39",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "deepmerge mergeObject() allows prototype poisoning of returned objects",
+            "url": "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+            "severity": "low",
+            "range": ">=4.2.0 <=4.3.1"
+          }
+        ]
+      },
+      {
+        "name": "expo",
+        "severity": "high",
+        "direct": true,
+        "range": ">=52.0.0-canary-20240625-2333e70",
+        "fixAvailable": {
+          "name": "expo",
+          "version": "51.0.39",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "node-forge",
+        "severity": "high",
+        "direct": false,
+        "range": "<=1.4.0",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "node-forge RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements",
+            "url": "https://github.com/advisories/GHSA-86w9-cpqp-85rv",
+            "severity": "high",
+            "range": "<=1.4.0"
+          }
+        ]
+      },
+      {
+        "name": "zod",
+        "severity": "high",
+        "direct": true,
+        "range": "<4.6.6",
+        "fixAvailable": {
+          "name": "expo",
+          "version": "51.0.39",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "Zod can exhaust memory while validating oversized constrained collections",
+            "url": "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
+            "severity": "high",
+            "range": "<4.6.6"
+          }
+        ]
+      }
+    ]
+  },
+  "backend": {
+    "counts": {
+      "info": 0,
+      "low": 0,
+      "moderate": 15,
+      "high": 52,
+      "critical": 3,
+      "total": 70
+    },
+    "packages": [
+      {
+        "name": "@mapbox/node-pre-gyp",
+        "severity": "high",
+        "direct": false,
+        "range": "<=1.0.11",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "@nestjs-modules/mailer",
+        "severity": "high",
+        "direct": true,
+        "range": "1.4.0 - 2.0.2",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/bull",
+        "severity": "moderate",
+        "direct": true,
+        "range": "*",
+        "fixAvailable": {
+          "name": "@nestjs/bull",
+          "version": "12.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/bull-shared",
+        "severity": "moderate",
+        "direct": false,
+        "range": "<=10.2.3",
+        "fixAvailable": {
+          "name": "@nestjs/bull",
+          "version": "12.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/common",
+        "severity": "moderate",
+        "direct": true,
+        "range": "10.4.16 - 10.4.22 || 11.0.16 - 11.1.16 || 12.0.0-alpha.0 - 12.0.0-alpha.7",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/config",
+        "severity": "moderate",
+        "direct": true,
+        "range": "1.1.6 - 4.0.2",
+        "fixAvailable": {
+          "name": "@nestjs/config",
+          "version": "12.0.1",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/core",
+        "severity": "moderate",
+        "direct": true,
+        "range": "<=11.1.17",
+        "fixAvailable": {
+          "name": "@nestjs/core",
+          "version": "12.3.2",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "@nestjs/core Improperly Neutralizes Special Elements in Output Used by a Downstream Component ('Injection')",
+            "url": "https://github.com/advisories/GHSA-36xv-jgw5-4q75",
+            "severity": "moderate",
+            "range": "<=11.1.17"
+          }
+        ]
+      },
+      {
+        "name": "@nestjs/mongoose",
+        "severity": "moderate",
+        "direct": true,
+        "range": "5.1.0 - 10.1.0",
+        "fixAvailable": {
+          "name": "@nestjs/mongoose",
+          "version": "12.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/platform-express",
+        "severity": "high",
+        "direct": true,
+        "range": "<=11.1.14 || 12.0.0-alpha.0 - 12.0.0-alpha.7",
+        "fixAvailable": {
+          "name": "@nestjs/platform-express",
+          "version": "12.3.2",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/platform-socket.io",
+        "severity": "moderate",
+        "direct": true,
+        "range": "<=11.0.0-next.4",
+        "fixAvailable": {
+          "name": "@nestjs/platform-socket.io",
+          "version": "12.3.2",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/schedule",
+        "severity": "moderate",
+        "direct": true,
+        "range": "<=4.1.2",
+        "fixAvailable": {
+          "name": "@nestjs/schedule",
+          "version": "12.0.2",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/serve-static",
+        "severity": "high",
+        "direct": true,
+        "range": "<=4.0.2",
+        "fixAvailable": {
+          "name": "@nestjs/serve-static",
+          "version": "12.1.1",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/swagger",
+        "severity": "moderate",
+        "direct": true,
+        "range": "<=11.2.5 || 12.0.0-alpha.0 - 12.0.0-alpha.2",
+        "fixAvailable": {
+          "name": "@nestjs/swagger",
+          "version": "12.0.5",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "@nestjs/websockets",
+        "severity": "moderate",
+        "direct": true,
+        "range": "<=11.0.0-next.4",
+        "fixAvailable": {
+          "name": "@nestjs/websockets",
+          "version": "12.3.2",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "body-parser",
+        "severity": "high",
+        "direct": false,
+        "range": "<=1.20.8",
+        "fixAvailable": {
+          "name": "@nestjs/platform-express",
+          "version": "12.3.2",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+            "url": "https://github.com/advisories/GHSA-v422-hmwv-36x6",
+            "severity": "low",
+            "range": "<1.20.6"
+          },
+          {
+            "title": "body-parser vulnerable to Denial of Service via trailing bytes after a compressed request body",
+            "url": "https://github.com/advisories/GHSA-27r3-jxmh-p828",
+            "severity": "high",
+            "range": "<1.20.9"
+          }
+        ]
+      },
+      {
+        "name": "brace-expansion",
+        "severity": "high",
+        "direct": false,
+        "range": "<=1.1.20 || 2.0.0 - 2.1.6",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+            "url": "https://github.com/advisories/GHSA-q2hr-2g5m-vwhr",
+            "severity": "moderate",
+            "range": "<1.1.21"
+          },
+          {
+            "title": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+            "url": "https://github.com/advisories/GHSA-q2hr-2g5m-vwhr",
+            "severity": "moderate",
+            "range": ">=2.0.0 <2.1.7"
+          },
+          {
+            "title": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+            "url": "https://github.com/advisories/GHSA-qhr7-859c-m2p7",
+            "severity": "high",
+            "range": "<1.1.20"
+          },
+          {
+            "title": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+            "url": "https://github.com/advisories/GHSA-qhr7-859c-m2p7",
+            "severity": "high",
+            "range": ">=2.0.0 <2.1.6"
+          },
+          {
+            "title": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+            "url": "https://github.com/advisories/GHSA-6j4f-fj2g-mc7p",
+            "severity": "high",
+            "range": "<1.1.19"
+          },
+          {
+            "title": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+            "url": "https://github.com/advisories/GHSA-6j4f-fj2g-mc7p",
+            "severity": "high",
+            "range": ">=2.0.0 <2.1.5"
+          }
+        ]
+      },
+      {
+        "name": "bull",
+        "severity": "moderate",
+        "direct": true,
+        "range": ">=2.0.0",
+        "fixAvailable": {
+          "name": "bull",
+          "version": "1.1.3",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "deepmerge-ts",
+        "severity": "high",
+        "direct": false,
+        "range": "<8.0.0",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "DeepmergeTS has stack exhaustion when merging recursive object graphs",
+            "url": "https://github.com/advisories/GHSA-ggr8-5vv4-36mx",
+            "severity": "high",
+            "range": "<8.0.0"
+          }
+        ]
+      },
+      {
+        "name": "engine.io",
+        "severity": "high",
+        "direct": false,
+        "range": "6.6.0 - 6.6.9",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "Socket.IO: Engine.IO Protocol Revision Mismatch DoS",
+            "url": "https://github.com/advisories/GHSA-2gc4-cqfq-p2gv",
+            "severity": "high",
+            "range": ">=6.6.0 <6.6.10"
+          }
+        ]
+      },
+      {
+        "name": "express-handlebars",
+        "severity": "high",
+        "direct": false,
+        "range": "<5.3.1",
+        "fixAvailable": false,
+        "advisories": [
+          {
+            "title": "Insecure template handling in Express-handlebars",
+            "url": "https://github.com/advisories/GHSA-fr76-2wp8-fp92",
+            "severity": "high",
+            "range": "<5.3.1"
+          }
+        ]
+      },
+      {
+        "name": "file-type",
+        "severity": "moderate",
+        "direct": false,
+        "range": "13.0.0 - 21.3.1",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "file-type affected by infinite loop in ASF parser on malformed input with zero-size sub-header",
+            "url": "https://github.com/advisories/GHSA-5v7r-6r5c-r473",
+            "severity": "moderate",
+            "range": ">=13.0.0 <21.3.1"
+          },
+          {
+            "title": "file-type: ZIP Decompression Bomb DoS via [Content_Types].xml entry",
+            "url": "https://github.com/advisories/GHSA-j47w-4g3g-c36v",
+            "severity": "moderate",
+            "range": ">=20.0.0 <=21.3.1"
+          }
+        ]
+      },
+      {
+        "name": "glob",
+        "severity": "high",
+        "direct": false,
+        "range": "10.2.0 - 10.4.5",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "glob CLI: Command injection via -c/--cmd executes matches with shell:true",
+            "url": "https://github.com/advisories/GHSA-5j98-mcp5-4vw2",
+            "severity": "high",
+            "range": ">=10.2.0 <10.5.0"
+          }
+        ]
+      },
+      {
+        "name": "handlebars",
+        "severity": "critical",
+        "direct": true,
+        "range": "3.0.0 - 4.7.9",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "Handlebars: JavaScript Injection via Unsafe Inline Embedding of Precompiled Templates",
+            "url": "https://github.com/advisories/GHSA-xw65-4hp5-5hc7",
+            "severity": "moderate",
+            "range": ">=4.0.0 <=4.7.9"
+          },
+          {
+            "title": "Handlebars: JavaScript Injection via AST Type Confusion in compile (bypass of CVE-2026-33937)",
+            "url": "https://github.com/advisories/GHSA-8r5x-fm3f-whwj",
+            "severity": "critical",
+            "range": ">=4.0.0 <=4.7.9"
+          },
+          {
+            "title": "Handlebars: JavaScript Injection via Own Property Check Bypass",
+            "url": "https://github.com/advisories/GHSA-p8wg-vrv2-v86f",
+            "severity": "critical",
+            "range": ">=3.0.0 <=4.7.9"
+          }
+        ]
+      },
+      {
+        "name": "html-minifier",
+        "severity": "high",
+        "direct": false,
+        "range": "*",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "kangax html-minifier REDoS vulnerability",
+            "url": "https://github.com/advisories/GHSA-pfq8-rq6v-vf5m",
+            "severity": "high",
+            "range": "<=4.0.0"
+          }
+        ]
+      },
+      {
+        "name": "html-to-text",
+        "severity": "high",
+        "direct": false,
+        "range": "10.0.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "js-yaml",
+        "severity": "high",
+        "direct": false,
+        "range": "4.0.0 - 4.3.1",
+        "fixAvailable": {
+          "name": "@nestjs/swagger",
+          "version": "12.0.5",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "js-yaml has prototype pollution in merge (<<)",
+            "url": "https://github.com/advisories/GHSA-mh29-5h37-fv8m",
+            "severity": "moderate",
+            "range": ">=4.0.0 <4.1.1"
+          },
+          {
+            "title": "JS-YAML: Quadratic-complexity DoS in merge key handling via repeated aliases",
+            "url": "https://github.com/advisories/GHSA-h67p-54hq-rp68",
+            "severity": "moderate",
+            "range": ">=4.0.0 <=4.1.1"
+          },
+          {
+            "title": "js-yaml: YAML merge-key chains can force quadratic CPU consumption",
+            "url": "https://github.com/advisories/GHSA-52cp-r559-cp3m",
+            "severity": "high",
+            "range": ">=4.0.0 <4.3.0"
+          },
+          {
+            "title": "JS-YAML: Quadratic CPU consumption in !!omap resolution (3.x and 4.x) — CVE-2026-59870 fix not backported",
+            "url": "https://github.com/advisories/GHSA-5p4m-2wfm-xmqj",
+            "severity": "high",
+            "range": ">=4.0.0 <4.3.1"
+          },
+          {
+            "title": "js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources",
+            "url": "https://github.com/advisories/GHSA-2883-xcg3-v3hh",
+            "severity": "high",
+            "range": ">=4.0.0 <4.3.2"
+          }
+        ]
+      },
+      {
+        "name": "lodash",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.17.23",
+        "fixAvailable": {
+          "name": "@nestjs/swagger",
+          "version": "12.0.5",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "lodash vulnerable to Code Injection via `_.template` imports key names",
+            "url": "https://github.com/advisories/GHSA-r5fr-rjxr-66jc",
+            "severity": "high",
+            "range": ">=4.0.0 <=4.17.23"
+          },
+          {
+            "title": "lodash vulnerable to Prototype Pollution via array path bypass in `_.unset` and `_.omit`",
+            "url": "https://github.com/advisories/GHSA-f23m-r3pf-42rh",
+            "severity": "moderate",
+            "range": "<=4.17.23"
+          },
+          {
+            "title": "Lodash has Prototype Pollution Vulnerability in `_.unset` and `_.omit` functions",
+            "url": "https://github.com/advisories/GHSA-xxjr-mmjv-4gpg",
+            "severity": "moderate",
+            "range": ">=4.0.0 <=4.17.22"
+          }
+        ]
+      },
+      {
+        "name": "mailparser",
+        "severity": "high",
+        "direct": false,
+        "range": "2.3.1 - 3.9.19",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml",
+        "severity": "high",
+        "direct": false,
+        "range": "<=5.0.0-beta.2",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "MJML allows mj-include directory traversal due to an incomplete fix for CVE-2020-12827",
+            "url": "https://github.com/advisories/GHSA-45h5-66jx-r2wf",
+            "severity": "moderate",
+            "range": "<5.0.0-alpha.9"
+          }
+        ]
+      },
+      {
+        "name": "mjml-accordion",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-body",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-button",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-carousel",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "mjml-cli",
+        "severity": "high",
+        "direct": false,
+        "range": "<=5.0.0-beta.2",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "mjml-column",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-core",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "mjml-divider",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-group",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head-attributes",
+        "severity": "high",
+        "direct": false,
+        "range": "<=2.0.4 || 4.0.0-alpha.1 - 4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head-breakpoint",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head-font",
+        "severity": "high",
+        "direct": false,
+        "range": "4.0.0-alpha.1 - 4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head-html-attributes",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head-preview",
+        "severity": "high",
+        "direct": false,
+        "range": "4.0.0-alpha.3 - 4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head-style",
+        "severity": "high",
+        "direct": false,
+        "range": "4.0.0-alpha.1 - 4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-head-title",
+        "severity": "high",
+        "direct": false,
+        "range": "4.0.0-alpha.1 - 4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-hero",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-image",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-migrate",
+        "severity": "high",
+        "direct": false,
+        "range": "4.0.0-beta.1 - 4.18.0",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "mjml-navbar",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-preset-core",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "mjml-raw",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-section",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-social",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-spacer",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-table",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-text",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "mjml-wrapper",
+        "severity": "high",
+        "direct": false,
+        "range": "<=4.18.0",
+        "fixAvailable": true,
+        "advisories": []
+      },
+      {
+        "name": "moment",
+        "severity": "moderate",
+        "direct": false,
+        "range": "2.29.2 - 2.30.1",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "moment vulnerable to Path Traversal via crafted non-string locale name",
+            "url": "https://github.com/advisories/GHSA-4p3w-j4w9-5jqw",
+            "severity": "moderate",
+            "range": ">=2.29.2 <2.31.0"
+          }
+        ]
+      },
+      {
+        "name": "multer",
+        "severity": "high",
+        "direct": false,
+        "range": "<=2.4.0",
+        "fixAvailable": {
+          "name": "@nestjs/platform-express",
+          "version": "12.3.2",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "Multer vulnerable to Denial of Service via incomplete cleanup",
+            "url": "https://github.com/advisories/GHSA-xf7r-hgr6-v32p",
+            "severity": "high",
+            "range": "<2.1.0"
+          },
+          {
+            "title": "Multer vulnerable to Denial of Service via resource exhaustion",
+            "url": "https://github.com/advisories/GHSA-v52c-386h-88mc",
+            "severity": "high",
+            "range": "<2.1.0"
+          },
+          {
+            "title": "Multer Vulnerable to Denial of Service via Uncontrolled Recursion",
+            "url": "https://github.com/advisories/GHSA-5528-5vmv-3xc2",
+            "severity": "high",
+            "range": "<2.1.1"
+          },
+          {
+            "title": "Multer vulnerable to Denial of Service via deeply nested field names",
+            "url": "https://github.com/advisories/GHSA-72gw-mp4g-v24j",
+            "severity": "high",
+            "range": ">=1.0.0 <2.2.0"
+          },
+          {
+            "title": "Multer vulnerable to Denial of Service via incomplete cleanup of aborted uploads",
+            "url": "https://github.com/advisories/GHSA-3p4h-7m6x-2hcm",
+            "severity": "moderate",
+            "range": ">=2.0.0-alpha.1 <2.2.0"
+          },
+          {
+            "title": "multer vulnerable to Denial of Service via crafted multipart field names",
+            "url": "https://github.com/advisories/GHSA-wc9g-mqfw-jrwm",
+            "severity": "high",
+            "range": "<2.3.0"
+          },
+          {
+            "title": "multer vulnerable to file size limit bypass via async fileFilter race condition",
+            "url": "https://github.com/advisories/GHSA-qvfw-j98x-7q72",
+            "severity": "low",
+            "range": "<2.3.0"
+          },
+          {
+            "title": "multer vulnerable to Denial of Service via oversized array index in field names",
+            "url": "https://github.com/advisories/GHSA-535w-7cp7-47q4",
+            "severity": "high",
+            "range": "<2.3.0"
+          },
+          {
+            "title": "multer vulnerable to Denial of Service via a pending asynchronous fileFilter after request teardown",
+            "url": "https://github.com/advisories/GHSA-q7qp-rjg7-q26m",
+            "severity": "high",
+            "range": ">=2.0.0 <2.5.0"
+          }
+        ]
+      },
+      {
+        "name": "nodemailer",
+        "severity": "high",
+        "direct": true,
+        "range": "<=10.1.3",
+        "fixAvailable": {
+          "name": "nodemailer",
+          "version": "10.3.1",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "Nodemailer: Email to an unintended domain can occur due to Interpretation Conflict",
+            "url": "https://github.com/advisories/GHSA-mm7p-fcc7-pg87",
+            "severity": "moderate",
+            "range": "<7.0.7"
+          },
+          {
+            "title": "Nodemailer has SMTP command injection due to unsanitized `envelope.size` parameter",
+            "url": "https://github.com/advisories/GHSA-c7w3-x93f-qmm8",
+            "severity": "low",
+            "range": "<8.0.4"
+          },
+          {
+            "title": "Nodemailer Vulnerable to SMTP Command Injection via CRLF in Transport name Option (EHLO/HELO) ",
+            "url": "https://github.com/advisories/GHSA-vvjj-xcjg-gr5g",
+            "severity": "moderate",
+            "range": "<=8.0.4"
+          },
+          {
+            "title": "Nodemailer: CRLF injection in Nodemailer List-* header comments allows arbitrary message header injection",
+            "url": "https://github.com/advisories/GHSA-268h-hp4c-crq3",
+            "severity": "moderate",
+            "range": "<=8.0.8"
+          },
+          {
+            "title": "Nodemailer jsonTransport bypasses disableFileAccess and disableUrlAccess during message normalization",
+            "url": "https://github.com/advisories/GHSA-wqvq-jvpq-h66f",
+            "severity": "moderate",
+            "range": "<=8.0.8"
+          },
+          {
+            "title": "Nodemailer’s addressparser is vulnerable to DoS caused by recursive calls",
+            "url": "https://github.com/advisories/GHSA-rcmh-qjqh-p98v",
+            "severity": "high",
+            "range": ">=3.0.0 <=7.0.10"
+          },
+          {
+            "title": "Nodemailer: Message-level raw option bypasses disableFileAccess/disableUrlAccess, enabling arbitrary file read and full-response SSRF in the delivered message",
+            "url": "https://github.com/advisories/GHSA-p6gq-j5cr-w38f",
+            "severity": "high",
+            "range": "<=9.0.0"
+          },
+          {
+            "title": "Nodemailer: resolveContent() on a MailMessage bypasses disableFileAccess/disableUrlAccess when called with the legacy signature",
+            "url": "https://github.com/advisories/GHSA-8m3c-c648-2xjj",
+            "severity": "moderate",
+            "range": "<=9.1.0"
+          },
+          {
+            "title": "Nodemailer: IDN/Punycode domain allow-list bypass leads to email delivery to an attacker-controlled domain",
+            "url": "https://github.com/advisories/GHSA-wmmp-3585-3rmp",
+            "severity": "moderate",
+            "range": "<9.1.0"
+          },
+          {
+            "title": "Nodemailer: Quadratic (O(n²)) time complexity in addressparser allows remote denial of service via a crafted address list",
+            "url": "https://github.com/advisories/GHSA-2x7j-588g-ccc2",
+            "severity": "high",
+            "range": "<9.1.0"
+          },
+          {
+            "title": "Nodemailer: Recipient-domain validation bypass via RFC 5322 comment mis-parsing leads to email delivery to an attacker-controlled domain",
+            "url": "https://github.com/advisories/GHSA-cc9r-2j5m-2m83",
+            "severity": "moderate",
+            "range": ">=6.9.16 <9.1.0"
+          },
+          {
+            "title": "Nodemailer: Process-global DNS cache reuses TLS `servername` across transports, enabling cross-tenant SMTP credential disclosure",
+            "url": "https://github.com/advisories/GHSA-6vj9-mwq6-2f5v",
+            "severity": "moderate",
+            "range": ">=5.0.0 <10.0.2"
+          },
+          {
+            "title": "Nodemailer: Nested structured recipient arrays bypass the parser depth limit and cause stack exhaustion DoS",
+            "url": "https://github.com/advisories/GHSA-8vvx-rff5-p5rq",
+            "severity": "moderate",
+            "range": "<10.0.2"
+          },
+          {
+            "title": "Nodemailer: Quadratic backtracking in the addressparser free-text fallback allows remote denial of service",
+            "url": "https://github.com/advisories/GHSA-v53p-9fqp-m79j",
+            "severity": "high",
+            "range": "<=10.0.5"
+          },
+          {
+            "title": "Nodemailer: Improper TLS Certificate Validation in OAuth2 Token Fetch Enables Credential Interception",
+            "url": "https://github.com/advisories/GHSA-r7g4-qg5f-qqm2",
+            "severity": "high",
+            "range": "<=8.0.7"
+          },
+          {
+            "title": "Nodemailer: Quadratic (O(n^2)) DKIM header unfolding lets a large folded header cause remote denial of service during signing",
+            "url": "https://github.com/advisories/GHSA-39m8-27wv-hr27",
+            "severity": "moderate",
+            "range": ">=3.0.0 <=10.0.9"
+          },
+          {
+            "title": "Nodemailer: A nested comment ends early in addressparser, releasing the rest of the comment as a recipient",
+            "url": "https://github.com/advisories/GHSA-8c8m-p3m8-cjg8",
+            "severity": "moderate",
+            "range": ">=3.0.0 <10.1.4"
+          },
+          {
+            "title": "Nodemailer: A \";\" inside a quoted string or comment ends an address group early in addressparser, turning display text into a recipient",
+            "url": "https://github.com/advisories/GHSA-m943-m63m-w62w",
+            "severity": "moderate",
+            "range": ">=3.0.0 <10.1.4"
+          },
+          {
+            "title": "Nodemailer: A \">\" inside a quoted local part ends an angle-addr early in addressparser, delivering to a domain the header does not name",
+            "url": "https://github.com/advisories/GHSA-85x2-q946-cp5h",
+            "severity": "moderate",
+            "range": ">=3.0.0 <10.1.4"
+          },
+          {
+            "title": "Nodemailer: Quadratic backtracking in SMTP AUTH mechanism detection regexes allows pre-auth remote denial of service",
+            "url": "https://github.com/advisories/GHSA-4ffr-jq9g-5ffx",
+            "severity": "moderate",
+            "range": ">=3.0.0 <=10.0.12"
+          },
+          {
+            "title": "Nodemailer: RFC 5322 comment inside an angle-bracket address is never stripped",
+            "url": "https://github.com/advisories/GHSA-g73g-hqqh-jr95",
+            "severity": "moderate",
+            "range": ">=3.0.0 <=10.0.12"
+          },
+          {
+            "title": "Nodemailer: Quadratic (O(n^2)) SMTP client reply parsing lets a malicious server or MITM cause a pre-auth remote denial of service",
+            "url": "https://github.com/advisories/GHSA-4g23-2xm8-66gc",
+            "severity": "moderate",
+            "range": ">=3.0.0 <=10.0.9"
+          }
+        ]
+      },
+      {
+        "name": "nodemailer-handlebars",
+        "severity": "high",
+        "direct": true,
+        "range": "*",
+        "fixAvailable": false,
+        "advisories": []
+      },
+      {
+        "name": "path-to-regexp",
+        "severity": "high",
+        "direct": false,
+        "range": "0.2.0 - 1.8.0",
+        "fixAvailable": {
+          "name": "@nestjs/serve-static",
+          "version": "12.1.1",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "path-to-regexp outputs backtracking regular expressions",
+            "url": "https://github.com/advisories/GHSA-9wv6-86v2-598j",
+            "severity": "high",
+            "range": ">=0.2.0 <1.9.0"
+          }
+        ]
+      },
+      {
+        "name": "preview-email",
+        "severity": "high",
+        "direct": false,
+        "range": "<=3.2.0",
+        "fixAvailable": {
+          "name": "@nestjs-modules/mailer",
+          "version": "4.0.0",
+          "isSemVerMajor": true
+        },
+        "advisories": []
+      },
+      {
+        "name": "proxy-addr",
+        "severity": "critical",
+        "direct": false,
+        "range": "1.1.0 - 2.0.7",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "proxy-addr vulnerable to IP spoofing via IPv4-mapped IPv6 trust subnet",
+            "url": "https://github.com/advisories/GHSA-jqcg-44mw-7w3h",
+            "severity": "critical",
+            "range": ">=1.1.0 <2.0.8"
+          }
+        ]
+      },
+      {
+        "name": "qs",
+        "severity": "moderate",
+        "direct": false,
+        "range": "2.2.5 - 6.16.0",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "qs has a remotely triggerable DoS: qs.stringify crashes with TypeError on null/undefined entries in comma-format arrays when encodeValuesOnly is set",
+            "url": "https://github.com/advisories/GHSA-q8mj-m7cp-5q26",
+            "severity": "moderate",
+            "range": ">=6.11.1 <=6.15.1"
+          },
+          {
+            "title": "qs array-limit bypass via bracket-key comma parsing",
+            "url": "https://github.com/advisories/GHSA-x5fp-wj9c-mxmx",
+            "severity": "moderate",
+            "range": ">=6.14.2 <=6.15.3"
+          },
+          {
+            "title": "qs: Denial of Service via Attacker Controlled isBuffer",
+            "url": "https://github.com/advisories/GHSA-4mjr-xmp4-gh2g",
+            "severity": "moderate",
+            "range": ">=2.2.5 <6.16.0"
+          },
+          {
+            "title": "qs : qs.stringify with arrayFormat 'comma' throws an uncaught TypeError on array elements carrying a non-callable own toString (DoS)",
+            "url": "https://github.com/advisories/GHSA-6pq8-jhm2-2vcw",
+            "severity": "moderate",
+            "range": ">=6.7.0 <=6.16.0"
+          }
+        ]
+      },
+      {
+        "name": "sharp",
+        "severity": "high",
+        "direct": true,
+        "range": "<=0.35.5-rc.1",
+        "fixAvailable": {
+          "name": "sharp",
+          "version": "0.35.5",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591",
+            "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
+            "severity": "high",
+            "range": "<0.35.0"
+          },
+          {
+            "title": "sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545",
+            "url": "https://github.com/advisories/GHSA-rgj7-g3m4-5g8c",
+            "severity": "high",
+            "range": "<0.35.4"
+          },
+          {
+            "title": "sharp : Vulnerability in librsvg dependency CVE-2026-96889",
+            "url": "https://github.com/advisories/GHSA-wq5f-xc86-pv6w",
+            "severity": "high",
+            "range": "<0.35.5"
+          }
+        ]
+      },
+      {
+        "name": "tar",
+        "severity": "critical",
+        "direct": false,
+        "range": "<=7.5.20",
+        "fixAvailable": true,
+        "advisories": [
+          {
+            "title": "node-tar Vulnerable to Arbitrary File Creation/Overwrite via Hardlink Path Traversal",
+            "url": "https://github.com/advisories/GHSA-34x7-hfp2-rc4v",
+            "severity": "high",
+            "range": "<7.5.7"
+          },
+          {
+            "title": "node-tar is Vulnerable to Arbitrary File Overwrite and Symlink Poisoning via Insufficient Path Sanitization",
+            "url": "https://github.com/advisories/GHSA-8qq5-rm4j-mr97",
+            "severity": "high",
+            "range": "<=7.5.2"
+          },
+          {
+            "title": "Arbitrary File Read/Write via Hardlink Target Escape Through Symlink Chain in node-tar Extraction",
+            "url": "https://github.com/advisories/GHSA-83g3-92jg-28cx",
+            "severity": "high",
+            "range": "<7.5.8"
+          },
+          {
+            "title": "tar has Hardlink Path Traversal via Drive-Relative Linkpath",
+            "url": "https://github.com/advisories/GHSA-qffp-2rhf-9h96",
+            "severity": "high",
+            "range": "<=7.5.9"
+          },
+          {
+            "title": "node-tar Symlink Path Traversal via Drive-Relative Linkpath",
+            "url": "https://github.com/advisories/GHSA-9ppj-qmqm-q256",
+            "severity": "high",
+            "range": "<=7.5.10"
+          },
+          {
+            "title": "Race Condition in node-tar Path Reservations via Unicode Ligature Collisions on macOS APFS",
+            "url": "https://github.com/advisories/GHSA-r6q2-hw4h-h46w",
+            "severity": "high",
+            "range": "<=7.5.3"
+          },
+          {
+            "title": "node-tar applies PAX size override to intermediary GNU long-name/long-link headers, causing tar parser interpretation differential (file smuggling)",
+            "url": "https://github.com/advisories/GHSA-vmf3-w455-68vh",
+            "severity": "moderate",
+            "range": "<=7.5.15"
+          },
+          {
+            "title": "node-tar: Process crash via PAX numeric path type confusion",
+            "url": "https://github.com/advisories/GHSA-w8wr-v893-vjvp",
+            "severity": "moderate",
+            "range": "<=7.5.17"
+          },
+          {
+            "title": "node-tar: Decompression/parse DoS via unlimited input",
+            "url": "https://github.com/advisories/GHSA-23hp-3jrh-7fpw",
+            "severity": "critical",
+            "range": "<=7.5.18"
+          },
+          {
+            "title": "node-tar: Negative tar entry size causes infinite loop in archive replace",
+            "url": "https://github.com/advisories/GHSA-8x88-c5mf-7j5w",
+            "severity": "high",
+            "range": "<=7.5.17"
+          },
+          {
+            "title": "node-tar: Uncaught Exception DoS via NUL byte in PAX path/linkpath records",
+            "url": "https://github.com/advisories/GHSA-gvwx-54wh-qm9j",
+            "severity": "moderate",
+            "range": "<=7.5.16"
+          },
+          {
+            "title": "node-tar: Uncontrolled recursion in mapHas/filesFilter allows uncatchable stack-overflow DoS via crafted long-path tar with member selection",
+            "url": "https://github.com/advisories/GHSA-r292-9mhp-454m",
+            "severity": "high",
+            "range": "<=7.5.20"
+          }
+        ]
+      },
+      {
+        "name": "uuid",
+        "severity": "moderate",
+        "direct": false,
+        "range": "<11.1.1",
+        "fixAvailable": {
+          "name": "@nestjs/schedule",
+          "version": "12.0.2",
+          "isSemVerMajor": true
+        },
+        "advisories": [
+          {
+            "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+            "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+            "severity": "moderate",
+            "range": "<11.1.1"
+          }
+        ]
+      },
+      {
+        "name": "zod",
+        "severity": "high",
+        "direct": true,
+        "range": "<4.6.6",
+        "fixAvailable": {
+          "name": "zod",
+          "version": "4.6.7",
+          "isSemVerMajor": false
+        },
+        "advisories": [
+          {
+            "title": "Zod can exhaust memory while validating oversized constrained collections",
+            "url": "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
+            "severity": "high",
+            "range": "<4.6.6"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -81,7 +81,7 @@ export async function sendToGod(id: string, content: string): Promise<GodChatSes
     const response = await apiClient.post<Envelope<{ session?: GodChatSession | null }>>(
       '/god-chat/messages',
       { id, content: content.slice(0, GOD_CHAT_MAX_CHARS) },
-      { timeout: 35_000 },
+      { timeout: 135_000 },
     );
     return unwrap(response.data).session ?? null;
   } catch (error) {

@@ -11,11 +11,11 @@ export function RegisterScreen(): React.JSX.Element {
   const [signupToken, setSignupToken] = useState<string | null>(null);
   return (
     <AuthScaffold
-      title={signupToken ? 'A little about you' : 'Create your account'}
+      title={signupToken ? 'Secure your account' : 'Create your account'}
       subtitle={
         signupToken
-          ? "Number verified. A few details and you're in."
-          : "Start with your mobile number. You'll use it to sign in."
+          ? 'Mobile number verified. Add your email and create a password.'
+          : 'Verify your mobile number, then add your email and password.'
       }
       footer={
         <AuthPrompt

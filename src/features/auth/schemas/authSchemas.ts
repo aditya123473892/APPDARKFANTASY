@@ -27,3 +27,15 @@ export const inviteCodeSchema = z.object({
 });
 export type LoginValues = z.infer<typeof loginSchema>;
 export type RegisterValues = z.infer<typeof registerSchema>;
+
+export const mobileSignupSchema = z
+  .object({
+    email: z.string().trim().toLowerCase().pipe(z.email('Enter a valid email address')),
+    password: registerSchema.shape.password.max(72, 'Use at most 72 characters'),
+    confirmPassword: z.string().min(1, 'Confirm your password'),
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+export type MobileSignupValues = z.infer<typeof mobileSignupSchema>;

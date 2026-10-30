@@ -78,10 +78,11 @@ The configured API URL remains the fallback when Expo has no host information.
 For direct backend access, restore port 9000 and set both
 proxy flags to `false`.
 
-Mobile sign-in is phone number + SMS code only (Twilio Verify; the backend rejects
-password login from the app). Signup verifies the phone first, then calls `/auth/otp/signup`
-with the profile fields. Accounts created with email and password use **Set up phone
-sign-in** on the sign-in screen once. Change the number under **Settings → Account → Phone
+Mobile signup verifies the mobile number by SMS (Twilio Verify), then collects only
+email, password and password confirmation. Login offers **Password** (email or verified
+mobile number) and **Mobile OTP**. Password login calls `/auth/password/login`; signup
+calls `/auth/otp/signup` with the verified signup token, email as `username`, and password.
+Names, age and gender can be added later. Change the number under **Settings → Account → Phone
 number**. Backend setup, migration and trial-account testing are covered in
 [dfbackend/README.md](dfbackend/README.md#phone-otp-sign-in-twilio-verify).
 

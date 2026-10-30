@@ -31,7 +31,7 @@ export const apiClient = axios.create({
   maxRedirects: 0,
 });
 // Sign-in endpoints never carry the stored session token.
-const PUBLIC_AUTH = /^\/auth\/(login|otp\/.+|phone\/bootstrap)$/;
+const PUBLIC_AUTH = /^\/auth\/(login|password\/login|otp\/.+|phone\/bootstrap)$/;
 apiClient.interceptors.request.use(async (config) => {
   const guarded = config as RetryConfig;
   guarded._sessionGeneration ??= sessionIdentity.generation;
