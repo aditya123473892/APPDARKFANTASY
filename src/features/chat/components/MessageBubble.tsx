@@ -173,6 +173,7 @@ export const MessageBubble = memo(function MessageBubble({
             mine={mine}
             viewedAt={message.viewedAt}
             viewDurationSeconds={message.viewDurationSeconds}
+            deliveryStatus={message.status}
           />
         ) : (
           message.media?.map((media) => (

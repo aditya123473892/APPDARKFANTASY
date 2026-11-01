@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { CountryCode } from 'libphonenumber-js';
 import { Button, Input, OTPInput, Text } from '@/components/ui';
@@ -25,6 +25,8 @@ export function PhoneOtpFlow({
   verifyLabel = 'Verify',
   phoneHint,
   autoFocus = true,
+  renderPhoneFields,
+  validatePhoneEntry,
 }: {
   /** Resolves with the server's resend cooldown in seconds. */
   sendCode: (phone: string) => Promise<number>;
@@ -34,6 +36,9 @@ export function PhoneOtpFlow({
   phoneHint?: string;
   /** Focus the number field on mount (the code field always focuses). */
   autoFocus?: boolean;
+  /** Extra signup details collected alongside the contact number. */
+  renderPhoneFields?: (loading: boolean) => ReactNode;
+  validatePhoneEntry?: () => boolean;
 }): React.JSX.Element {
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [country, setCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
@@ -108,7 +113,8 @@ export function PhoneOtpFlow({
 
   const submitPhone = () => {
     setTouched(true);
-    if (e164) void send(e164);
+    const detailsValid = validatePhoneEntry?.() ?? true;
+    if (e164 && detailsValid) void send(e164);
   };
 
   const verify = (value = code) => {
@@ -122,6 +128,7 @@ export function PhoneOtpFlow({
   if (step === 'phone')
     return (
       <View style={styles.form}>
+        {renderPhoneFields?.(loading)}
         <View style={styles.field}>
           <Text variant="label" color="secondary" nativeID="phone-label">
             Mobile number

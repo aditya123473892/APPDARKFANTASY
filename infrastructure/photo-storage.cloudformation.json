@@ -184,6 +184,39 @@
                 },
                 {
                   "Fn::Sub": "${PhotosBucket.Arn}/users/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/vault/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/deleted/vault/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/profile/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/posts/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/previews/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/videos/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/chat/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/groups/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/events/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/quarantine/*"
+                },
+                {
+                  "Fn::Sub": "${PhotosBucket.Arn}/reports/*"
                 }
               ]
             },

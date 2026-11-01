@@ -28,6 +28,8 @@ export function database(owner: string): Promise<SQLite.SQLiteDatabase> {
       await db
         .execAsync("ALTER TABLE photos ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'")
         .catch(() => undefined);
+      for (const column of ['localEncrypted INTEGER NOT NULL DEFAULT 0', 'remoteEncrypted INTEGER NOT NULL DEFAULT 0'])
+        await db.execAsync('ALTER TABLE photos ADD COLUMN ' + column).catch(() => undefined);
       // Recover interrupted work after process death.
       await db.runAsync("UPDATE photos SET syncState='pending' WHERE syncState='syncing'");
       return db;
@@ -38,12 +40,14 @@ export function database(owner: string): Promise<SQLite.SQLiteDatabase> {
   return current;
 }
 export async function list(owner: string): Promise<VaultPhoto[]> {
-  return (await database(owner)).getAllAsync<VaultPhoto>(
+  const rows = await (await database(owner)).getAllAsync<VaultPhoto>(
     'SELECT * FROM photos WHERE deletedAt IS NULL ORDER BY sortOrder,createdAt DESC',
   );
+  return rows.map(row => ({ ...row, remoteEncrypted: !!row.remoteEncrypted }));
 }
 export async function get(owner: string, id: string): Promise<VaultPhoto | null> {
-  return (await database(owner)).getFirstAsync<VaultPhoto>('SELECT * FROM photos WHERE id=?', id);
+  const row = await (await database(owner)).getFirstAsync<VaultPhoto>('SELECT * FROM photos WHERE id=?', id);
+  return row ? { ...row, remoteEncrypted: !!row.remoteEncrypted } : null;
 }
 export async function save(
   owner: string,
@@ -71,6 +75,7 @@ export async function save(
       photo.syncState,
       photo.error,
     );
+    await tx.runAsync('UPDATE photos SET localEncrypted=?, remoteEncrypted=? WHERE id=?', photo.localEncrypted === 1 ? 1 : 0, photo.remoteEncrypted ? 1 : 0, photo.id);
     if (operation)
       await tx.runAsync(
         `INSERT OR IGNORE INTO queue (id,photoId,operation) VALUES (?,?,?)`,

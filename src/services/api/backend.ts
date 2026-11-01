@@ -12,7 +12,8 @@ export type Envelope<T> = {
 export function unwrap<T>(body: Envelope<T>): T {
   if (body.error || (body.statusCode ?? 200) >= 400) {
     const code =
-      body.statusCode === 403 ? 'FORBIDDEN' : body.statusCode === 404 ? 'NOT_FOUND' : 'VALIDATION';
+      (body.statusCode ?? 0) >= 500 ? 'UNKNOWN'
+        : body.statusCode === 403 ? 'FORBIDDEN' : body.statusCode === 404 ? 'NOT_FOUND' : 'VALIDATION';
     const mediaFailure =
       typeof body.message === 'string' && /upload|signed URL/i.test(body.message);
     throw new ServiceError(
@@ -27,14 +28,15 @@ export function unwrap<T>(body: Envelope<T>): T {
   if (body.data === undefined || body.data === null) throw new ServiceError('UNKNOWN');
   return body.data;
 }
-export async function getData<T>(url: string, params?: Record<string, unknown>): Promise<T> {
+export async function getData<T>(url: string, params?: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   try {
-    return unwrap<T>((await apiClient.get<Envelope<T>>(url, { params })).data);
+    return unwrap<T>((await apiClient.get<Envelope<T>>(url, { params, signal })).data);
   } catch (error) {
     throw serviceError(error);
   }
 }
 export function serviceError(error: unknown): Error {
+  if (axios.isCancel(error)) return error as Error;
   if (error instanceof ServiceError) return error;
   if (axios.isAxiosError(error)) {
     const status = error.response?.status;
@@ -51,8 +53,9 @@ export function serviceError(error: unknown): Error {
   return new ServiceError('UNKNOWN');
 }
 /** The API's paginated collections use limit/skip and a separate count. */
-export async function getCollection<T>(url: string, key: string): Promise<T[]> {
+export async function getCollection<T>(url: string, key: string, signal?: AbortSignal): Promise<T[]> {
   const rows: T[] = [];
+  const pages = new Set<string>();
   const limit = 50;
   for (let skip = 0; ; skip += limit) {
     const data = await getData<Record<string, unknown>>(url, {
@@ -60,9 +63,17 @@ export async function getCollection<T>(url: string, key: string): Promise<T[]> {
       skip,
       sortBy: 'createdAt',
       order: 'desc',
-    });
+    }, signal);
     const page = data[key];
     if (!Array.isArray(page)) throw new ServiceError('UNKNOWN');
+    if (data.count !== undefined && (typeof data.count !== 'number' || !Number.isFinite(data.count) || data.count < 0))
+      throw new ServiceError('UNKNOWN');
+    // An endpoint that ignores skip must fail into a retry state instead of looping forever.
+    if (page.length) {
+      const fingerprint = JSON.stringify(page.map(item => item?._id ?? item?.id ?? item));
+      if (pages.has(fingerprint)) throw new ServiceError('UNKNOWN', 'Pagination did not advance. Please retry.');
+      pages.add(fingerprint);
+    }
     rows.push(...(page as T[]));
     if (page.length < limit || (typeof data.count === 'number' && rows.length >= data.count))
       return rows;

@@ -1,5 +1,6 @@
 import 'react-native-reanimated';
 import { withCrashReporting } from '@/services/monitoring/crashReporting';
+import { useNotificationLifecycle } from '@/features/activity/useNotificationLifecycle';
 import { useEffect } from 'react';
 import { View } from 'react-native';
 import { useFonts } from 'expo-font';
@@ -33,6 +34,7 @@ function RootNavigator(): React.JSX.Element {
     Inter_700Bold,
   });
   const privateScreen = useSessionLifecycle();
+  useNotificationLifecycle(true);
   const sessionRevision = useAuthStore((state) => state.sessionRevision);
   const status = useAuthStore((state) => state.status);
   const permissionError = useAuthStore((state) => state.permissionError);
@@ -44,7 +46,8 @@ function RootNavigator(): React.JSX.Element {
     return registerSessionTeardown(() => useToastStore.getState().hide());
   }, []);
   useEffect(() => {
-    void hydrate();
+    // Unlocking remounts protected navigation; the established session is already hydrated.
+    if (useAuthStore.getState().status === 'loading') void hydrate();
     void hydratePreferences();
   }, [hydrate, hydratePreferences]);
   useEffect(() => {

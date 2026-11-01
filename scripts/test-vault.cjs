@@ -7,11 +7,12 @@ function load(file, modules = {}) {
   const exports = {};
   vm.runInNewContext(
     ts.transpileModule(fs.readFileSync(file, 'utf8'), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      fileName: file,
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
     }).outputText,
     {
       exports,
-      require: (name) => modules[name] ?? require(name),
+      require: (name) => modules[name] ?? (name === './backupStatus' ? load('src/features/vault/backupStatus.ts') : require(name)),
       Buffer,
       Uint8Array,
       console,
@@ -28,6 +29,73 @@ const crypto = load('src/features/vault/crypto.ts', {
   expo: { uuid: { v4: require('node:crypto').randomUUID } },
 });
 module.exports = { load };
+
+function deviceStorageHarness(rows) {
+  const photos = new Map(rows.map(row => [row.id, { ...row }]));
+  const removed = [], saved = [];
+  let locked = false;
+  const valid = () => { if (locked) throw new Error('Vault locked'); };
+  const service = load('src/features/vault/deviceStorage.ts', {
+    'expo-file-system/legacy': { deleteAsync: async path => removed.push(path) },
+    './repository': {
+      get: async (owner, id) => photos.get(id),
+      save: async (owner, photo, operation) => { saved.push({ photo, operation }); photos.set(photo.id, photo); },
+    },
+    './files': { localUri: async (owner, id, path) => { valid(); return path; } },
+    './lock': { assertUnlocked: () => { valid(); return 0; }, assertEpoch: valid, refreshVault() {} },
+    './vaultService': { serial: async fn => fn() },
+  });
+  return { ...service, photos, removed, saved, lock: () => { locked = true; } };
+}
+
+test('removing a backed-up device copy preserves cloud metadata without queuing deletion', async () => {
+  const row = { id: 'photo', s3Key: 'cloud-key', status: 'approved', syncState: 'synced', localPath: 'private.jpg', updatedAt: 123, deletedAt: null };
+  const h = deviceStorageHarness([row]);
+  await h.removeDeviceCopies('owner', ['photo', 'photo']);
+  assert.deepEqual(h.removed, ['private.jpg']);
+  assert.equal(h.saved.length, 1);
+  assert.equal(h.saved[0].operation, undefined);
+  assert.equal(h.photos.get('photo').s3Key, row.s3Key);
+  assert.equal(h.photos.get('photo').deletedAt, null);
+  assert.equal(h.photos.get('photo').updatedAt, 123);
+  assert.equal(h.photos.get('photo').localPath, null);
+});
+
+test('device copy removal refuses unsynced, rejected, deleted and mixed selections before deleting anything', async () => {
+  const safe = { id: 'safe', s3Key: 'cloud-key', status: 'approved', syncState: 'synced', localPath: 'safe.jpg' };
+  for (const change of [{ s3Key: null }, { syncState: 'pending_upload' }, { status: 'rejected' }, { deletedAt: 123 }]) {
+    const h = deviceStorageHarness([safe, { ...safe, id: 'unsafe', ...change }]);
+    await assert.rejects(h.removeDeviceCopies('owner', ['safe', 'unsafe']));
+    assert.equal(h.removed.length, 0);
+    assert.equal(h.saved.length, 0);
+  }
+  const h = deviceStorageHarness([safe]);
+  h.lock();
+  await assert.rejects(h.removeDeviceCopies('owner', ['safe']), /Vault locked/);
+  assert.equal(h.removed.length, 0);
+});
+
+test('cloud-only vault thumbnails do not download media just because the grid renders', () => {
+  let requests = 0, opened = 0;
+  const effects = [];
+  const { VaultPhotoTile } = load('src/features/vault/components/VaultPhotoTile.tsx', {
+    react: { useEffect: fn => effects.push(fn), useState: initial => [initial, () => {}], useRef: initial => ({ current: initial }) },
+    'react-native': { StyleSheet: { create: s => s }, View: 'View', ActivityIndicator: 'Spinner' },
+    '@/theme': { radius: {}, spacing: {} },
+    '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
+    '@/components/ui/Pressable': { Pressable: 'Pressable' },
+    '@/components/ui/FitImage': { FitImage: 'Image' },
+    '@/components/ui': { Text: 'Text' },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    '../media': { photoUri: async () => { requests++; return 'private.jpg'; } },
+  });
+  const tile = VaultPhotoTile({ owner: 'owner', photo: { id: 'cloud', kind: 'photo', localPath: null, s3Key: 'cloud-key' }, selected: false, selecting: false, onPress: () => { opened++; } });
+  effects.forEach(fn => fn());
+  assert.equal(requests, 0);
+  assert.equal(tile.props.accessibilityState.busy, false);
+  tile.props.onPress();
+  assert.equal(opened, 1);
+});
 
 function selectionHarness() {
   const copies = [], removed = [], temps = [];
@@ -175,8 +243,12 @@ test('damaged local photos are rejected before a viewing copy is written', async
   assert.equal(written, false);
 });
 
-test('sandbox JPEGs persist after temp cleanup, reject other-account paths and wipe on logout', async () => {
-  const disk = new Map();
+test('encrypted photos persist after temp cleanup, reject corruption and other-account paths, and wipe on logout', async () => {
+  const disk = new Map(), keys = new Map();
+  const secure = { getItemAsync:async key=>keys.get(key), setItemAsync:async(key,value)=>keys.set(key,value), deleteItemAsync:async key=>keys.delete(key) };
+  const photoEncryption = load('src/features/vault/photoEncryption.ts', {
+    'expo-crypto':require('./test-support/crypto.cjs').aesAdapter(), 'expo-secure-store':secure,
+  });
   const owner = '0123456789abcdef01234567',
     id = '12345678-1234-4234-8234-123456789abc';
   const files = load('src/features/vault/files.ts', {
@@ -207,7 +279,8 @@ test('sandbox JPEGs persist after temp cleanup, reject other-account paths and w
         }
       },
     },
-    'expo-secure-store': { deleteItemAsync: async () => {} },
+    'expo-secure-store': secure,
+    './photoEncryption': photoEncryption,
     './crypto': crypto,
     './repository': {
       directory: (o) => `file:///private/files/vault/${o}/simple/`,
@@ -218,8 +291,11 @@ test('sandbox JPEGs persist after temp cleanup, reject other-account paths and w
   const path = await files.store(owner, id, bytes);
   assert.equal(disk.size, 1);
   assert.ok(path.endsWith('.jpg'));
-  assert.deepEqual(disk.get(path), bytes);
+  assert.notDeepEqual(disk.get(path), bytes);
+  assert.equal(photoEncryption.encryptedPhoto(new Uint8Array(disk.get(path))), true);
   assert.deepEqual(Buffer.from(await files.plaintext(owner, id, path)), bytes);
+  const intact=Buffer.from(disk.get(path)); disk.get(path)[10]^=1;
+  await assert.rejects(files.plaintext(owner,id,path)); disk.set(path,intact);
   await assert.rejects(files.plaintext('different-account', id, path), /Invalid vault path/);
   const temp = await files.temporaryFile(bytes);
   assert.deepEqual(disk.get(temp), bytes);
@@ -488,12 +564,12 @@ test('Android 14 exports only after confirmation, without photo-read permission,
       removeTemp: async (uri) => deleted.push(uri),
     },
   });
-  await exporting.exportPhotos('owner', ['photo']);
+  assert.equal(await exporting.exportPhotos('owner', ['photo']), 0);
   assert.equal(viewed, 0);
   assert.equal(prepared, 0);
   assert.equal(gallery.length, 0);
   confirmed = true;
-  await exporting.exportPhotos('owner', ['photo']);
+  assert.equal(await exporting.exportPhotos('owner', ['photo']), 1);
   assert.equal(prepared, 1);
   assert.deepEqual(gallery, ['file:///cache/vault-temp/export.jpg']);
   assert.equal(deleted.length, 3);
@@ -607,7 +683,7 @@ test('unlocked All photos includes earlier hidden imports while Hidden keeps the
   assert.equal(photos[1].hidden, 1);
 });
 
-test('opening a local photo uses its sandbox URI without network, hashing or temporary copies', async () => {
+test('opening a local photo delegates verified local access without a network download', async () => {
   let reads = 0;
   const media = load('src/features/vault/media.ts', {
     './repository': { get: async () => ({ localPath: 'sandbox.jpg', deletedAt: null }) },

@@ -256,16 +256,18 @@ export async function deletePost(postId: string): Promise<void> {
   }
 }
 export const realFeedService: FeedService = {
-  async listPage(skip) {
-    const data = await getData<{ posts: BackendPost[]; count: number }>('/posts/public/feeds', {
+  async listPage(skip, signal) {
+    const data = await getData<{ posts: BackendPost[]; count: number; nextCursor?: string }>('/posts/public/feeds', {
       limit: FEED_PAGE,
-      skip,
+      summary: 'true',
+      ...(typeof skip === 'string' ? { cursor: skip } : { skip }),
       sortBy: 'createdAt',
       order: 'desc',
-    });
+    }, signal);
     if (!Array.isArray(data?.posts)) throw new ServiceError('UNKNOWN');
     return {
       posts: data.posts.map((post) => mapPost(post)),
+      nextCursor: data.nextCursor,
       count: typeof data.count === 'number' ? data.count : data.posts.length,
     };
   },

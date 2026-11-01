@@ -1,4 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { RefreshControl, StyleSheet, View } from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
@@ -7,14 +6,9 @@ import { spacing, radius } from '@/theme';
 import { useRouter } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
 import { Avatar, Button, Text, EmptyState, Loader } from '@/components/ui';
-import { toast } from '@/components/ui/Toast';
 import { ErrorState } from '@/components/feedback/ErrorState';
-import { pendingFollows, approveFollow } from '@/features/requests/services/requestsService.real';
-import { queryKeys } from '@/services/queryKeys';
-import { describeError } from '@/services/errors';
+import { useRequestActions, useRequests } from '@/features/requests/hooks/useRequests';
 import { useTheme } from '@/theme/useTheme';
-import { displayName } from '@/features/auth/userModel';
-import { mediaUrl } from '@/services/api/backend';
 import { useState } from 'react';
 import { NotificationsScreen } from './NotificationsScreen';
 export function ActivityScreen() {
@@ -68,18 +62,10 @@ export function ActivityScreen() {
 }
 export function FollowRequestsScreen() {
   const router = useRouter();
-  const client = useQueryClient();
   const { theme } = useTheme();
-  const query = useQuery({ queryKey: ['follow-requests'], queryFn: pendingFollows });
-  const action = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: 'accepted' | 'rejected' }) =>
-      approveFollow(id, status),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ['follow-requests'] });
-      void client.invalidateQueries({ queryKey: queryKeys.requests });
-    },
-    onError: (error) => toast.error(describeError(error, 'Unable to update this follow request.')),
-  });
+  const query = useRequests();
+  const actions = useRequestActions();
+  const busy = actions.accept.isPending || actions.decline.isPending;
   return (
     <Screen padded={false} edges={[]}>
       <View style={styles.sectionHeading}>
@@ -96,8 +82,8 @@ export function FollowRequestsScreen() {
         <ErrorState onRetry={() => void query.refetch()} />
       ) : (
         <FlashList
-          data={query.data}
-          keyExtractor={(f) => f._id}
+          data={query.data?.incoming ?? []}
+          keyExtractor={(request) => request.id}
           contentContainerStyle={{ paddingHorizontal: spacing.screen, paddingBottom: spacing.xl }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
           refreshControl={
@@ -126,14 +112,14 @@ export function FollowRequestsScreen() {
             >
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`View ${displayName(item.follower)}'s profile`}
-                onPress={() => router.push(`/profile/${item.follower._id}`)}
+                accessibilityLabel={`View ${item.user.name}'s profile`}
+                onPress={() => router.push(`/profile/${item.user.id}`)}
                 style={styles.person}
               >
-                <Avatar uri={mediaUrl(item.follower.avatar)} label={displayName(item.follower)} />
+                <Avatar uri={item.user.avatarUri} label={item.user.name} />
                 <View style={styles.personCopy}>
                   <Text variant="label" weight="semibold">
-                    {displayName(item.follower)}
+                    {item.user.name}
                   </Text>
                   <Text variant="caption" color="muted">
                     Wants to follow you
@@ -146,23 +132,21 @@ export function FollowRequestsScreen() {
                   fullWidth={false}
                   variant="ghost"
                   size="sm"
-                  disabled={action.isPending}
+                  disabled={busy}
                   style={styles.requestAction}
-                  onPress={() => action.mutate({ id: item._id, status: 'rejected' })}
+                  onPress={() => actions.decline.mutate(item)}
                 />
                 <Button
                   label="Accept"
                   icon="checkmark"
                   size="sm"
                   fullWidth={false}
-                  disabled={action.isPending}
+                  disabled={busy}
                   loading={
-                    action.isPending &&
-                    action.variables?.id === item._id &&
-                    action.variables.status === 'accepted'
+                    actions.accept.isPending && actions.accept.variables?.id === item.id
                   }
                   style={styles.requestAction}
-                  onPress={() => action.mutate({ id: item._id, status: 'accepted' })}
+                  onPress={() => actions.accept.mutate(item)}
                 />
               </View>
             </View>

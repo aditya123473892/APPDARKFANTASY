@@ -13,24 +13,27 @@ import { get } from './repository';
 function confirmExport(sharing: boolean): Promise<boolean> {
   return new Promise((resolve) =>
     Alert.alert(
-      sharing ? 'Share outside Photo Vault?' : 'Export to Photos?',
+      sharing ? 'Share outside Photo Vault?' : 'Download to phone?',
       sharing
         ? 'This will leave the vault. The receiving app can keep a copy.'
         : 'This will leave the vault and become visible in your gallery and to other apps. The vault copy stays.',
       [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-        { text: sharing ? 'Share' : 'Export', onPress: () => resolve(true) },
+        { text: sharing ? 'Share' : 'Download', onPress: () => resolve(true) },
       ],
       { cancelable: true, onDismiss: () => resolve(false) },
     ),
   );
 }
-export async function exportPhotos(owner: string, ids: string[], sharing = false): Promise<void> {
+export async function exportPhotos(owner: string, ids: string[], sharing = false): Promise<number> {
   const scope = assertUnlocked(owner);
-  if (!(await confirmExport(sharing))) return;
+  if (!(await confirmExport(sharing))) return 0;
   assertEpoch(owner, scope);
   // Android 10+ inserts app-owned media via MediaStore without read permission.
-  if (!sharing && Platform.OS === 'android' && Number(Platform.Version) < 30) {
+  if (
+    !sharing &&
+    (Platform.OS === 'ios' || (Platform.OS === 'android' && Number(Platform.Version) < 30))
+  ) {
     const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo', 'video']);
     if (!permission.granted)
       throw new Error('Photo export permission was denied. Your vault copy is safe.');
@@ -72,4 +75,5 @@ export async function exportPhotos(owner: string, ids: string[], sharing = false
         await FS.deleteAsync(normalized, { idempotent: true });
     }
   }
+  return ids.length;
 }

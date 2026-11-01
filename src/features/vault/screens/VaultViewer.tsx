@@ -7,6 +7,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { Text, Button, IconButton } from '@/components/ui';
 import { useTheme } from '@/theme/useTheme';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
+import { backupStatus } from '../backupStatus';
 import { useVaultLock, unlock } from '../lock';
 import { editPhoto, initializeVaultOwner } from '../vaultService';
 import { get } from '../repository';
@@ -14,6 +15,7 @@ import { photoUri } from '../media';
 import { exportPhotos } from '../export';
 import { vaultError } from '../presentation';
 import type { VaultPhoto } from '../types';
+import { removeDeviceCopies } from '../deviceStorage';
 
 /** Plays a private local file; unmounting on lock/background releases the player. */
 function VaultVideo({ uri }: { uri: string }): React.JSX.Element {
@@ -92,7 +94,7 @@ export function VaultViewer(): React.JSX.Element {
         const restore = repair.current;
         repair.current = false;
         const value = await photoUri(owner, id, restore);
-        if (!cancelled) setDisplay({ id, uri: value });
+        if (!cancelled) { setPhoto(await get(owner, id) ?? row); setDisplay({ id, uri: value }); }
       })().catch(() => {
         if (!cancelled) {
           setDisplay(undefined);
@@ -118,8 +120,8 @@ export function VaultViewer(): React.JSX.Element {
   };
   const remove = () =>
     Alert.alert(
-      `Delete ${noun}?`,
-      'This removes it from your vault on all devices. Exported copies will stay.',
+      `Delete ${noun} from vault?`,
+      'This removes it from your vault on all devices. The service retains a private deleted copy. Gallery copies will stay.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -134,6 +136,24 @@ export function VaultViewer(): React.JSX.Element {
         },
       ],
     );
+  const removeLocal = () =>
+    Alert.alert(
+      'Remove device copy?',
+      'This frees storage used by the app. The backed-up item stays in your vault and can be downloaded again. Gallery copies are unchanged.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove device copy',
+          onPress: () =>
+            void run(async () => {
+              setDisplay(undefined);
+              await removeDeviceCopies(owner, [id]);
+              if (router.canGoBack()) router.back();
+              else router.replace('/vault' as Href);
+            }, 'Could not remove the device copy.'),
+        },
+      ],
+    );
   const more = () =>
     Alert.alert(`${noun === 'video' ? 'Video' : 'Photo'} options`, undefined, [
       {
@@ -144,7 +164,8 @@ export function VaultViewer(): React.JSX.Element {
             'Couldn’t update this photo.',
           ),
       },
-      { text: `Delete ${noun}`, style: 'destructive', onPress: remove },
+      ...(photo?.localPath ? [{ text: 'Remove device copy', onPress: removeLocal }] : []),
+      { text: 'Delete from vault', style: 'destructive', onPress: remove },
       { text: 'Cancel', style: 'cancel' },
     ]);
   return (
@@ -219,6 +240,9 @@ export function VaultViewer(): React.JSX.Element {
                 Hidden photo
               </Text>
             ) : null}
+            <Text variant="caption" color="secondary" center>
+              {photo ? backupStatus(photo) : 'Keep the phone copy until backup completes'}
+            </Text>
             {photo?.status === 'rejected' && (
               <Text color="danger" accessibilityRole="alert">
                 This photo wasn’t accepted for backup. You can keep it here, export it or delete it.
@@ -240,17 +264,20 @@ export function VaultViewer(): React.JSX.Element {
                 }
               />
               <Button
-                label="Export"
+                label="Download to phone"
                 icon="download-outline"
                 fullWidth={false}
                 style={styles.grow}
                 loading={busy}
                 disabled={!uri}
                 onPress={() =>
-                  void run(
-                    () => exportPhotos(owner, [id]),
-                    'Couldn’t export. Check permissions and storage.',
-                  )
+                  void run(async () => {
+                    if (await exportPhotos(owner, [id]))
+                      Alert.alert(
+                        'Saved to phone',
+                        'You can find it in Gallery / Photos. Your vault copy is kept.',
+                      );
+                  }, 'Couldn’t export. Check permissions and storage.')
                 }
               />
             </View>

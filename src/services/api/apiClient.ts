@@ -9,11 +9,13 @@ import {
 import { initializePinning } from './pinning';
 import { CLIENT_PLATFORM_HEADERS } from './clientPlatform';
 import { useBlockState } from '@/features/safety/blockState';
+import { requestSignal } from './requestSignal';
 
 type RetryConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
   _sessionGeneration?: number;
   _blockVersion?: number;
+  _disposeSignal?: () => void;
 };
 function assertRequestSession(config?: RetryConfig): void {
   if (config?._sessionGeneration !== sessionIdentity.generation)
@@ -31,7 +33,7 @@ export const apiClient = axios.create({
   maxRedirects: 0,
 });
 // Sign-in endpoints never carry the stored session token.
-const PUBLIC_AUTH = /^\/auth\/(login|password\/login|otp\/.+|phone\/bootstrap)$/;
+const PUBLIC_AUTH = /^\/auth\/(login|password\/login|email\/resend|otp\/.+|phone\/bootstrap)$/;
 apiClient.interceptors.request.use(async (config) => {
   const guarded = config as RetryConfig;
   guarded._sessionGeneration ??= sessionIdentity.generation;
@@ -41,7 +43,9 @@ apiClient.interceptors.request.use(async (config) => {
   await initializePinning();
   assertRequestSession(guarded);
   if (scope.signal.aborted) throw new axios.CanceledError('Session ended');
-  config.signal = scope.signal;
+  const combined = requestSignal(scope.signal, config.signal as AbortSignal | undefined);
+  config.signal = combined.signal;
+  guarded._disposeSignal = combined.dispose;
   const target = new URL(apiClient.getUri(config));
   if (target.origin !== new URL(env.apiUrl).origin || target.username || target.password)
     throw new Error('API requests must stay on the configured origin');
@@ -59,6 +63,7 @@ apiClient.interceptors.request.use(async (config) => {
 });
 apiClient.interceptors.response.use(
   async (response) => {
+    (response.config as RetryConfig)._disposeSignal?.();
     assertRequestSession(response.config);
     if (
       response.config.method === 'get' &&
@@ -92,6 +97,7 @@ apiClient.interceptors.response.use(
   },
   async (error: AxiosError<{ message?: string }>) => {
     const config = error.config as RetryConfig | undefined;
+    config?._disposeSignal?.();
     if (config) assertRequestSession(config);
     if (error.response?.status === 401)
       await invalidateSession(

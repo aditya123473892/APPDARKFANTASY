@@ -238,6 +238,18 @@ export async function connectSocket(): Promise<Socket> {
       }
       acceptMessage(parsed, deleted, received);
     };
+    current.on('notificationChanged', (event?: { relationships?: boolean }) => {
+      if (!valid()) return;
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      if (!event?.relationships) return;
+      void queryClient.invalidateQueries({ queryKey: ['feed'] });
+      void queryClient.invalidateQueries({ queryKey: ['user-posts'] });
+      void queryClient.invalidateQueries({ queryKey: ['requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      void queryClient.invalidateQueries({ queryKey: ['relationships'] });
+      void queryClient.invalidateQueries({ queryKey: ['social-lists'] });
+      void queryClient.invalidateQueries({ queryKey: ['social-counts'] });
+    });
     current.on('receiveMessage', (raw: unknown) => merge(raw, false, true));
     current.on('receiveGroupMessage', (raw: unknown) => merge(raw, false, true));
     current.on('messageUpdated', (raw: unknown) => merge(raw));

@@ -6,9 +6,9 @@ export type DiscoveryPage = { profiles: ProfileView[]; nextSkip?: number };
 
 export interface ProfileService {
   discover(): Promise<ProfileView[]>;
-  discoverPage(skip: number, search: string): Promise<DiscoveryPage>;
+  discoverPage(skip: number, search: string, signal?: AbortSignal): Promise<DiscoveryPage>;
   /** Throws ServiceError('NOT_FOUND') for unknown or unavailable profiles. */
-  get(userId: string): Promise<ProfileView>;
+  get(userId: string, signal?: AbortSignal): Promise<ProfileView>;
   updateMe(input: UpdateProfileInput): Promise<User>;
   updateAvatar(asset: UploadAsset): Promise<User>;
 }

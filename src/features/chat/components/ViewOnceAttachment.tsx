@@ -23,12 +23,14 @@ export function ViewOnceAttachment({
   mine,
   viewedAt,
   viewDurationSeconds,
+  deliveryStatus = 'sent',
 }: {
   media: ChatMedia;
   messageId: string;
   mine: boolean;
   viewedAt?: string;
   viewDurationSeconds?: number;
+  deliveryStatus?: string;
 }): React.JSX.Element {
   const [uri, setUri] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
@@ -48,7 +50,9 @@ export function ViewOnceAttachment({
     (media.status && media.status !== 'active') ||
     (media.expiresAt && Date.parse(media.expiresAt) <= initialTime),
   );
-  const mode = viewDurationSeconds ? `${viewDurationSeconds}s photo` : 'View-once photo';
+  const mode = viewDurationSeconds ? `View Once · ${viewDurationSeconds}s photo` : 'View Once · Photo';
+  const sentLabel = deliveryStatus === 'sending' ? 'Sending' : deliveryStatus === 'uncertain' ? 'Delivery unconfirmed'
+    : deliveryStatus === 'failed-definitive' ? 'Not sent' : 'Sent';
   useScreenshotProtection(`chat-photo:${messageId}`, visible);
 
   const close = useCallback(() => {
@@ -141,13 +145,13 @@ export function ViewOnceAttachment({
       <AttachmentCard
         label={label}
         title={
-          unavailable ? (viewedAt || consumed ? 'Opened photo' : 'Photo unavailable') : 'Photo'
+          mine ? `${sentLabel} photo · View Once` : unavailable ? (viewedAt || consumed ? 'Opened photo' : 'Photo unavailable') : 'View Once · Photo'
         }
         description={
           unavailable
-            ? 'This photo cannot be opened again'
+            ? (viewedAt || consumed ? 'Opened · This photo cannot be opened again' : 'Expired · Photo unavailable')
             : mine
-              ? `${viewDurationSeconds ? `${viewDurationSeconds}s · ` : ''}View once · Not opened yet`
+              ? `${viewDurationSeconds ? `${viewDurationSeconds}s · ` : ''}${sentLabel} · Not opened yet`
               : `${viewDurationSeconds ? `${viewDurationSeconds}s · ` : ''}View once · Tap to open`
         }
         icon={

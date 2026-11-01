@@ -1,14 +1,4 @@
-import { useEffect, useState } from 'react';
-import { Keyboard } from 'react-native';
+import { useKeyboardState } from 'react-native-keyboard-controller';
 export function useKeyboard(): boolean {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () => setVisible(true));
-    const hide = Keyboard.addListener('keyboardDidHide', () => setVisible(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-  return visible;
+  return useKeyboardState((state) => state.isVisible);
 }

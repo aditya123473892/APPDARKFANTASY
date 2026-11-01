@@ -1,4 +1,6 @@
-import { KeyboardAvoidingView, Modal, Platform, StyleSheet, View } from 'react-native';
+import { useMemo } from 'react';
+import { Modal, PanResponder, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Pressable } from '@/components/ui/Pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, spacing } from '@/theme';
@@ -10,6 +12,10 @@ export function BottomSheet({
 }: React.PropsWithChildren<{ visible: boolean; onClose: () => void }>): React.JSX.Element {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const pan = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => g.dy > 8 && Math.abs(g.dx) < 30,
+    onPanResponderRelease: (_, g) => { if (g.dy > 50 || g.vy > 0.6) onClose(); },
+  }), [onClose]);
   return (
     <Modal
       transparent
@@ -19,17 +25,15 @@ export function BottomSheet({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.flex}
-      >
+      <KeyboardAvoidingView behavior="padding" automaticOffset style={styles.flex}>
+        <View style={styles.overlay}>
         <Pressable
           accessibilityLabel="Close"
           onPress={onClose}
-          style={[styles.overlay, { backgroundColor: theme.colors.overlay }]}
-        >
-          <Pressable
-            accessible={false}
+          style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.overlay }]}
+        />
+          <View
+            accessibilityViewIsModal
             style={[
               styles.sheet,
               {
@@ -39,10 +43,12 @@ export function BottomSheet({
               },
             ]}
           >
-            <View style={[styles.handle, { backgroundColor: theme.colors.border }]} />
+            <View {...pan.panHandlers} style={{ paddingVertical: spacing.sm }}>
+              <View style={[styles.handle, { backgroundColor: theme.colors.border }]} />
+            </View>
             {children}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );

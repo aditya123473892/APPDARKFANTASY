@@ -4,7 +4,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
 import { Avatar, Chip, FitImage, Text } from '@/components/ui';
 import type { ProfileView } from '@/features/profile/types';
-import { useFollowUser } from '@/features/requests/hooks/useRequests';
+import { FollowButton } from '@/features/requests/components/FollowButton';
 import { mediaUrl } from '@/services/api/backend';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -92,7 +92,6 @@ export const ProfilePost = memo(function ProfilePost({
   onMessage: (profile: ProfileView) => void;
 }): React.JSX.Element {
   const { theme } = useTheme();
-  const follow = useFollowUser(profile.id);
   const place = (showDistance ? formatDistance(profile.distanceKm) : null) ?? profile.location;
   const meta = [profile.occupation, place].filter(Boolean).join(' · ');
   const presence = showPresence ? formatPresence(profile.presence) : null;
@@ -187,17 +186,7 @@ export const ProfilePost = memo(function ProfilePost({
         ) : null}
 
         <View style={styles.actions}>
-          <ActionPill
-            tone="primary"
-            icon={follow.requested ? 'checkmark' : 'heart-outline'}
-            label={follow.requested ? 'Requested' : 'Follow'}
-            accessibilityLabel={
-              follow.requested ? `Follow request sent to ${profile.name}` : `Follow ${profile.name}`
-            }
-            disabled={follow.requested}
-            busy={follow.pending}
-            onPress={follow.follow}
-          />
+<FollowButton userId={profile.id} />
           <ActionPill
             icon="chatbubble-outline"
             label="Message"

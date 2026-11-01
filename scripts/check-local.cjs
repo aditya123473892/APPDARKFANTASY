@@ -8,7 +8,7 @@ async function check() {
     (entry) => entry.family === 'IPv4' && !entry.internal,
   )?.address || '127.0.0.1';
   const targets = {
-    backend: 'http://[::1]:9000/api',
+    backend: 'http://127.0.0.1:9000/api',
     expo: `http://${address}:8081/status`,
     proxy: `http://${address}:8081/api`,
   };

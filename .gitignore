@@ -13,6 +13,7 @@ web-build/
 .env
 .env.*
 !.env.mobile.example
+!.env.mobile.production.example
 npm-debug.log*
 expo-proxy.*.log
 artifacts/*.log
@@ -57,3 +58,6 @@ docker-compose.yml
 
 expo-env.d.ts
 # @end expo-cli
+
+# Generated JavaScript export used for reliability verification.
+/artifacts/reliability-android/

@@ -2,11 +2,17 @@
 
 ## Claude merge compatibility
 
-The merged disappearing-message and view-once UI is disabled by default. The bundled
-backend does not enforce these contracts. Set
-`EXPO_PUBLIC_CHAT_EPHEMERAL_ENABLED=true` only after connecting a backend that enforces
-message TTL and atomic recipient consumption. Ordinary messages retain the existing
-wire format, local drafts, message actions, and explicit resend/resync behavior.
+The bundled backend enforces message TTL and atomic single-opening photos. The existing
+`EXPO_PUBLIC_CHAT_EPHEMERAL_ENABLED` deployment gate remains available for ephemeral UI.
+View-once video messages are not supported by the existing chat upload contract.
+Ordinary messages retain their wire format, local drafts, actions, and resend/resync behavior.
+
+The reliability update adds canonical follow state, cancellation/unfollow, following-first
+feed cursors, persisted social notifications and an Expo push outbox. App Lock is under
+Settings and uses a custom PIN with separately optional biometrics. Persistent vault photos
+use authenticated AES-256-GCM encryption; cloud photos retain the existing moderated S3
+pipeline with server-side encryption verification. See [the verification report](artifacts/SOCIAL_RELIABILITY_REPORT.md)
+for migrations, native build requirements, tests and measured performance.
 
 The backend is the separate repository https://github.com/aditya123473892/dfbackend,
 checked out at `dfbackend/` (its own Git repo, not part of this one). Run only that backend;
@@ -35,6 +41,12 @@ npm start
 ```
 
 Press `a` for Android, `i` for an iOS simulator on macOS, or scan the QR code in Expo Go. The Android emulator/device should use `10.0.2.2` instead of `localhost` when the real backend is eventually connected.
+
+### Signup and sign-in
+
+The current app collects first name, last name, age and gender, followed by email, contact number and password in a second short step. The contact number is stored without SMS verification; members sign in with email and password. Local development uses `EXPO_PUBLIC_PHONE_AUTH_REQUIRED=false` in the app and `MOBILE_PHONE_AUTH_REQUIRED=false` in the backend (both default to false outside production).
+
+For deployment, set `EXPO_PUBLIC_PHONE_AUTH_REQUIRED=true` and `MOBILE_PHONE_AUTH_REQUIRED=true`, configure Twilio Verify, restart the backend and build the app again. This enables the existing phone verification signup and OTP sign-in flow. The backend defaults to requiring phone authentication in production. Unverified contact details never populate the verified-phone fields.
 
 ### Expo Go on a physical phone
 

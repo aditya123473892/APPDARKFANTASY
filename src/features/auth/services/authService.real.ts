@@ -91,15 +91,18 @@ export const realAuthService: AuthService = {
       lastName: input.lastName.trim(),
       age: Number(input.age),
       gender: input.gender.trim(),
-      roles: ['user'],
+      ...(input.phoneNumber ? { phoneNumber: input.phoneNumber } : {}),
     };
     input.password = '';
     try {
-      const response = await apiClient.post<Envelope<{ message: string }>>('/auth/signup', body);
+      const response = await apiClient.post<
+        Envelope<{ message: string; emailVerificationRequired?: boolean }>
+      >('/auth/signup', body);
       response.config.data = undefined;
       if (response.data.message === 'Account already exists with this email!, go to login')
         throw new AuthError('EMAIL_IN_USE');
-      unwrap(response.data);
+      const result = unwrap(response.data);
+      return { emailVerificationRequired: result.emailVerificationRequired ?? true };
     } catch (error) {
       if (axios.isAxiosError(error) && error.config) error.config.data = undefined;
       throw translate(error);
@@ -110,7 +113,8 @@ export const realAuthService: AuthService = {
   async requestPasswordReset(email) {
     try {
       const response = await apiClient.post<Envelope<{ passwordRequest: boolean }>>(
-        '/auth/forgot-password', { username: email.trim() },
+        '/auth/forgot-password',
+        { username: email.trim() },
       );
       response.config.data = undefined;
       unwrap(response.data);

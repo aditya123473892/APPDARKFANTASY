@@ -5,6 +5,7 @@ import { useRouter, type Href } from 'expo-router';
 import { Header, KeyboardAvoidingScreen, Screen, SettingsButton } from '@/components/layout';
 import { useContentInsets } from '@/components/layout/useContentInsets';
 import { Button, EmptyState, IconButton, Text } from '@/components/ui';
+import { Pressable } from '@/components/ui/Pressable';
 import { toast } from '@/components/ui/Toast';
 import { ChatInput } from '@/features/chat/components/ChatInput';
 import { TypingDots } from '@/features/chat/components/TypingDots';
@@ -35,8 +36,21 @@ const GREETING: GodChatMessage = {
   by: 'ai',
   at: '',
   content:
-    'Welcome, wanderer. I know the ways of DARKFANTASY: posts, chats, events, the Vault and more. What do you seek?',
+    'We can talk about your fantasies, desires, sex life, intimacy, or the feelings behind them, without judgment. Share only what feels comfortable. What would you like to explore?',
 };
+
+const TOPICS = [
+  { label: 'Explore a fantasy', prompt: 'I want to understand a fantasy without feeling judged.' },
+  {
+    label: 'Sex & intimacy',
+    prompt: 'I would like to talk about my sex life and what I need from intimacy.',
+  },
+  { label: 'Share my desires', prompt: 'How can I talk to my partner about my desires?' },
+  {
+    label: 'My boundaries',
+    prompt: 'I want to understand my boundaries and what feels comfortable for me.',
+  },
+];
 
 const authorLabel = (message: GodChatMessage) =>
   message.by === 'staff' ? 'DARKFANTASY team' : 'God';
@@ -50,6 +64,7 @@ export function GodChatScreen(): React.JSX.Element {
   const keyboardVisible = useKeyboard();
   const visible = useChatVisibility();
   const listRef = useRef<FlatList<GodChatMessage>>(null);
+  const [draft, setDraft] = useState('');
   // The message being sent; kept after a failure so "Try again" reuses its id.
   const [pending, setPending] = useState<{ id: string; content: string } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -87,6 +102,7 @@ export function GodChatScreen(): React.JSX.Element {
   const fresh = useMutation({
     mutationFn: startNewGodChat,
     onSuccess: () => {
+      setDraft('');
       setPending(null);
       setFailure(null);
       queryClient.setQueryData(SESSION_KEY, null);
@@ -122,32 +138,32 @@ export function GodChatScreen(): React.JSX.Element {
     data.push({ ...pending, role: 'user', by: 'user', at: '' });
 
   return (
-    <Screen padded={false}>
-      <View style={styles.header}>
-        <Header
-          title="Chat with God"
-          subtitle={withTeam ? 'A team member is with you' : 'AI guide to the app'}
-          action={
-            <View style={styles.actions}>
-              <IconButton
-                icon="time-outline"
-                label="Past chats"
-                onPress={() => router.push('/god-history' as Href)}
-              />
-              {stored.length > 0 && (
+    <KeyboardAvoidingScreen>
+      <Screen padded={false} edges={['top', 'left', 'right']} style={styles.screen}>
+        <View style={styles.header}>
+          <Header
+            title="Chat with God"
+            subtitle={withTeam ? 'A team member is with you' : 'Fantasies, intimacy & desires · AI'}
+            action={
+              <View style={styles.actions}>
                 <IconButton
-                  icon="create-outline"
-                  label="Start a new chat"
-                  disabled={fresh.isPending || ask.isPending}
-                  onPress={confirmNewChat}
+                  icon="time-outline"
+                  label="Past chats"
+                  onPress={() => router.push('/god-history' as Href)}
                 />
-              )}
-              <SettingsButton />
-            </View>
-          }
-        />
-      </View>
-      <KeyboardAvoidingScreen>
+                {stored.length > 0 && (
+                  <IconButton
+                    icon="create-outline"
+                    label="Start a new chat"
+                    disabled={fresh.isPending || ask.isPending}
+                    onPress={confirmNewChat}
+                  />
+                )}
+                <SettingsButton />
+              </View>
+            }
+          />
+        </View>
         {unavailable ? (
           <EmptyState
             icon="moon-outline"
@@ -156,6 +172,7 @@ export function GodChatScreen(): React.JSX.Element {
           />
         ) : (
           <FlatList
+            style={styles.timeline}
             ref={listRef}
             data={data}
             keyExtractor={(item) => item.id}
@@ -163,10 +180,40 @@ export function GodChatScreen(): React.JSX.Element {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+            onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
             ListHeaderComponent={
-              <Text variant="caption" color="muted" center style={styles.notice}>
-                Chats are saved. The DARKFANTASY team can read them and may join to help you.
-              </Text>
+              <View style={styles.intro}>
+                <Text variant="caption" color="muted" center style={styles.notice}>
+                  Chats are saved. The DARKFANTASY team can read them and may join to help you.
+                </Text>
+                {stored.length === 0 && !pending && !withTeam ? (
+                  <View style={styles.topics}>
+                    {TOPICS.map((topic) => (
+                      <Pressable
+                        key={topic.label}
+                        accessibilityRole="button"
+                        accessibilityLabel={topic.label}
+                        accessibilityHint="Adds a conversation starter to your message. You can edit it before sending."
+                        disabled={unavailable || ask.isPending || fresh.isPending}
+                        onPress={() => setDraft(topic.prompt)}
+                        style={({ pressed }) => [
+                          styles.topic,
+                          {
+                            borderColor: theme.colors.border,
+                            backgroundColor: pressed
+                              ? theme.colors.surfacePressed
+                              : theme.colors.surface,
+                          },
+                        ]}
+                      >
+                        <Text variant="caption" color="primary">
+                          {topic.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
             }
             renderItem={({ item }) => (
               <GodChatBubble
@@ -208,18 +255,31 @@ export function GodChatScreen(): React.JSX.Element {
         )}
         <ChatInput
           minimal
+          draftValue={draft}
+          onDraftChange={setDraft}
           onSend={send}
           canSendMessages
           disabled={unavailable || ask.isPending || fresh.isPending}
           bottomInset={keyboardVisible || contentInsets.inTabs ? 0 : contentInsets.bottom}
-          placeholder={withTeam ? 'Message the team…' : 'Ask God anything about the app…'}
+          placeholder={withTeam ? 'Message the team…' : 'Share what’s on your mind…'}
         />
-      </KeyboardAvoidingScreen>
-    </Screen>
+      </Screen>
+    </KeyboardAvoidingScreen>
   );
 }
 
 const styles = StyleSheet.create({
+  intro: { gap: spacing.md, marginBottom: spacing.md },
+  topics: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, justifyContent: 'center' },
+  topic: {
+    minHeight: spacing.touch,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: radius.full,
+  },
+  screen: { flex: 1, minHeight: 0 },
+  timeline: { flex: 1, minHeight: 0 },
   header: { paddingHorizontal: spacing.screen },
   actions: { flexDirection: 'row', alignItems: 'center' },
   list: { padding: spacing.screen, gap: spacing.md },

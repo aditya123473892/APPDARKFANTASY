@@ -1,0 +1,15 @@
+{
+  "environment": "Local MongoMemoryReplSet; 20 users, 60 posts, warmed service calls; no HTTP/media URL signing/device rendering",
+  "before": {
+    "samples": 10,
+    "meanMs": 98.06740999999893,
+    "queriesPerRead": 22,
+    "payloadBytes": 38571
+  },
+  "after": {
+    "samples": 10,
+    "meanMs": 21.01372000000047,
+    "queriesPerRead": 5,
+    "payloadBytes": 11371
+  }
+}

@@ -1,8 +1,9 @@
 import * as FS from 'expo-file-system/legacy';
 import { File } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
-import { uuid } from './crypto';
-import { directory, close } from './repository';
+import { encryptPhoto, decryptPhoto, encryptedPhoto, photoKeyName } from './photoEncryption';
+import { hash, uuid } from './crypto';
+import { directory, close, database } from './repository';
 
 const keyName = (owner: string) => `darkfantasy.vault.${owner}`;
 export const tempDirectory = () => {
@@ -24,9 +25,13 @@ export async function store(owner: string, id: string, bytes: Uint8Array): Promi
   await FS.makeDirectoryAsync(dir, { intermediates: true });
   const path = `${dir}${id}.jpg`,
     partial = `${path}.partial`;
-  // Ordinary JPEGs in private app storage; no additional image encryption.
+  const sealed = await encryptPhoto(owner, id, bytes);
   try {
-    await new File(partial).write(bytes);
+    await new File(partial).write(sealed);
+    // Authenticate and compare the actual on-disk bytes before committing the new copy.
+    const verified = await decryptPhoto(owner, id, await read(partial));
+    try { if (await hash(verified) !== await hash(bytes)) throw new Error('Encrypted photo verification failed'); }
+    finally { verified.fill(0); }
     await FS.moveAsync({ from: partial, to: path });
   } finally {
     await FS.deleteAsync(partial, { idempotent: true });
@@ -93,18 +98,40 @@ export async function removeTemp(uri: string): Promise<void> {
 }
 export async function plaintext(owner: string, id: string, path: string): Promise<Uint8Array> {
   if (path !== `${directory(owner)}${id}.jpg`) throw new Error('Invalid vault path');
-  return read(path);
+  const bytes = await read(path);
+  if (encryptedPhoto(bytes)) return decryptPhoto(owner, id, bytes);
+  // Upgrade existing ordinary JPEGs atomically. Never discard the old file before verification.
+  await store(owner, id, bytes);
+  await markEncrypted(owner, id, path);
+  return bytes;
 }
-/** The simpler vault already stores JPEGs privately. Display without a JS read/hash/copy. */
+export async function verifyLocalPhoto(owner: string, photo: { id: string; localPath: string | null; sha256: string; size: number }) {
+  if (!photo.localPath) return false;
+  try {
+    const bytes = await plaintext(owner, photo.id, photo.localPath);
+    try { return bytes.length === photo.size && await hash(bytes) === photo.sha256; }
+    finally { bytes.fill(0); }
+  } catch { return false; }
+}
+async function markEncrypted(owner: string, id: string, path: string) {
+  await (await database(owner)).runAsync('UPDATE photos SET localEncrypted=1 WHERE id=? AND localPath=?', id, path);
+}
+/** Only temporary viewing copies are plaintext; persistent photos are authenticated ciphertext. */
 export async function localUri(owner: string, id: string, path: string): Promise<string> {
   if (!validPath(owner, id, path)) throw new Error('Invalid vault path');
   const info = await FS.getInfoAsync(path);
   if (!info.exists || info.isDirectory || !info.size) throw new Error('Photo unavailable');
-  return path;
+  if (path.endsWith('.mp4')) return path;
+  const bytes = await plaintext(owner, id, path);
+  try {
+    await markEncrypted(owner, id, path);
+    return await temporaryFile(bytes);
+  } finally { bytes.fill(0); }
 }
 export async function wipe(owner: string): Promise<void> {
   // Clear encrypted-build credentials too, on explicit logout/wipe only.
   await SecureStore.deleteItemAsync(keyName(owner));
+  await SecureStore.deleteItemAsync(photoKeyName(owner));
   await SecureStore.deleteItemAsync(`${keyName(owner)}.passcode`);
   await clearTemps();
   await close(owner);

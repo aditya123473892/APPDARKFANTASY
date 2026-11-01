@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 export const loginSchema = z.object({
   email: z.string().trim().pipe(z.email('Enter a valid email address')),
@@ -28,9 +29,15 @@ export const inviteCodeSchema = z.object({
 export type LoginValues = z.infer<typeof loginSchema>;
 export type RegisterValues = z.infer<typeof registerSchema>;
 
+export const signupEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.email('Enter a valid email address'));
+
 export const mobileSignupSchema = z
   .object({
-    email: z.string().trim().toLowerCase().pipe(z.email('Enter a valid email address')),
+    email: signupEmailSchema,
     password: registerSchema.shape.password.max(72, 'Use at most 72 characters'),
     confirmPassword: z.string().min(1, 'Confirm your password'),
   })
@@ -39,3 +46,21 @@ export const mobileSignupSchema = z
     path: ['confirmPassword'],
   });
 export type MobileSignupValues = z.infer<typeof mobileSignupSchema>;
+
+export const emailSignupSchema = registerSchema
+  .extend({
+    email: signupEmailSchema,
+    phoneNumber: z
+      .string()
+      .refine(
+        (value) => value.startsWith('+') && Boolean(parsePhoneNumberFromString(value)?.isValid()),
+        'Enter a valid contact number for the selected country',
+      ),
+    password: registerSchema.shape.password.max(72, 'Use at most 72 characters'),
+    confirmPassword: z.string().min(1, 'Confirm your password'),
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+export type EmailSignupValues = z.infer<typeof emailSignupSchema>;

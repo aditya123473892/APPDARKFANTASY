@@ -26,14 +26,15 @@ export function VaultPhotoTile({
 }): React.JSX.Element {
   const { theme } = useTheme();
   const colors = theme.colors;
-  const [uri, setUri] = useState<string>();
+  const [storedUri, setUri] = useState<string>();
+  const uri = photo.localPath ? storedUri : undefined;
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const lastAttempt = useRef(0);
   const video = photo.kind === 'video';
   useEffect(() => {
-    // Videos are fetched only when opened, never just because a grid cell is visible.
-    if (video) return;
+    // Browsing must not refill storage after "Remove device copy".
+    if (video || !photo.localPath) return;
     let cancelled = false;
     const repair = attempt > lastAttempt.current;
     lastAttempt.current = attempt;
@@ -58,7 +59,7 @@ export function VaultPhotoTile({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${photo.hidden ? 'Hidden ' : ''}${video ? 'video' : 'photo'}${selected ? ', selected' : ''}${failed ? ', tap to retry' : ''}${photo.status === 'rejected' ? ', backup unavailable' : ''}`}
-      accessibilityState={{ selected, busy: !video && !uri && !failed }}
+      accessibilityState={{ selected, busy: Boolean(photo.localPath) && !video && !uri && !failed }}
       onLongPress={onLongPress}
       onPress={() => {
         if (failed && !selecting) {
@@ -98,11 +99,11 @@ export function VaultPhotoTile({
               setFailed(true);
             }}
           />
-        ) : failed ? (
+        ) : failed || !photo.localPath ? (
           <View style={styles.placeholder}>
             <Ionicons name="cloud-download-outline" size={24} color={colors.textMuted} />
             <Text variant="caption" color="muted" center>
-              Tap to load
+              {photo.localPath ? 'Tap to retry' : 'In cloud · tap to open'}
             </Text>
           </View>
         ) : (

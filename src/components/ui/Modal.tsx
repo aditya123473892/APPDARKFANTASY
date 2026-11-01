@@ -1,12 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Modal as RNModal, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Pressable } from '@/components/ui/Pressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from './Text';
@@ -35,7 +29,8 @@ export function Modal({
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
+        automaticOffset
         style={[
           styles.overlay,
           {

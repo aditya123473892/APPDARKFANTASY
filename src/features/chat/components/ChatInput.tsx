@@ -124,6 +124,7 @@ export function ChatInput({
           selectionColor={theme.colors.primary}
           cursorColor={theme.colors.primary}
           multiline
+          scrollEnabled
           editable={!disabled && canSendMessages}
           maxLength={MAX_LENGTH}
           maxFontSizeMultiplier={typography.maxFontScale}
@@ -132,7 +133,7 @@ export function ChatInput({
             setValue(text);
             onChangeText?.(text);
           }}
-          textAlignVertical="center"
+          textAlignVertical="top"
           style={[styles.input, { color: theme.colors.text }]}
         />
         {value.length > MAX_LENGTH * 0.9 ? (
@@ -193,6 +194,7 @@ export function ChatInput({
 const FIELD = spacing.touch;
 const styles = StyleSheet.create({
   root: {
+    flexShrink: 0,
     paddingHorizontal: spacing.sm,
     paddingTop: spacing.sm,
     flexDirection: 'row',

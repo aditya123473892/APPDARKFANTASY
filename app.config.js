@@ -22,7 +22,8 @@ module.exports = ({ config }) => {
       ...config.ios,
       infoPlist: {
         ...config.ios?.infoPlist,
-        NSAppTransportSecurity: {
+        NSFaceIDUsageDescription: 'Use Face ID to unlock DARKFANTASY when you enable biometric App Lock.',
+      NSAppTransportSecurity: {
           NSAllowsArbitraryLoads: development,
           NSAllowsLocalNetworking: development,
         },
@@ -34,7 +35,9 @@ module.exports = ({ config }) => {
         organization: process.env.SENTRY_ORG,
         project: process.env.SENTRY_PROJECT,
       }]] : []),
-      ['expo-secure-store', { configureAndroidBackup: true }],
+      ['expo-secure-store', { configureAndroidBackup: true, faceIDPermission: 'Use Face ID to unlock DARKFANTASY.' }],
+      ['expo-local-authentication', { faceIDPermission: 'Use Face ID to unlock DARKFANTASY.' }],
+      'expo-notifications',
       './plugins/withVaultBackup.cjs',
       [
         'expo-image-picker',

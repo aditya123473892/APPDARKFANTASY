@@ -11,6 +11,7 @@ export const queryClient = new QueryClient({
     queries: {
       staleTime: 30_000,
       retry: (count, error) =>
+        !axios.isCancel(error) &&
         !(
           axios.isAxiosError(error) &&
           [401, 403].includes(error.response?.status ?? error.response?.data?.statusCode)

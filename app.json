@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "scheme": "darkfantasy",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#0E0912",
+    "backgroundColor": "#FBF3F6",
     "android": {
       "package": "com.aditya123473892.darkfantasy",
       "adaptiveIcon": {
@@ -25,7 +25,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0E0912",
+          "backgroundColor": "#FBF3F6",
           "android": { "drawable": { "icon": "./assets/android-splash.xml" } }
         }
       ]

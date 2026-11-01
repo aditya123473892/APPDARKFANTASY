@@ -15,6 +15,7 @@ import * as files from './files';
 import { assertUnlocked, assertEpoch, useVaultLock, refreshVault } from './lock';
 import { serial } from './vaultService';
 import { hash } from './crypto';
+import { backupStatus } from './backupStatus';
 import { retryDelay, remoteWins, sameRemotePhoto } from './conflicts';
 import type { VaultPhoto, RemotePhoto, QueueJob } from './types';
 
@@ -146,7 +147,7 @@ export async function downloadPhoto(owner: string, id: string): Promise<void> {
       const path = await files.store(owner, id, bytes);
       assertEpoch(owner, scope);
       assertSessionCurrent(session);
-      await repo.save(owner, { ...local, localPath: path, sha256: photo.sha256, size: photo.size });
+      await repo.save(owner, { ...local, localPath: path, localEncrypted: 1, remoteEncrypted: photo.remoteEncrypted, sha256: photo.sha256, size: photo.size });
       refreshVault();
     });
   } finally {
@@ -211,6 +212,8 @@ async function upload(owner: string, photo: VaultPhoto, valid: () => void): Prom
     let uri: string | undefined;
     try {
       valid();
+      if (bytes.length !== photo.size || await hash(bytes) !== photo.sha256)
+        throw new Error('Local photo verification failed');
       uri = await files.temporaryFile(bytes);
       valid();
       if (!signed.fields?.key) throw new Error('Invalid upload response');
@@ -350,6 +353,7 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
               ...latest,
               ...server,
               localPath: path,
+              localEncrypted: canonical ? 1 : latest.localEncrypted,
               syncState: newerLocalEdit ? 'pending' : 'synced',
               error: null,
             };
@@ -374,6 +378,10 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
         ? error.response?.status
         : (error as { status?: number }).status;
       const rejected = status === 422;
+      // An old flag is insufficient after a failed read or a damaged/deleted file.
+      const local = await repo.get(owner, photo.id);
+      const safeLocal = !local?.deletedAt && local?.kind !== 'video' && local?.localPath
+        ? await files.verifyLocalPhoto(owner, local) : false;
       await serial(async () => {
         valid();
         const latest = await repo.get(owner, photo.id);
@@ -393,17 +401,20 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
         }
         await repo.save(owner, {
           ...latest,
+          localEncrypted: safeLocal ? 1 : 0,
           syncState: rejected ? 'rejected' : 'failed',
           status: rejected ? 'rejected' : latest.status,
           error: rejected
             ? `${latest.kind === 'video' ? 'Video' : 'Photo'} did not pass moderation. Delete it to remove it.`
-            : status === 401
+            : safeLocal
+              ? backupStatus({ ...latest, localEncrypted: 1, syncState: 'failed' })
+              : status === 401
               ? 'Sign in again to back up this photo.'
               : status === 403
                 ? 'Backup was denied. Check your account and storage permissions.'
                 : status === 503
                   ? 'Photo storage is unavailable. Try backup again later.'
-                  : 'Could not finish photo backup. Your local photo is saved. Tap Retry.',
+                  : backupStatus({ ...latest, localEncrypted: safeLocal ? 1 : 0, syncState: 'failed' }),
         });
         if (rejected)
           await db.runAsync("DELETE FROM queue WHERE photoId=? AND operation!='delete'", photo.id);

@@ -6,6 +6,8 @@ export interface VaultPhoto {
   kind: VaultKind;
   s3Key: string | null;
   localPath: string | null;
+  localEncrypted?: number;
+  remoteEncrypted?: boolean;
   sha256: string;
   size: number;
   status: 'local' | 'approved' | 'rejected';
@@ -24,4 +26,4 @@ export interface QueueJob {
   attempts: number;
   nextAttemptAt: number;
 }
-export type RemotePhoto = Omit<VaultPhoto, 'localPath' | 'syncState' | 'error'>;
+export type RemotePhoto = Omit<VaultPhoto, 'localPath' | 'localEncrypted' | 'syncState' | 'error'>;

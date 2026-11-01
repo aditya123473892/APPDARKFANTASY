@@ -27,8 +27,8 @@ export async function photoUri(owner: string, id: string, repair = false): Promi
   if (!repair && photo.localPath) {
     try {
       const uri = await files.localUri(owner, id, photo.localPath);
-      assertEpoch(owner, scope);
-      return uri;
+      try { assertEpoch(owner, scope); return uri; }
+      catch (error) { await files.removeTemp(uri); throw error; }
     } catch {
       assertEpoch(owner, scope);
       // Missing files can be restored below; a local-only photo must never be overwritten.
@@ -49,6 +49,6 @@ export async function photoUri(owner: string, id: string, repair = false): Promi
   photo = await repo.get(owner, id);
   if (!photo || photo.deletedAt || !photo.localPath) throw new Error('Photo unavailable');
   const uri = await files.localUri(owner, id, photo.localPath);
-  assertEpoch(owner, scope);
-  return uri;
+  try { assertEpoch(owner, scope); return uri; }
+  catch (error) { await files.removeTemp(uri); throw error; }
 }

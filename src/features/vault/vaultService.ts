@@ -60,6 +60,7 @@ export async function importPhoto(owner: string, uri: string): Promise<VaultPhot
         const photo: VaultPhoto = {
           id,
           kind: 'photo',
+          localEncrypted: 1,
           s3Key: null,
           localPath: path,
           sha256: checksum,

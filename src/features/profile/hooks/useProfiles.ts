@@ -18,7 +18,7 @@ import type { UploadAsset } from '@/features/feed/types';
 export function useDiscoverProfiles(search = '') {
   return useInfiniteQuery({
     queryKey: [...queryKeys.discover, search],
-    queryFn: ({ pageParam }) => profileService.discoverPage(pageParam, search),
+    queryFn: ({ pageParam, signal }) => profileService.discoverPage(pageParam, search, signal),
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextSkip,
     // Keep showing the last results while a new search term loads.
@@ -35,7 +35,7 @@ export function useDiscoverProfiles(search = '') {
 export function useProfile(userId: string) {
   return useQuery({
     queryKey: queryKeys.profile(userId),
-    queryFn: () => profileService.get(userId),
+    queryFn: ({ signal }) => profileService.get(userId, signal),
     enabled: Boolean(userId),
     retry: false,
   });

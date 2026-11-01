@@ -1,13 +1,7 @@
 import type { PropsWithChildren } from 'react';
 import { useMemo } from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  PanResponder,
-  Platform,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Modal, PanResponder, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -42,7 +36,8 @@ export function SocialSheet({
     >
       <KeyboardAvoidingView
         style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: theme.colors.overlay }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
+        automaticOffset
       >
         <Pressable
           accessibilityLabel={`Close ${title}`}

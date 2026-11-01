@@ -1,3 +1,4 @@
+import { unregisterPushDevice } from '@/features/activity/pushRegistration';
 import { create } from 'zustand';
 import { authService } from '../services';
 import { AuthError, type AuthResult, type Session, type UserView as User } from '../types';
@@ -136,6 +137,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }));
   },
   logout: async (options = {}) => {
+    await unregisterPushDevice();
     if (options.preserveVault) pauseLocalVault();
     else await prepareVaultLogout(options.discardUnsynced);
     ++revision;

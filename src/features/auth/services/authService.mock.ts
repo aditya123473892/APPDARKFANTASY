@@ -40,9 +40,10 @@ export const mockAuthService: AuthService = {
       session: createSession(fixtureUser._id),
     };
   },
-  async register(input: RegisterInput): Promise<void> {
+  async register(input: RegisterInput) {
     await wait();
     if (input.email === 'taken@example.com') throw new AuthError('EMAIL_IN_USE');
+    return { emailVerificationRequired: false };
   },
   async logout(): Promise<void> {
     await wait();

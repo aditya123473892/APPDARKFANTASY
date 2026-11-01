@@ -33,12 +33,12 @@ test('only the explicit development EAS profile allows HTTP when doctor sets pro
   } finally { process.env = before; }
 });
 
-test('signup sends the backend DTO, clears passwords, and does not invent a session', async () => {
+test('email signup sends profile and contact details without OTP, clears passwords, and does not invent a session', async () => {
   const h = harness();
   const requests = [];
   h.apiClient.defaults.adapter = async (config) => {
     requests.push({ url: config.url, body: JSON.parse(config.data) });
-    return h.ok(config, { message: 'Account created, Please check your email and verify!' });
+    return h.ok(config, { message: 'Account created', emailVerificationRequired: false });
   };
   const input = {
     name: ' Test ',
@@ -47,8 +47,9 @@ test('signup sends the backend DTO, clears passwords, and does not invent a sess
     gender: 'Other',
     email: ' test@example.test ',
     password: 'Private123',
+    phoneNumber: '+919876543210',
   };
-  assert.equal(await h.service.register(input), undefined);
+  assert.equal((await h.service.register(input)).emailVerificationRequired, false);
   assert.deepEqual(requests, [
     {
       url: '/auth/signup',
@@ -59,7 +60,7 @@ test('signup sends the backend DTO, clears passwords, and does not invent a sess
         lastName: 'User',
         age: 25,
         gender: 'Other',
-        roles: ['user'],
+        phoneNumber: '+919876543210',
       },
     },
   ]);
@@ -224,7 +225,8 @@ test('discovery loads one page, advances past hidden rows, and searches on the s
   assert.equal(second.profiles[0].id, other);
   assert.equal(second.nextSkip, undefined);
   assert.equal(requests[1].skip, 20);
-  assert.equal(requests[1].displayname, 'A\\.\\*', 'search text cannot inject regex operators');
+  assert.equal(requests[1].displayname, 'A.*', 'send literal search text; the backend escapes it exactly once');
+  assert.equal(requests[1].summary, 'true');
   h.apiClient.defaults.adapter = async config => h.ok(config, { users: [], count: 21 });
   assert.equal((await realProfileService.discoverPage(20, '')).nextSkip, undefined);
   h.runtime.teardownSession();
@@ -3256,4 +3258,116 @@ test('phone numbers normalise to E.164 for the selected country', () => {
   assert.equal(toE164('(415) 555-2671', 'US'), '+14155552671');
   assert.equal(toE164('12345', 'IN'), null);
   assert.equal(formatPhone('+919876543210'), '+91 98765 43210');
+});
+
+test('deployment phone signup keeps email and contact paired through phone verification', async () => {
+  const state = new Map();
+  let active;
+  let cursor;
+  const hook = (initial) => {
+    const index = cursor++;
+    if (!(index in active)) active[index] = typeof initial === 'function' ? initial() : initial;
+    const slots = active;
+    return [slots[index], (next) => {
+      slots[index] = typeof next === 'function' ? next(slots[index]) : next;
+    }];
+  };
+  const render = (component, props = {}) => {
+    if (!state.has(component)) state.set(component, []);
+    active = state.get(component);
+    cursor = 0;
+    return component(props);
+  };
+  const sends = [];
+  const checks = [];
+  const h = harness({
+    react: {
+      useState: hook,
+      useRef: (value) => hook(() => ({ current: value }))[0],
+      useEffect() {},
+    },
+    'react-native': { View: 'View', StyleSheet: { create: value => value } },
+    'expo-router': { useRouter: () => ({ replace() {} }) },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    '@/theme': { spacing: {}, radius: {} },
+    '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
+    '@/components/ui': { Input: 'Input', OTPInput: 'OTPInput', Button: 'Button', Text: 'Text' },
+    '../components/AuthScaffold': { AuthScaffold: 'AuthScaffold', AuthPrompt: 'AuthPrompt' },
+    '../components/PhoneOtpFlow': { PhoneOtpFlow: 'PhoneOtpFlow' },
+    '../components/VerifiedPhoneRegisterForm': { VerifiedPhoneRegisterForm: 'RegisterForm' },
+    './CountryPicker': { CountryPicker: 'CountryPicker' },
+    '../services/phoneAuth': {
+      phoneErrorMessage: () => 'Verification failed',
+      phoneAuth: {
+        sendSignupCode: async phone => { sends.push(phone); return 30; },
+        verifySignupCode: async (phone, code) => {
+          checks.push([phone, code]);
+          return 'proof-for-this-phone';
+        },
+      },
+    },
+  });
+  const { PhoneRegisterScreen: RegisterScreen } = h.load('src/features/auth/screens/PhoneRegisterScreen.tsx');
+  const { PhoneOtpFlow } = h.load('src/features/auth/components/PhoneOtpFlow.tsx');
+  const elements = (node) => !node || typeof node !== 'object' ? []
+    : Array.isArray(node) ? node.flatMap(elements)
+      : [node, ...elements(node.props?.children)];
+  const find = (tree, predicate) => {
+    const element = elements(tree).find(predicate);
+    assert.ok(element, 'Expected signup control');
+    return element;
+  };
+  const flowProps = () => render(RegisterScreen).props.children.props;
+  const phoneTree = () => render(PhoneOtpFlow, flowProps());
+
+  // A valid number alone must not send an SMS when email is missing or invalid.
+  const phone = find(phoneTree(), node => node.props?.accessibilityLabel === 'Mobile number');
+  phone.props.onChangeText('98765 43210');
+  find(phoneTree(), node => node.props?.label === 'Verify contact number').props.onPress();
+  assert.deepEqual(sends, []);
+  assert.match(flowProps().renderPhoneFields(false).props.error, /email/i);
+  flowProps().renderPhoneFields(false).props.onChangeText('invalid-email');
+  find(phoneTree(), node => node.props?.label === 'Verify contact number').props.onPress();
+  assert.deepEqual(sends, []);
+
+  flowProps().renderPhoneFields(false).props.onChangeText(' MEMBER@Example.test ');
+  find(phoneTree(), node => node.props?.label === 'Verify contact number').props.onPress();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sends, ['+919876543210']);
+  // Email is no longer editable while the SMS proof is being collected.
+  assert.equal(elements(phoneTree()).some(node => node.props?.label === 'Email address'), false);
+  find(phoneTree(), node => node.type === 'OTPInput').props.onComplete('123456');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(checks, [['+919876543210', '123456']]);
+  const finish = render(RegisterScreen).props.children;
+  assert.equal(finish.type, 'RegisterForm');
+  assert.equal(finish.props.email, 'member@example.test');
+  assert.equal(finish.props.phone, '+919876543210');
+  assert.equal(finish.props.signupToken, 'proof-for-this-phone');
+  finish.props.onSignupExpired();
+  assert.equal(render(RegisterScreen).props.children.type, 'PhoneOtpFlow');
+  assert.equal(flowProps().renderPhoneFields(false).props.value, 'member@example.test');
+});
+
+test('current signup collects full details without OTP; phone signup stays behind the deployment flag', () => {
+  const flags = { PHONE_AUTH_REQUIRED: false };
+  const h = harness({
+    'expo-router': { useRouter: () => ({ replace() {} }) },
+    '@/config/featureFlags': { featureFlags: flags },
+    '../components/AuthScaffold': { AuthScaffold: 'AuthScaffold', AuthPrompt: 'AuthPrompt' },
+    '../components/RegisterForm': { RegisterForm: 'RegisterForm' },
+    './PhoneRegisterScreen': { PhoneRegisterScreen: 'PhoneRegisterScreen' },
+  });
+  const { RegisterScreen } = h.load('src/features/auth/screens/RegisterScreen.tsx');
+  assert.equal(RegisterScreen().type, 'RegisterForm');
+  flags.PHONE_AUTH_REQUIRED = true;
+  assert.equal(RegisterScreen().type, 'PhoneRegisterScreen');
+  const { emailSignupSchema } = h.load('src/features/auth/schemas/authSchemas.ts');
+  const details = { name: 'Test', lastName: 'User', age: '28', gender: 'Other', email: ' MEMBER@example.test ', phoneNumber: '+919876543210', password: 'Private123', confirmPassword: 'Private123' };
+  assert.equal(emailSignupSchema.parse(details).email, 'member@example.test');
+  for (const name of ['name', 'lastName', 'age', 'gender', 'email', 'phoneNumber', 'password', 'confirmPassword']) {
+    assert.equal(emailSignupSchema.safeParse({ ...details, [name]: '' }).success, false, name);
+  }
+  assert.equal(emailSignupSchema.safeParse({ ...details, phoneNumber: '12345' }).success, false);
+  assert.equal(emailSignupSchema.safeParse({ ...details, confirmPassword: 'Different123' }).success, false);
 });

@@ -24,6 +24,9 @@ export function sameRemotePhoto(local: VaultPhoto | null, remote: RemotePhoto): 
       'createdAt',
       'updatedAt',
       'deletedAt',
+      'remoteEncrypted',
     ] as const
-  ).every((field) => local[field] === remote[field]);
+  ).every((field) => field === 'remoteEncrypted'
+    ? Boolean(local.remoteEncrypted) === Boolean(remote.remoteEncrypted)
+    : local[field] === remote[field]);
 }

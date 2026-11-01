@@ -12,6 +12,7 @@ type Row = {
   read: boolean;
   sender?: { _id: string; displayname?: string; avatar?: string } | null;
   eventId?: string;
+  navigation?: import('../notificationTarget').NotificationNavigation;
 };
 const objectId = (value?: string) => typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
 export const realActivityService: ActivityService = {
@@ -37,12 +38,13 @@ export const realActivityService: ActivityService = {
         throw new ServiceError('UNKNOWN');
       return {
         id: row._id,
-        kind: row.sender ? 'message' : 'system',
+        kind: row.type === 'follow_request' ? 'request' : row.type === 'follow_accepted' ? 'connection' : row.type === 'direct_message' ? 'message' : 'system',
         actor: {
           id: objectId(row.sender?._id) ? row.sender!._id : '',
           name: row.sender?.displayname || 'DARKFANTASY',
           avatarUri: mediaUrl(row.sender?.avatar),
         },
+        ...row.navigation,
         text: row.message,
         createdAt: row.createdAt,
         read: row.read,

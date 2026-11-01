@@ -8,6 +8,8 @@ export type AppNotification = {
   createdAt: string;
   read: boolean;
   /** Navigation targets, present depending on kind. */
+  profileId?: string;
+  requestId?: string;
   conversationId?: string;
   postId?: string;
   eventId?: string;

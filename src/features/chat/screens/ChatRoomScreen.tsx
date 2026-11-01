@@ -1,10 +1,13 @@
 import { cleanupPickedAssets } from '@/services/api/photoUpload';
 import { uploadProgressLabel } from '@/services/api/uploadProgress';
 import { Ionicons } from '@expo/vector-icons';
+import { MessageActionPopup } from '../components/MessageActionPopup';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
+  type AlertButton,
   Modal,
   TextInput,
   StyleSheet,
@@ -262,12 +265,21 @@ export function ChatRoomScreen(): React.JSX.Element {
       }),
     [],
   );
+  const actionPopupOpen = useRef(false);
+  const [actionButtons, setActionButtons] = useState<AlertButton[] | null>(null);
+  const closeActionPopup = useCallback(() => {
+    actionPopupOpen.current = false;
+    setActionButtons(null);
+  }, []);
   const openActions = useCallback(
     (message: ChatMessage) => {
+      if (actionPopupOpen.current) return;
+      actionPopupOpen.current = true;
+      Keyboard.dismiss();
       const scope = renderScope;
       const valid = () => isSessionCurrent(scope);
       const options = messageActions(message, myId);
-      Alert.alert('Message', undefined, [
+      const actions = [
         ...(options.includes('copy')
           ? [
               {
@@ -346,8 +358,9 @@ export function ChatRoomScreen(): React.JSX.Element {
               },
             ]
           : []),
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+        { text: 'Cancel', style: 'cancel' as const },
+      ];
+      setActionButtons(actions);
     },
     [myId, canSendMessages, conversationId, renderScope, block, router],
   );
@@ -478,153 +491,158 @@ export function ChatRoomScreen(): React.JSX.Element {
   };
 
   return (
-    <Screen
-      padded={false}
-      edges={['top', 'left', 'right']}
-      style={[styles.root, { backgroundColor: theme.colors.chatBackground }]}
-    >
-      <View
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.divider },
-        ]}
+    <KeyboardAvoidingScreen>
+      <Screen
+        padded={false}
+        edges={['top', 'left', 'right']}
+        style={[styles.root, { backgroundColor: theme.colors.chatBackground }]}
       >
-        <Header
-          title={participant?.name ?? 'Messages'}
-          back
-          onBack={goBack}
-          content={
-            participant ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`View ${participant.name}'s ${isGroup ? 'group' : 'profile'}`}
-                onPress={openDetails}
-                style={styles.person}
-              >
-                <Avatar
-                  uri={participant.avatarUri}
-                  label={participant.name}
-                  size={44}
-                  online={Boolean(presenceLabel && conversation?.presence?.online)}
-                />
-                <View style={styles.personCopy}>
-                  <Text weight="semibold" numberOfLines={1} style={{ fontSize: 16 }}>
-                    {participant.name}
-                  </Text>
-                  {subtitle ? (
-                    <Text
-                      variant="caption"
-                      color={
-                        typingLabel || (presenceLabel && conversation?.presence?.online)
-                          ? 'primary'
-                          : 'muted'
-                      }
-                      numberOfLines={1}
-                      accessibilityLiveRegion="polite"
-                    >
-                      {subtitle}
-                    </Text>
-                  ) : null}
-                </View>
-              </Pressable>
-            ) : (
-              <View style={styles.person}>
-                <Skeleton style={styles.headerAvatar} />
-                <Skeleton style={styles.headerName} />
-              </View>
-            )
-          }
-          action={
-            participant ? (
-              <IconButton
-                icon="ellipsis-horizontal"
-                label="Conversation options"
-                onPress={() =>
-                  Alert.alert('Conversation', undefined, [
-                    { text: isGroup ? 'Group info' : 'View profile', onPress: openDetails },
-                    ...(!isGroup
-                      ? [
-                          {
-                            text: 'Block user',
-                            style: 'destructive' as const,
-                            onPress: () => block.confirm(participant.id),
-                          },
-                        ]
-                      : []),
-                    { text: 'Cancel', style: 'cancel' },
-                  ])
-                }
-              />
-            ) : undefined
-          }
-        />
-      </View>
-
-      {messagesQuery.isRefetchError && messagesQuery.data ? (
-        <OfflineBanner message="Can't reach the server. We'll keep trying." />
-      ) : null}
-
-      <Modal visible={Boolean(editing)} transparent animationType="fade" onRequestClose={closeEdit}>
-        <View style={[styles.editBackdrop, { backgroundColor: theme.colors.overlay }]}>
-          <View style={[styles.editCard, { backgroundColor: theme.colors.surfaceElevated }]}>
-            <View style={styles.editTitle}>
-              <Ionicons name="pencil" size={18} color={theme.colors.primaryText} />
-              <Text variant="subheading">Edit message</Text>
-            </View>
-            <TextInput
-              accessibilityLabel="Edit message text"
-              multiline
-              autoFocus
-              maxLength={2000}
-              value={editText}
-              onChangeText={setEditText}
-              selectionColor={theme.colors.primary}
-              cursorColor={theme.colors.primary}
-              maxFontSizeMultiplier={typography.maxFontScale}
-              style={[
-                styles.editInput,
-                { color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted },
-              ]}
-            />
-            <View style={styles.editActions}>
-              <Button
-                label="Cancel"
-                variant="secondary"
-                size="sm"
-                fullWidth={false}
-                onPress={closeEdit}
-                style={styles.editAction}
-              />
-              <Button
-                label="Save edit"
-                size="sm"
-                fullWidth={false}
-                disabled={!editText.trim()}
-                onPress={saveEdit}
-                style={styles.editAction}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
-      {!isGroup && firstUnread && allMessages.some((message) => message.id === firstUnread) ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={jumpFirstUnread}
-          style={({ pressed }) => [
-            styles.unreadBar,
-            {
-              backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.primarySoft,
-            },
+        <View
+          style={[
+            styles.header,
+            { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.divider },
           ]}
         >
-          <Ionicons name="arrow-up" size={16} color={theme.colors.primaryText} />
-          <Text variant="label" color="primary">
-            Jump to first unread
-          </Text>
-        </Pressable>
-      ) : null}
-      <KeyboardAvoidingScreen>
+          <Header
+            title={participant?.name ?? 'Messages'}
+            back
+            onBack={goBack}
+            content={
+              participant ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${participant.name}'s ${isGroup ? 'group' : 'profile'}`}
+                  onPress={openDetails}
+                  style={styles.person}
+                >
+                  <Avatar
+                    uri={participant.avatarUri}
+                    label={participant.name}
+                    size={44}
+                    online={Boolean(presenceLabel && conversation?.presence?.online)}
+                  />
+                  <View style={styles.personCopy}>
+                    <Text weight="semibold" numberOfLines={1} style={{ fontSize: 16 }}>
+                      {participant.name}
+                    </Text>
+                    {subtitle ? (
+                      <Text
+                        variant="caption"
+                        color={
+                          typingLabel || (presenceLabel && conversation?.presence?.online)
+                            ? 'primary'
+                            : 'muted'
+                        }
+                        numberOfLines={1}
+                        accessibilityLiveRegion="polite"
+                      >
+                        {subtitle}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              ) : (
+                <View style={styles.person}>
+                  <Skeleton style={styles.headerAvatar} />
+                  <Skeleton style={styles.headerName} />
+                </View>
+              )
+            }
+            action={
+              participant ? (
+                <IconButton
+                  icon="ellipsis-horizontal"
+                  label="Conversation options"
+                  onPress={() =>
+                    Alert.alert('Conversation', undefined, [
+                      { text: isGroup ? 'Group info' : 'View profile', onPress: openDetails },
+                      ...(!isGroup
+                        ? [
+                            {
+                              text: 'Block user',
+                              style: 'destructive' as const,
+                              onPress: () => block.confirm(participant.id),
+                            },
+                          ]
+                        : []),
+                      { text: 'Cancel', style: 'cancel' },
+                    ])
+                  }
+                />
+              ) : undefined
+            }
+          />
+        </View>
+
+        {messagesQuery.isRefetchError && messagesQuery.data ? (
+          <OfflineBanner message="Can't reach the server. We'll keep trying." />
+        ) : null}
+
+        <Modal
+          visible={Boolean(editing)}
+          transparent
+          animationType="fade"
+          onRequestClose={closeEdit}
+        >
+          <View style={[styles.editBackdrop, { backgroundColor: theme.colors.overlay }]}>
+            <View style={[styles.editCard, { backgroundColor: theme.colors.surfaceElevated }]}>
+              <View style={styles.editTitle}>
+                <Ionicons name="pencil" size={18} color={theme.colors.primaryText} />
+                <Text variant="subheading">Edit message</Text>
+              </View>
+              <TextInput
+                accessibilityLabel="Edit message text"
+                multiline
+                autoFocus
+                maxLength={2000}
+                value={editText}
+                onChangeText={setEditText}
+                selectionColor={theme.colors.primary}
+                cursorColor={theme.colors.primary}
+                maxFontSizeMultiplier={typography.maxFontScale}
+                style={[
+                  styles.editInput,
+                  { color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted },
+                ]}
+              />
+              <View style={styles.editActions}>
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  size="sm"
+                  fullWidth={false}
+                  onPress={closeEdit}
+                  style={styles.editAction}
+                />
+                <Button
+                  label="Save edit"
+                  size="sm"
+                  fullWidth={false}
+                  disabled={!editText.trim()}
+                  onPress={saveEdit}
+                  style={styles.editAction}
+                />
+              </View>
+            </View>
+          </View>
+        </Modal>
+        {!isGroup && firstUnread && allMessages.some((message) => message.id === firstUnread) ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={jumpFirstUnread}
+            style={({ pressed }) => [
+              styles.unreadBar,
+              {
+                backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.primarySoft,
+              },
+            ]}
+          >
+            <Ionicons name="arrow-up" size={16} color={theme.colors.primaryText} />
+            <Text variant="label" color="primary">
+              Jump to first unread
+            </Text>
+          </Pressable>
+        ) : null}
         <View style={styles.body}>
           {initialLoading ? (
             <MessagesSkeleton />
@@ -649,7 +667,7 @@ export function ChatRoomScreen(): React.JSX.Element {
           ) : (
             <FlashList
               ref={listRef}
-              style={styles.inverted}
+              style={[styles.timeline, styles.inverted]}
               data={rows}
               keyExtractor={(item) => item.key}
               renderItem={renderItem}
@@ -741,24 +759,25 @@ export function ChatRoomScreen(): React.JSX.Element {
           bottomInset={keyboardVisible ? 0 : insets.bottom}
           placeholder={participant ? `Message ${participant.name}…` : 'Write a message…'}
         />
-      </KeyboardAvoidingScreen>
-      {picker}
-      <TimerSheet
-        visible={timerSheet}
-        value={ttlSeconds}
-        onChange={setTtlSeconds}
-        onClose={() => setTimerSheet(false)}
-      />
-      {shareCount > 0 ? (
-        <MediaShareSheet
-          visible
-          count={shareCount}
-          previewUri={sharePreview}
-          canViewOnce={conversationId.startsWith('user:')}
-          onChoose={finishShareChoice}
+        {picker}
+        <MessageActionPopup actions={actionButtons} onClose={closeActionPopup} />
+        <TimerSheet
+          visible={timerSheet}
+          value={ttlSeconds}
+          onChange={setTtlSeconds}
+          onClose={() => setTimerSheet(false)}
         />
-      ) : null}
-    </Screen>
+        {shareCount > 0 ? (
+          <MediaShareSheet
+            visible
+            count={shareCount}
+            previewUri={sharePreview}
+            canViewOnce={conversationId.startsWith('user:')}
+            onChoose={finishShareChoice}
+          />
+        ) : null}
+      </Screen>
+    </KeyboardAvoidingScreen>
   );
 }
 
@@ -785,7 +804,14 @@ const styles = StyleSheet.create({
   personCopy: { flex: 1, minWidth: 0 },
   headerAvatar: { width: 38, height: 38, borderRadius: radius.full },
   headerName: { width: 120 },
-  body: { flex: 1, width: '100%', maxWidth: spacing.contentMax + 120, alignSelf: 'center' },
+  body: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    maxWidth: spacing.contentMax + 120,
+    alignSelf: 'center',
+  },
+  timeline: { flex: 1, minHeight: 0 },
   list: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
   skeleton: { flex: 1, justifyContent: 'flex-end', padding: spacing.screen, gap: spacing.md },
   skeletonBubble: { height: 40, borderRadius: radius.lg },

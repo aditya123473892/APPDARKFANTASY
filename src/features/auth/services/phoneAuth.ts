@@ -65,6 +65,14 @@ async function signIn(result: Session): Promise<AuthResult> {
 
 /** Mobile authentication with verified phone signup, OTP or password sign-in. */
 export const phoneAuth = {
+  async resendVerification(email: string, password: string): Promise<void> {
+    const body = { identifier: email.trim().toLowerCase(), password };
+    try {
+      await post('/auth/email/resend', body);
+    } finally {
+      body.password = '';
+    }
+  },
   async loginWithPassword(identifier: string, password: string): Promise<AuthResult> {
     const body = { identifier: identifier.trim(), password };
     try {
@@ -174,7 +182,7 @@ export function phoneErrorMessage(error: unknown): string {
     case 'INVALID_CREDENTIALS':
       return 'Unable to sign in. Check your email or mobile number and password.';
     case 'UNVERIFIED':
-      return 'Verify your email first, then sign in with your phone number.';
+      return 'Verify your email first, then sign in.';
     case 'BLOCKED':
       return 'This account is blocked. Contact support through the desktop website.';
     case 'NETWORK':

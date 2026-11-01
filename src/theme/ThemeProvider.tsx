@@ -1,10 +1,9 @@
 import { createContext, type PropsWithChildren, useEffect, useMemo, useState } from 'react';
-import { useColorScheme } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 import { darkTheme, lightTheme, type AppTheme } from './index';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemeMode = 'light' | 'dark';
 
 type ThemeContextValue = {
   theme: AppTheme;
@@ -16,14 +15,13 @@ type ThemeContextValue = {
 export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: PropsWithChildren): React.JSX.Element {
-  const [mode, setMode] = useState<ThemeMode>('dark');
-  const systemMode = useColorScheme();
+  const [mode, setMode] = useState<ThemeMode>('light');
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     let mounted = true;
     void SecureStore.getItemAsync('velvet-noir.appearance')
       .then((saved) => {
-        if (mounted && (saved === 'dark' || saved === 'light' || saved === 'system'))
+        if (mounted && (saved === 'dark' || saved === 'light'))
           setMode(saved);
       })
       .catch(() => undefined)
@@ -38,7 +36,7 @@ export function ThemeProvider({ children }: PropsWithChildren): React.JSX.Elemen
     if (hydrated)
       void SecureStore.setItemAsync('velvet-noir.appearance', mode).catch(() => undefined);
   }, [hydrated, mode]);
-  const isDark = mode === 'system' ? systemMode !== 'light' : mode === 'dark';
+  const isDark = mode === 'dark';
   const value = useMemo(
     () => ({ theme: isDark ? darkTheme : lightTheme, mode, isDark, setMode }),
     [isDark, mode],

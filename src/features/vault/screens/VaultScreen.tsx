@@ -15,6 +15,7 @@ import * as repo from '../repository';
 import type { VaultPhoto } from '../types';
 import { useVaultNetwork, retrySync } from '../sync';
 import { exportPhotos } from '../export';
+import { removeDeviceCopies } from '../deviceStorage';
 import { visiblePhotos, vaultError } from '../presentation';
 import { VaultPhotoTile } from '../components/VaultPhotoTile';
 
@@ -147,8 +148,8 @@ export function VaultScreen(): React.JSX.Element {
     setSelected((ids) => (ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]));
   const deleteSelected = () =>
     Alert.alert(
-      `Delete ${selected.length === 1 ? 'item' : `${selected.length} items`}?`,
-      'This removes them from your vault on all devices. Exported copies will stay.',
+      `Delete ${selected.length === 1 ? 'item' : `${selected.length} items`} from vault?`,
+      'This removes them from your vault on all devices. The service retains a private deleted copy. Gallery copies will stay.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -159,6 +160,22 @@ export function VaultScreen(): React.JSX.Element {
               for (const id of selected) await editPhoto(owner, id, { deletedAt: Date.now() });
               setSelected([]);
             }, 'Couldn’t delete these photos. Try again.'),
+        },
+      ],
+    );
+  const removeSelectedDeviceCopies = () =>
+    Alert.alert(
+      'Remove device copies?',
+      'Only fully backed-up items can be removed from app storage. They stay in your cloud vault. Gallery copies are unchanged.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove device copies',
+          onPress: () =>
+            void run(async () => {
+              await removeDeviceCopies(owner, selected);
+              setSelected([]);
+            }),
         },
       ],
     );
@@ -297,6 +314,10 @@ export function VaultScreen(): React.JSX.Element {
               </Text>
             </Pressable>
           )}
+          <Text variant="caption" color="secondary">
+            Wait for backup to finish before deleting originals in Gallery / Photos. Use Download to
+            phone to save a new copy later.
+          </Text>
           <FlatList
             data={data}
             numColumns={3}
@@ -367,18 +388,28 @@ export function VaultScreen(): React.JSX.Element {
               />
               <IconButton
                 icon="download-outline"
-                label="Export selected items"
+                label="Download selected items to phone"
                 disabled={busy}
                 onPress={() =>
-                  void run(
-                    () => exportPhotos(owner, selected),
-                    'Couldn’t export. Check permissions and storage.',
-                  )
+                  void run(async () => {
+                    const count = await exportPhotos(owner, selected);
+                    if (count)
+                      Alert.alert(
+                        'Saved to phone',
+                        `${count} item(s) saved in Gallery / Photos. Your vault copies are kept.`,
+                      );
+                  }, 'Couldn’t export. Check permissions and storage.')
                 }
               />
               <IconButton
+                icon="cloud-done-outline"
+                label="Remove device copies, keep cloud backups"
+                disabled={busy}
+                onPress={removeSelectedDeviceCopies}
+              />
+              <IconButton
                 icon="trash-outline"
-                label="Delete selected items"
+                label="Delete selected items from vault"
                 disabled={busy}
                 onPress={deleteSelected}
               />

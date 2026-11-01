@@ -1,13 +1,7 @@
 import { type PropsWithChildren } from 'react';
-import {
-  KeyboardAvoidingView,
-  ScrollView,
-  StyleSheet,
-  View,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+import { ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { useContentInsets } from './useContentInsets';
@@ -33,6 +27,7 @@ export function Screen({
   const insets = useContentInsets();
   const contentStyle = [
     styles.content,
+    !scroll && styles.fill,
     padded && styles.padded,
     scroll && { paddingBottom: insets.bottom },
     style,
@@ -45,8 +40,7 @@ export function Screen({
       style={[styles.safe, { backgroundColor: theme.colors.background }]}
     >
       {scroll ? (
-        // Edge-to-edge Android no longer resizes for the keyboard, so pad on both platforms.
-        <KeyboardAvoidingView behavior="padding" style={styles.safe}>
+        <KeyboardAvoidingView behavior="padding" automaticOffset style={styles.safe}>
           <ScrollView
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
@@ -64,6 +58,7 @@ export function Screen({
 }
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  fill: { flex: 1, minHeight: 0 },
   content: { flexGrow: 1, width: '100%', maxWidth: spacing.contentMax, alignSelf: 'center' },
   padded: { paddingHorizontal: spacing.screen },
 });

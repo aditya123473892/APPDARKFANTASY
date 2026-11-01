@@ -27,12 +27,9 @@ import { usePostPresentation } from '../presentation';
 export function useFeed() {
   return useInfiniteQuery({
     queryKey: queryKeys.feed,
-    queryFn: ({ pageParam }) => feedService.listPage(pageParam),
-    initialPageParam: 0,
-    getNextPageParam: (last: FeedPage, pages: FeedPage[]) => {
-      const loaded = pages.reduce((total, page) => total + page.posts.length, 0);
-      return last.posts.length && loaded < last.count ? loaded : undefined;
-    },
+    queryFn: ({ pageParam, signal }) => feedService.listPage(pageParam, signal),
+    initialPageParam: 'start',
+    getNextPageParam: (last: FeedPage) => last.nextCursor,
     // New posts shift offsets, so a later page can repeat a post already shown.
     select: (data) => {
       const seen = new Set<string>();

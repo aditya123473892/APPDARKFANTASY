@@ -10,7 +10,7 @@ import { useProfile } from '../hooks/useProfiles';
 import { ProfileHeader } from '../components/ProfileHeader';
 import { listUserPosts } from '@/features/feed/services/feedService.real';
 import { useToggleLike } from '@/features/feed/hooks/useFeed';
-import { useFollowUser } from '@/features/requests/hooks/useRequests';
+import { FollowButton } from '@/features/requests/components/FollowButton';
 import { useTheme } from '@/theme/useTheme';
 import { spacing } from '@/theme';
 import { useBlock } from '@/features/safety/useBlock';
@@ -28,7 +28,6 @@ export function UserProfileScreen() {
     enabled: Boolean(id) && id !== myId,
   });
   const toggleLike = useToggleLike();
-  const follow = useFollowUser(id);
   const block = useBlock();
   const blocked = useBlockState((state) => state.ids.includes(id));
   const unblocking = useBlockState((state) => state.pending.includes(id));
@@ -104,18 +103,10 @@ export function UserProfileScreen() {
         ) : (
           <>
             <View style={{ paddingHorizontal: spacing.lg }}>
-              <ProfileHeader user={profile.data} posts={posts.data?.length ?? 0} />
+              <ProfileHeader user={profile.data} posts={posts.data?.length ?? 0} followers={profile.data.followers} following={profile.data.following} />
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg }}>
-              <Button
-                label={follow.requested ? 'Requested' : 'Follow'}
-                variant="secondary"
-                size="sm"
-                style={{ flex: 1, minHeight: 40 }}
-                loading={follow.pending}
-                disabled={follow.requested}
-                onPress={follow.follow}
-              />
+<FollowButton userId={id} />
               <Button
                 label="Message"
                 variant="secondary"

@@ -5,40 +5,69 @@ import { toast } from '@/components/ui/Toast';
 import { describeError } from '@/services/errors';
 import { queryKeys } from '@/services/queryKeys';
 import { requestsService } from '../services';
-import { followUser } from '../services/requestsService.real';
+import { followUser, unfollowUser } from '../services/requestsService.real';
+import { getData } from '@/services/api/backend';
+import { relationshipKey, relationshipChanging as changing, type FollowRelationship } from '../relationship';
+import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import type { ConnectionRequest, RequestsResult } from '../types';
+import { restoreRequest } from '../requestCache';
 
-/**
- * Follow request ("interest") from a profile or discovery row. The backend exposes no
- * outgoing-request state, so this session's successful request is the only "Requested"
- * signal. State is read from the mutation cache by user id, so it is shared between screens
- * and never leaks between recycled list rows.
- */
+const pendingRequestActions = new Set<string>();
+type RequestContext = { previous?: RequestsResult; generation: number; reservation: string };
+
 export function useFollowUser(userId: string) {
+  const client = useQueryClient();
+  const invalidate = useInvalidateSocial();
+  const key = relationshipKey(userId);
+  const generation = sessionIdentity.generation;
+  const reservation = `${generation}:${userId}`;
+  const query = useQuery({ queryKey: key, enabled: Boolean(userId),
+    queryFn: async ({ signal }) => (await getData<{ relationship: FollowRelationship }>(
+      '/users/follow/relationship/' + userId, undefined, signal)).relationship });
+  const state = query.data ?? { status: 'none' as const };
   const mutationKey = ['requests', 'follow', userId];
-  const mutation = useMutation({
-    mutationKey,
-    mutationFn: () => followUser(userId),
-    onSuccess: () => {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      toast.success('Follow request sent');
+  const mutation = useMutation({ mutationKey,
+    mutationFn: async (remove: boolean) => {
+      if (reservation !== `${sessionIdentity.generation}:${userId}`) throw new Error('Session changed');
+      if (remove) { await unfollowUser(userId); return { status: 'none' } as FollowRelationship; }
+      const edge = await followUser(userId);
+      return { status: edge.status === 'accepted' ? 'following' : 'requested', requestId: edge._id } as FollowRelationship;
     },
-    onError: (error) =>
-      toast.error(describeError(error, 'Unable to follow this user. A request may already exist.')),
+    onMutate: async (remove) => {
+      if (generation !== sessionIdentity.generation) throw new Error('Session changed');
+      await client.cancelQueries({ queryKey: key });
+      if (generation !== sessionIdentity.generation) return { generation };
+      const previous = client.getQueryData<FollowRelationship>(key);
+      client.setQueryData(key, { status: remove ? 'none' : 'requested' });
+      return { previous, generation };
+    },
+    onSuccess: (data, _remove, context) => {
+      if (context?.generation === sessionIdentity.generation) client.setQueryData(key, data);
+    },
+    onError: (error, _remove, context) => {
+      if (context?.generation !== sessionIdentity.generation) return;
+      client.setQueryData(key, context?.previous ?? { status: 'none' });
+      toast.error(describeError(error, 'Could not update follow status. Try again.'));
+    },
+    onSettled: async (_data, _error, _remove, context) => {
+      try {
+        if (context?.generation !== sessionIdentity.generation) return;
+        await client.invalidateQueries({ queryKey: key });
+        await invalidate();
+      } finally { changing.delete(reservation); }
+    },
   });
-  const statuses = useMutationState({
-    filters: { mutationKey, exact: true },
-    select: (item) => item.state.status,
-  });
-  return {
-    follow: () => mutation.mutate(),
-    requested: statuses.includes('success'),
+  const statuses = useMutationState({ filters: { mutationKey, exact: true }, select: item => item.state.status });
+  return { state, requested: state.status === 'requested', loading: query.isPending,
+    error: query.isError && !query.data, retry: () => void query.refetch(),
     pending: statuses.includes('pending'),
+    follow: () => { if (!changing.has(reservation)) { changing.add(reservation); mutation.mutate(false); } },
+    remove: () => { if (!changing.has(reservation)) { changing.add(reservation); mutation.mutate(true); } },
   };
 }
 
 export function useRequests() {
-  return useQuery({ queryKey: queryKeys.requests, queryFn: () => requestsService.list() });
+  return useQuery({ queryKey: queryKeys.requests, queryFn: ({ signal }) => requestsService.list(signal) });
 }
 
 export function useIncomingRequestCount(): number {
@@ -51,6 +80,11 @@ function useInvalidateSocial() {
   return () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.requests }),
+      queryClient.invalidateQueries({ queryKey: ['social-lists'] }),
+      queryClient.invalidateQueries({ queryKey: ['social-counts'] }),
+      queryClient.invalidateQueries({ queryKey: ['relationships'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.feed }),
+      queryClient.invalidateQueries({ queryKey: ['user-posts'] }),
       queryClient.invalidateQueries({ queryKey: ['profiles'] }),
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations }),
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications }),
@@ -76,61 +110,82 @@ export function useRequestActions() {
   const queryClient = useQueryClient();
   const invalidate = useInvalidateSocial();
   const router = useRouter();
+  const generation = sessionIdentity.generation;
+  const current = (context?: RequestContext) => context?.generation === sessionIdentity.generation;
 
   const optimisticRemove = async (request: ConnectionRequest) => {
-    await queryClient.cancelQueries({ queryKey: queryKeys.requests });
-    const previous = queryClient.getQueryData<RequestsResult>(queryKeys.requests);
-    queryClient.setQueryData(queryKeys.requests, removeFromCache(previous, request.id));
-    return { previous };
+    const reservation = `${generation}:${request.id}`;
+    if (generation !== sessionIdentity.generation || pendingRequestActions.has(reservation))
+      throw new Error('Request action is unavailable');
+    pendingRequestActions.add(reservation);
+    try {
+      await queryClient.cancelQueries({ queryKey: queryKeys.requests });
+      if (generation !== sessionIdentity.generation) throw new Error('Session changed');
+      const previous = queryClient.getQueryData<RequestsResult>(queryKeys.requests);
+      queryClient.setQueryData(queryKeys.requests, removeFromCache(previous, request.id));
+      return { previous, generation, reservation };
+    } catch (error) { pendingRequestActions.delete(reservation); throw error; }
   };
   const rollback = (
     _error: unknown,
-    _request: ConnectionRequest,
-    context?: { previous?: RequestsResult },
+    request: ConnectionRequest,
+    context?: RequestContext,
   ) => {
-    if (context?.previous) queryClient.setQueryData(queryKeys.requests, context.previous);
+    if (current(context)) queryClient.setQueryData<RequestsResult>(queryKeys.requests,
+      data => restoreRequest(data, context?.previous, request.id));
+  };
+  const settled = async (_data: unknown, _error: unknown, _request: ConnectionRequest, context?: RequestContext) => {
+    try { if (current(context)) await invalidate(); }
+    finally { if (context) pendingRequestActions.delete(context.reservation); }
+  };
+  const assertActionSession = () => {
+    if (generation !== sessionIdentity.generation) throw new Error('Session changed');
   };
 
   const accept = useMutation({
     mutationKey: ['requests', 'accept'],
-    mutationFn: (request: ConnectionRequest) => requestsService.accept(request.id),
+    mutationFn: (request: ConnectionRequest) => { assertActionSession(); return requestsService.accept(request.id, request.user.id); },
     onMutate: optimisticRemove,
     onError: (error, request, context) => {
+      if (!current(context)) return;
       rollback(error, request, context);
       toast.error(describeError(error, `Couldn't accept ${request.user.name}'s request.`));
     },
-    onSuccess: ({ conversationId }, request) => {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onSuccess: ({ conversationId }, request, context) => {
+      if (!current(context)) return;
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       toast.success(`You and ${request.user.name} are connected`, {
         label: 'Message',
-        onPress: () => router.push(`/chat/${conversationId}`),
+        onPress: () => { if (current(context)) router.push(`/chat/${conversationId}`); },
       });
     },
-    onSettled: invalidate,
+    onSettled: settled,
   });
 
   const decline = useMutation({
     mutationKey: ['requests', 'decline'],
-    mutationFn: (request: ConnectionRequest) => requestsService.decline(request.id),
+    mutationFn: (request: ConnectionRequest) => { assertActionSession(); return requestsService.decline(request.id); },
     onMutate: optimisticRemove,
     onError: (error, request, context) => {
+      if (!current(context)) return;
       rollback(error, request, context);
       toast.error(describeError(error, "Couldn't decline that request."));
     },
-    onSuccess: (_data, request) => toast.show(`Declined ${request.user.name}'s request`),
-    onSettled: invalidate,
+    onSuccess: (_data, request, context) => { if (current(context)) toast.show(`Declined ${request.user.name}'s request`); },
+    onSettled: settled,
   });
 
   const cancel = useMutation({
     mutationKey: ['requests', 'cancel'],
-    mutationFn: (request: ConnectionRequest) => requestsService.cancel(request.id),
+    mutationFn: (request: ConnectionRequest) => { assertActionSession(); return requestsService.cancel(request.id); },
     onMutate: optimisticRemove,
     onError: (error, request, context) => {
+      if (!current(context)) return;
       rollback(error, request, context);
       toast.error(describeError(error, "Couldn't cancel that request."));
     },
-    onSuccess: (_data, request) => toast.show(`Request to ${request.user.name} cancelled`),
-    onSettled: invalidate,
+    onSuccess: (_data, request, context) => { if (current(context)) toast.show(`Request to ${request.user.name} cancelled`); },
+    onSettled: settled,
   });
 
   const pendingId = [accept, decline, cancel].find((mutation) => mutation.isPending)?.variables?.id;

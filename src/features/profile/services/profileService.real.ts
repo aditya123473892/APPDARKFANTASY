@@ -10,12 +10,16 @@ import type { ProfileService } from './profileService';
 import { uploadPhoto } from '@/services/api/photoUpload';
 import { isPeerBlocked } from '@/features/safety/blockState';
 
-type PublicProfile = Pick<User, '_id'> & Partial<User>;
+import { queryClient } from '@/services/queryClient';
+import { relationshipKey, relationshipChanging, type FollowRelationship } from '@/features/requests/relationship';
+type PublicProfile = Pick<User, '_id'> & Partial<User> & { relationship?: FollowRelationship };
 export function mapProfile(user: PublicProfile): ProfileView {
   if (!user || !/^[a-f\d]{24}$/i.test(user._id)) throw new ServiceError('UNKNOWN');
   userCache.put(user);
+  if (user.relationship && !relationshipChanging.has(`${sessionIdentity.generation}:${user._id}`)) queryClient.setQueryData(relationshipKey(user._id), user.relationship);
   return {
     ...toUserView(user),
+    followers: user.followers, following: user.following,
     name: displayName(user),
     avatarUri: mediaUrl(user.avatar),
     photos: user.avatar ? [mediaUrl(user.avatar)] : [],
@@ -34,15 +38,16 @@ export async function listRealUsers(): Promise<ProfileView[]> {
 }
 export const realProfileService: ProfileService = {
   discover: listRealUsers,
-  async discoverPage(skip, search) {
+  async discoverPage(skip, search, signal) {
     const limit = 20;
     const data = await getData<{ users: PublicProfile[]; count: number }>('/users', {
+      summary: 'true',
       skip,
       limit,
       sortBy: '_id',
       order: 'desc',
-      ...(search ? { displayname: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') } : {}),
-    });
+      ...(search ? { displayname: search } : {}),
+    }, signal);
     if (!Array.isArray(data.users) || !Number.isFinite(data.count) || data.count < 0)
       throw new ServiceError('UNKNOWN');
     // Advance by server rows, including self/blocked rows filtered from the UI.
@@ -54,10 +59,10 @@ export const realProfileService: ProfileService = {
       nextSkip: data.users.length && next < data.count ? next : undefined,
     };
   },
-  async get(id) {
+  async get(id, signal) {
     if (isPeerBlocked(id)) throw new ServiceError('NOT_FOUND');
     // The server evaluates visibility for the authenticated caller.
-    const { user } = await getData<{ user: PublicProfile }>(`/users/${id}`);
+    const { user } = await getData<{ user: PublicProfile }>(`/users/${id}`, undefined, signal);
     if (isPeerBlocked(id)) throw new ServiceError('NOT_FOUND');
     return mapProfile(user);
   },

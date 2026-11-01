@@ -2,6 +2,7 @@ import { focusManager, QueryClientProvider } from '@tanstack/react-query';
 import { type PropsWithChildren, useEffect } from 'react';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { queryClient } from '@/services/queryClient';
 import { ThemeProvider } from '@/theme/ThemeProvider';
@@ -11,6 +12,7 @@ import { registerLocalVaultLifecycle } from '@/features/auth/localVaultLifecycle
 import { beforeLogout } from '@/features/vault/logout';
 import { lock } from '@/features/vault/lock';
 import { localOwner, rememberOwner } from '@/features/vault/vaultService';
+import { AppLockBoundary } from '@/features/app-lock/AppLockBoundary';
 import { VaultPinPrompt } from '@/features/vault/components/VaultPinPrompt';
 // The local Photo Vault is device-only: it needs SecureStore and on-device
 // files, neither of which exists on web, where registering it made every
@@ -46,12 +48,16 @@ export function AppProviders({ children }: PropsWithChildren): React.JSX.Element
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ThemeProvider>
-          <QueryClientProvider client={queryClient}>
-            {children}
-            <VaultPinPrompt />
-          </QueryClientProvider>
-        </ThemeProvider>
+        <KeyboardProvider statusBarTranslucent navigationBarTranslucent preserveEdgeToEdge>
+          <ThemeProvider>
+            <QueryClientProvider client={queryClient}>
+              <AppLockBoundary>
+                {children}
+                <VaultPinPrompt />
+              </AppLockBoundary>
+            </QueryClientProvider>
+          </ThemeProvider>
+        </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

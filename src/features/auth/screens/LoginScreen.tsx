@@ -8,28 +8,54 @@ import { completePhoneSignIn } from '../phoneSignIn';
 import { spacing } from '@/theme';
 import { useRef, useState } from 'react';
 import { Button, Input, PasswordInput, Text } from '@/components/ui';
+import { featureFlags } from '@/config/featureFlags';
+import { signupEmailSchema } from '../schemas/authSchemas';
 
 export function LoginScreen(): React.JSX.Element {
   const router = useRouter();
-  const [method, setMethod] = useState<'password' | 'otp'>('password');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const busy = useRef(false);
   const login = async () => {
     if (busy.current) return;
-    if (!identifier.trim() || !password) {
-      setError('Enter your email or mobile number and password.');
+    const email = signupEmailSchema.safeParse(identifier);
+    if (!email.success || !password) {
+      setError('Enter a valid email address and your password.');
       return;
     }
     busy.current = true;
     setLoading(true);
     setError(null);
+    setNotice(null);
     const secret = password;
     setPassword('');
     try {
-      await completePhoneSignIn(() => phoneAuth.loginWithPassword(identifier, secret));
+      await completePhoneSignIn(() => phoneAuth.loginWithPassword(email.data, secret));
+    } catch (caught) {
+      setError(phoneErrorMessage(caught));
+    } finally {
+      busy.current = false;
+      setLoading(false);
+    }
+  };
+  const resendEmail = async () => {
+    if (busy.current) return;
+    if (!identifier.includes('@') || !password) {
+      setError('Enter your account email and password above to resend verification.');
+      return;
+    }
+    busy.current = true;
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    const secret = password;
+    setPassword('');
+    try {
+      await phoneAuth.resendVerification(identifier, secret);
+      setNotice('Check your email for a verification link, then sign in.');
     } catch (caught) {
       setError(phoneErrorMessage(caught));
     } finally {
@@ -42,9 +68,9 @@ export function LoginScreen(): React.JSX.Element {
     <AuthScaffold
       title="Welcome back"
       subtitle={
-        method === 'password'
-          ? 'Sign in with your email or mobile number and password.'
-          : 'Get a one-time code on your mobile number.'
+        featureFlags.PHONE_AUTH_REQUIRED
+          ? 'Get a one-time code on your mobile number.'
+          : 'Sign in with your email and password.'
       }
       footer={
         <AuthPrompt
@@ -55,39 +81,15 @@ export function LoginScreen(): React.JSX.Element {
       }
     >
       <View style={styles.form}>
-        <View style={styles.methods}>
-          <Button
-            label="Password"
-            fullWidth={false}
-            style={{ flex: 1 }}
-            variant={method === 'password' ? 'primary' : 'ghost'}
-            disabled={loading}
-            onPress={() => {
-              setMethod('password');
-              setError(null);
-            }}
-          />
-          <Button
-            label="Mobile OTP"
-            fullWidth={false}
-            style={{ flex: 1 }}
-            variant={method === 'otp' ? 'primary' : 'ghost'}
-            disabled={loading}
-            onPress={() => {
-              setMethod('otp');
-              setPassword('');
-              setError(null);
-            }}
-          />
-        </View>
-        {method === 'password' ? (
+        {!featureFlags.PHONE_AUTH_REQUIRED ? (
           <>
             <Input
-              label="Email or mobile number"
-              placeholder="Email or +91 mobile number"
+              label="Email address"
+              placeholder="you@example.com"
+              keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
-              autoComplete="username"
+              autoComplete="email"
               editable={!loading}
               value={identifier}
               onChangeText={setIdentifier}
@@ -106,6 +108,13 @@ export function LoginScreen(): React.JSX.Element {
               </Text>
             ) : null}
             <Button label="Sign in" loading={loading} onPress={() => void login()} />
+            <Button
+              label="Resend verification email"
+              variant="ghost"
+              disabled={loading}
+              onPress={() => void resendEmail()}
+            />
+            {notice ? <Text accessibilityRole="alert">{notice}</Text> : null}
           </>
         ) : (
           <PhoneOtpFlow
@@ -125,5 +134,4 @@ export function LoginScreen(): React.JSX.Element {
 }
 const styles = StyleSheet.create({
   form: { gap: spacing.md },
-  methods: { flexDirection: 'row', gap: spacing.sm },
 });

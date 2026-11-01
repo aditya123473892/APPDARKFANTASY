@@ -9,6 +9,8 @@ import { ErrorState } from '@/components/feedback/ErrorState';
 import { toast } from '@/components/ui/Toast';
 import { spacing, radius } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
+import { type Href } from 'expo-router';
+import { notificationTarget } from '../notificationTarget';
 import { NotificationRow } from '../components/NotificationRow';
 import { useMarkNotificationsRead, useNotifications } from '../hooks/useActivity';
 
@@ -104,7 +106,8 @@ export function NotificationsScreen({ embedded = false }: { embedded?: boolean }
                   read.mutate([notification.id], {
                     onError: () => toast.error('Could not mark this notification read.'),
                   });
-                if (notification.eventId) router.push(`/events/${notification.eventId}`);
+                const target = notificationTarget(notification);
+                if (target) router.push(target as Href);
               }}
             />
           )}

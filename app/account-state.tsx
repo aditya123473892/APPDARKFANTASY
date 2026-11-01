@@ -29,7 +29,7 @@ export default function AccountState() {
           (status === 'blocked'
             ? 'Contact support through the desktop website.'
             : status === 'unverified'
-              ? 'Follow the verification link in your email on the desktop website, then refresh your profile.'
+              ? 'Open the verification link in your email, then return and sign in. You can resend the link from the sign-in screen using your email and password.'
               : 'Please sign in again.')}
       </Text>
       {tokenPresent && (

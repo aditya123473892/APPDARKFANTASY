@@ -26,7 +26,7 @@ const morePages = [
 
 export function SettingsScreen(): React.JSX.Element {
   const router = useRouter();
-  const { mode, setMode } = useTheme();
+  const { isDark, setMode } = useTheme();
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -131,26 +131,15 @@ export function SettingsScreen(): React.JSX.Element {
           {__DEV__ ? <SettingsRow icon="color-palette-outline" title="Social UI preview" onPress={() => router.push('/ui-preview' as Href)} /> : null}
           <SettingsRow
             icon="moon-outline"
-            title="Dark"
-            subtitle="Velvet Noir"
-            value={mode === 'dark'}
-            onValueChange={() => setMode('dark')}
-          />
-          <SettingsRow
-            icon="sunny-outline"
-            title="Light"
-            value={mode === 'light'}
-            onValueChange={() => setMode('light')}
-          />
-          <SettingsRow
-            icon="phone-portrait-outline"
-            title="Use device appearance"
-            value={mode === 'system'}
-            onValueChange={() => setMode('system')}
+            title="Dark mode"
+            subtitle={isDark ? 'Dark theme' : 'Light theme'}
+            value={isDark}
+            onValueChange={(enabled) => setMode(enabled ? 'dark' : 'light')}
             last
           />
         </SettingsGroup>
         <SettingsGroup title="Account">
+          <SettingsRow icon="lock-closed-outline" title="App Lock" subtitle="Custom PIN and optional biometrics" onPress={() => router.push('/settings/app-lock' as Href)} />
           <SettingsRow
             icon="flag-outline"
             title="My reports"

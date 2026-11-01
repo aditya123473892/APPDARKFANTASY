@@ -55,8 +55,10 @@ export type RegisterInput = {
   gender: string;
   email: string;
   password: string;
+  phoneNumber?: string;
   inviteCode?: string;
 };
+export type RegistrationResult = { emailVerificationRequired: boolean };
 
 export class AuthError extends Error {
   constructor(

@@ -5,20 +5,20 @@ The working `claude` branch uses the simpler vault requested afterwards.
 
 ## Running
 
-Run `npm start` and scan with an **SDK 57 compatible Expo Go** on the same Wi-Fi.
+Run `npm start` and scan with an **SDK 58 compatible Expo Go** on the same Wi-Fi.
 The launcher explicitly selects `--go`. Quick Crypto, Quick Base64, Nitro and expo-dev-client have been removed.
-`@noble/hashes@1.8.0` provides JavaScript-only SHA-256 checksums; UUIDs use the existing Expo core runtime. `expo-crypto` is not required. This also avoids the `Cannot find native module 'ExpoCrypto'` startup crash when using an older installed development APK. No custom native crypto is imported.
+`@noble/hashes@1.8.0` provides SHA-256 checksums; `expo-crypto` supplies native AES-256-GCM. Rebuild older development APKs to include the SDK 58 crypto module. Expo push notifications and Face ID also need a configured development/standalone build.
 Expo Go is a shared development host; app configuration, Android backup exclusions and package-specific permissions apply only to a standalone/development APK built from this project, not to Expo Go itself.
 
 ## What the simpler vault does
 
 - Stores resized JPEGs in private app documents at `vault/{userId}/simple/{photoId}.jpg`; SQLite DB/WAL live in the same directory.
-- Uses ordinary JPEGs with **no additional image encryption at rest**. Android sandbox/device security protects normal access; a compromised device or extracted files can expose images. Hidden is only an in-app display preference.
-- Requires Android device authentication (biometric/device credential fallback), relocks on background and retains persistent failed-attempt lockout. There is no separate app passcode or per-user image encryption key.
+- Persistent photos use versioned AES-256-GCM envelopes, authenticated against account and photo identity, with a separate random per-account key in SecureStore. Each disk write is decrypted and checksum-verified before commit. Existing ordinary JPEGs are upgraded when accessed. SQLite metadata and local videos retain their existing storage format; the app does not label them encrypted.
+- Vault authentication retains its device/PIN choices and failed-attempt lockout. App Lock is separate: a custom 6–12 digit PIN, optional biometrics, background timeout and account-password recovery under Settings → App Lock.
 - Keeps encrypted-build files/DB outside the `simple/` directory untouched during normal use. Sync old pending images with the encrypted build before switching. Cloud copies download normally into the simpler vault. Logout warns about unsynced changes from either DB before an explicit wipe removes both versions for that account.
 - Keeps offline additions, persistent SQLite upload/edit/delete jobs, retry/backoff, tombstones, moderation rejection, hide/show/order, separate 50-photo vault limit, lazy downloads and SHA-256 checks.
 - Never writes to the gallery except after explicit export confirmation. Camera/gallery originals in the gallery are not removed. Picker/manipulator temporary copies are cleaned up.
-- Uses React Native Image to display private sandbox JPEGs directly. Local grid/viewer opens do not hash/read/copy full images into JavaScript. UI images are cleared on lock/background; temporary export/publication files are cleaned separately. No expo-image URL/disk cache is used for vault photos.
+- Native images display temporary decrypted viewing copies. These are removed on lock/background and startup; exports/publication still require explicit actions. No reusable public media URL is added for vault photos.
 - Uses expo-screen-capture on vault screens; production always requests blocking. Screenshots are allowed by default in development, including Expo Go. Set `EXPO_PUBLIC_ALLOW_SCREENSHOTS_FOR_TESTING=false` to test blocking during development.
 - Retains explicit export/share, metadata removal, logout/discard guard, private backend endpoints, independent public publication copies and cleanup protections.
 
@@ -77,7 +77,7 @@ Manual phone checks remain:
 7. Test screenshot/recording and recent-app privacy on a standalone Android APK. Expo Go cannot validate this app's manifest/backup configuration.
 8. Test low disk, damaged/missing local files, cloud re-download and offline placeholders.
 
-No custom crypto, key-recovery claim or end-to-end encryption is provided by the simpler version. S3 encryption protects cloud storage at rest, while the backend/AWS can process cloud photos. Rooted devices, external exports, app memory and physical secure erasure are outside this vault's protection.
+Local photo encryption uses Expo's native AES-GCM implementation. S3 encryption protects cloud storage at rest; the backend/AWS still processes and moderates cloud photos. This is not end-to-end encryption. Local keys are not uploaded or recoverable from an app PIN; if a local key is lost, only a verified cloud copy can restore a photo. Rooted devices, external exports, app memory and physical secure erasure remain outside this protection.
 
 ## Videos, PIN unlock and staff tools (23 October 2026)
 

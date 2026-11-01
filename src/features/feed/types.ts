@@ -53,7 +53,7 @@ export type Post = {
   comments?: PostComment[];
 };
 
-export type FeedPage = { posts: Post[]; count: number };
+export type FeedPage = { posts: Post[]; count: number; nextCursor?: string };
 export type LikeState = { liked: boolean; likeCount: number };
 export type CommentPage = { comments: PostComment[]; hasMore: boolean; count: number };
 

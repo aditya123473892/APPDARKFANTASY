@@ -1,4 +1,7 @@
 {
+  "cli": {
+    "appVersionSource": "local"
+  },
   "build": {
     "development": {
       "developmentClient": true,
@@ -7,10 +10,27 @@
     },
     "apk": {
       "distribution": "internal",
+      "environment": "production",
+      "env": {
+        "APP_VARIANT": "production",
+        "EXPO_PUBLIC_API_URL": "https://dfbackend.onrender.com/api",
+        "EXPO_PUBLIC_PHONE_AUTH_REQUIRED": "false",
+        "EXPO_PUBLIC_DEV_API_PROXY": "false",
+        "EXPO_DEV_API_PROXY": "false"
+      },
       "android": {
         "buildType": "apk"
       }
     },
-    "production": { "env": { "APP_VARIANT": "production" } }
+    "production": {
+      "environment": "production",
+      "env": {
+        "APP_VARIANT": "production",
+        "EXPO_PUBLIC_API_URL": "https://dfbackend.onrender.com/api",
+        "EXPO_PUBLIC_PHONE_AUTH_REQUIRED": "true",
+        "EXPO_PUBLIC_DEV_API_PROXY": "false",
+        "EXPO_DEV_API_PROXY": "false"
+      }
+    }
   }
 }

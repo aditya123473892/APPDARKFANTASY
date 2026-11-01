@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { useRouter, type Href } from 'expo-router';
 import { RefreshControl, ScrollView, Share, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { Header, Screen, SettingsButton } from '@/components/layout';
-import { Button, Loader, Modal } from '@/components/ui';
+import { Button, Loader, Modal, Text } from '@/components/ui';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useDeletePost, useMyPosts, useToggleLike } from '@/features/feed/hooks/useFeed';
@@ -15,24 +16,22 @@ import { ProfileHeader } from '../components/ProfileHeader';
 import { ProfileGrid } from '../components/ProfileGrid';
 
 export function MyProfileScreen() {
+  const router = useRouter();
   const { theme } = useTheme();
   const user = useAuthStore((state) => state.user);
   const [editing, setEditing] = useState(false);
   const feed = useMyPosts();
-  const followers = useQuery({
-    queryKey: ['followers'],
-    queryFn: () => getData<{ followers: unknown[] }>('/users/follow/followers'),
-  });
-  const following = useQuery({
-    queryKey: ['following'],
-    queryFn: () => getData<{ following: unknown[] }>('/users/follow/following'),
+  const counts = useQuery({
+    queryKey: ['social-counts', user?.id],
+    queryFn: ({ signal }) => getData<{ followers: number; following: number }>('/users/follow/counts', undefined, signal),
+    enabled: !!user,
   });
   const toggle = useToggleLike();
   const remove = useDeletePost();
   if (!user)
     return (
       <Screen>
-        <Loader />
+        <ErrorState title="Profile unavailable" onRetry={() => void useAuthStore.getState().refreshProfile()} />
       </Screen>
     );
   const posts = feed.data?.filter((post) => post.user.id === user.id) ?? [];
@@ -43,11 +42,10 @@ export function MyProfileScreen() {
         contentContainerStyle={{ paddingBottom: spacing.xl }}
         refreshControl={
           <RefreshControl
-            refreshing={feed.isRefetching}
+            refreshing={feed.isRefetching || counts.isRefetching}
             onRefresh={() => {
               void feed.refetch();
-              void followers.refetch();
-              void following.refetch();
+              void counts.refetch();
             }}
             tintColor={theme.colors.primary}
           />
@@ -63,9 +61,15 @@ export function MyProfileScreen() {
           <ProfileHeader
             user={user}
             posts={posts.length}
-            followers={followers.data?.followers.length}
-            following={following.data?.following.length}
+            followers={counts.data?.followers}
+            following={counts.data?.following}
+            onFollowersPress={() => router.push('/connections?tab=followers' as Href)}
+            onFollowingPress={() => router.push('/connections?tab=following' as Href)}
           />
+          {counts.isPending ? <Text variant="caption" accessibilityLiveRegion="polite">Loading follower counts…</Text> : null}
+          {counts.isError ? <ErrorState compact title="Couldn’t refresh follow counts"
+            message={counts.data ? 'These counts may be out of date. Try again.' : 'Your counts could not be loaded. Check your connection and retry.'}
+            onRetry={() => void counts.refetch()} /> : null}
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             <Button
               label="Edit profile"
