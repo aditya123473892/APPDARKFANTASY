@@ -1,6 +1,4 @@
 const path = require('node:path');
-const os = require('node:os');
-const fs = require('node:fs');
 const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 const config = getSentryExpoConfig(__dirname);
 // expo-sqlite's web worker imports its WASM binary as an asset.
@@ -17,14 +15,6 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   }
   return (resolveRequest ?? context.resolveRequest)(context, moduleName, platform);
 };
-// File-map snapshots use V8 serialization, which can differ between Node runtimes.
-// Keep separate caches when starting Expo with system or portable Node installs.
-config.fileMapCacheDirectory = path.join(
-  os.tmpdir(),
-  'darkfantasy-metro-file-map',
-  `${process.versions.node}-${process.versions.v8}`,
-);
-fs.mkdirSync(config.fileMapCacheDirectory, { recursive: true });
 if (process.env.EXPO_DEV_API_PROXY === 'true' && process.env.APP_VARIANT === 'development') {
   const { createDevApiProxy } = require('./scripts/dev-api-proxy.cjs');
   const backendPort = Number(process.env.EXPO_DEV_API_PORT || 9000);
