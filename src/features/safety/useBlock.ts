@@ -1,5 +1,4 @@
 import { useMutation } from '@tanstack/react-query';
-import { Alert } from 'react-native';
 import { queryClient } from '@/services/queryClient';
 import { toast } from '@/components/ui/Toast';
 import { describeError } from '@/services/errors';
@@ -8,6 +7,7 @@ import { useOutbox } from '@/features/chat/store/outboxStore';
 import { changeBlock } from './blocks';
 import { setPeerBlocked, useBlockState } from './blockState';
 import { invalidateSafety, purgePeer, redactCached } from './blockCache';
+import { dialog } from '@/components/ui/dialogStore';
 
 export function useBlock() {
   const mutation = useMutation({
@@ -49,7 +49,7 @@ export function useBlock() {
   });
   const confirm = (id: string) => {
     if (mutation.isPending || useBlockState.getState().pending.includes(id)) return;
-    Alert.alert(
+    dialog.alert(
       'Block this user?',
       'You will disappear from each other’s profiles, feed and direct chats. Pending requests are cancelled. Shared groups remain, but neither of you will see the other’s messages there. You can unblock in Settings. Previously opened image links may work briefly until they expire.',
       [

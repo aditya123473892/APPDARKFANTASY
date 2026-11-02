@@ -1,5 +1,14 @@
 const MINUTE = 60_000;
 const DAY = 86_400_000;
+// Built once: creating an Intl formatter is slow on Hermes, and these run for every list row.
+const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+const shortDateWithYear = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+const clockTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'long' });
 
 export function formatRelativeTime(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
@@ -11,15 +20,11 @@ export function formatRelativeTime(date: string): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d`;
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(
-    new Date(date),
-  );
+  return shortDate.format(new Date(date));
 }
 
 export function formatMessageTime(date: string): string {
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(
-    new Date(date),
-  );
+  return clockTime.format(new Date(date));
 }
 
 const startOfDay = (value: Date): number =>
@@ -31,12 +36,10 @@ export function formatDayLabel(date: string): string {
   const days = Math.round((startOfDay(new Date()) - startOfDay(value)) / DAY);
   if (days <= 0) return 'Today';
   if (days === 1) return 'Yesterday';
-  if (days < 7) return new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(value);
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: value.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
-  }).format(value);
+  if (days < 7) return weekday.format(value);
+  return (value.getFullYear() === new Date().getFullYear() ? shortDate : shortDateWithYear).format(
+    value,
+  );
 }
 
 export function isSameDay(a: string, b: string): boolean {
@@ -67,4 +70,9 @@ export function formatTimeAgo(date: string): string {
   const relative = formatRelativeTime(date);
   if (relative === 'now') return 'just now';
   return /^\d+[mhd]$/.test(relative) ? `${relative} ago` : `on ${relative}`;
+}
+
+/** "Oct 3". */
+export function formatShortDate(date: string): string {
+  return shortDate.format(new Date(date));
 }

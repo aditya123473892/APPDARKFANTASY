@@ -37,3 +37,5 @@ export { StoriesRow } from './StoriesRow';
 export { CommentsSheet } from './CommentsSheet';
 export { CommentItem } from './CommentItem';
 export { LikesSheet } from './LikesSheet';
+export * from './Dialog';
+export * from './dialogStore';

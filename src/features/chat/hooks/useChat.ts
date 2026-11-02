@@ -162,10 +162,12 @@ export function useMessages(conversationId: string, enabled = true) {
   const loadOlder = useCallback(async () => {
     updateRoom(conversationId, { window: roomState(conversationId).window + LOCAL_WINDOW });
   }, [conversationId]);
+  // Same array until the messages or window change, so screens can memoise rows on it.
+  const windowed = useMemo(() => localWindow(messages, count), [messages, count]);
   return {
     ...query,
     allMessages: messages,
-    messages: localWindow(messages, count),
+    messages: windowed,
     hasOlder: messages.length > count,
     loadOlder,
     loadingOlder: false,
@@ -294,7 +296,8 @@ export function useMarkConversationRead(
       focused &&
       appState === 'active' &&
       ready &&
-      canSend && receipts
+      canSend &&
+      receipts
     ) {
       void chatService.markRead(conversationId, allowed).catch(() => undefined);
     }

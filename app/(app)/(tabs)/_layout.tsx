@@ -29,6 +29,8 @@ export default function TabsLayout(): React.JSX.Element {
       }}
       screenOptions={({ route }) => ({
         headerShown: false,
+        // Hidden tabs skip re-rendering on cache updates and catch up when shown again.
+        freezeOnBlur: true,
         sceneStyle: { backgroundColor: theme.colors.background },
         tabBarActiveTintColor: theme.colors.primaryText,
         tabBarInactiveTintColor: theme.colors.textMuted,

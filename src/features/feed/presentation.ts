@@ -28,6 +28,12 @@ export const mediaPreviews = new Map<string, MediaPreview>();
 export const singleMedia = (post: Post): PostMedia | undefined => post.media?.[0];
 export const isVideo = (media?: PostMedia) => Boolean(media?.mimetype?.startsWith('video/'));
 /**
+ * Image cache key that survives signed-URL refreshes (the URL changes on every refetch).
+ * The feed and profile grid share it, so a photo seen in one is not downloaded again.
+ */
+export const mediaCacheKey = (media: PostMedia, locked = false): string =>
+  media.id ? `${media.id}:${locked || media.locked ? 'locked' : 'open'}` : media.uri;
+/**
  * Feed frame from the stored size, clamped to 4:5…1.91:1 (never snapped to a
  * few presets, which cropped most photos). Videos of unknown size keep the
  * portrait 4:5 frame they always had.

@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useCallback } from 'react';
 import { RefreshControl, View } from 'react-native';
 import { Header, Screen, SettingsButton } from '@/components/layout';
 import { EmptyState, IconButton, Loader, Skeleton, Text } from '@/components/ui';
@@ -10,6 +11,7 @@ import { useContentInsets } from '@/components/layout/useContentInsets';
 import { useTheme } from '@/theme/useTheme';
 import { spacing } from '@/theme';
 import { useFeed, useToggleLike } from '../hooks/useFeed';
+import type { Post } from '../types';
 import { Pressable } from '@/components/ui/Pressable';
 
 export function FeedScreen() {
@@ -19,6 +21,17 @@ export function FeedScreen() {
   const me = useAuthStore((state) => state.user);
   const feed = useFeed();
   const toggle = useToggleLike();
+  // Stable handlers keep every PostCard from re-rendering when the feed screen does.
+  const { mutate: like } = toggle;
+  const myId = me?.id;
+  const toggleLike = useCallback(
+    (post: Post) => like({ postId: post.id, liked: !post.liked }),
+    [like],
+  );
+  const openAuthor = useCallback(
+    (post: Post) => router.push(post.user.id === myId ? '/profile' : `/profile/${post.user.id}`),
+    [router, myId],
+  );
   return (
     <Screen padded={false}>
       <View style={{ paddingHorizontal: spacing.md }}>
@@ -55,10 +68,8 @@ export function FeedScreen() {
       ) : (
         <PostList
           posts={feed.data ?? []}
-          onToggleLike={(post) => toggle.mutate({ postId: post.id, liked: !post.liked })}
-          onOpenAuthor={(post) =>
-            router.push(post.user.id === me?.id ? '/profile' : `/profile/${post.user.id}`)
-          }
+          onToggleLike={toggleLike}
+          onOpenAuthor={openAuthor}
           contentContainerStyle={{ paddingBottom: insets.bottom }}
           refreshControl={
             <RefreshControl

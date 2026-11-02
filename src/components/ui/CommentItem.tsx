@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { PostComment } from '@/features/feed/types';
 import { formatRelativeTime } from '@/utils/formatters';
@@ -9,6 +9,8 @@ import { spacing } from '@/theme';
 import { Avatar } from './Avatar';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
+
+import { dialog } from '@/components/ui/dialogStore';
 export function CommentItem({
   comment,
   onReply,
@@ -63,7 +65,7 @@ export function CommentItem({
               <Pressable
                 accessibilityLabel="Comment options"
                 onPress={() =>
-                  Alert.alert('Comment options', undefined, [
+                  dialog.alert('Comment options', undefined, [
                     onDelete
                       ? { text: 'Delete', style: 'destructive', onPress: onDelete }
                       : {

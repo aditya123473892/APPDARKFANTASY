@@ -9,6 +9,7 @@ import { useTheme } from '@/theme/useTheme';
 import { spacing } from '@/theme';
 import { durationLabel } from '@/features/feed/presentation';
 import { prepareSingleMedia, type SelectedMedia } from './singleMedia';
+import { whileExternal } from '@/services/externalActivity';
 
 export function RecentMediaGrid({
   selected,
@@ -31,7 +32,9 @@ export function RecentMediaGrid({
     if (Platform.OS === 'web') return;
     setBusy(true);
     try {
-      const permission = await MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']);
+      const permission = await whileExternal(() =>
+        MediaLibrary.requestPermissionsAsync(false, ['photo', 'video']),
+      );
       if (!permission.granted)
         throw new Error('Allow photo access, or use Choose media to select photos.');
       const result = await MediaLibrary.getAssetsAsync({

@@ -22,6 +22,8 @@ export default function AppLayout(): React.JSX.Element {
           headerShown: false,
           contentStyle: { backgroundColor: theme.colors.background },
           animation: 'slide_from_right',
+          // Screens covered by another one stop re-rendering until they are back on top.
+          freezeOnBlur: true,
         }}
       >
         <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />

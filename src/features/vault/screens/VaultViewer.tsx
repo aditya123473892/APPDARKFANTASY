@@ -1,6 +1,6 @@
 import { radius, spacing } from '@/theme';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Alert, Image, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, Image, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -17,6 +17,7 @@ import { vaultError } from '../presentation';
 import type { VaultPhoto } from '../types';
 import { removeDeviceCopies } from '../deviceStorage';
 
+import { dialog } from '@/components/ui/dialogStore';
 /** Plays a private local file; unmounting on lock/background releases the player. */
 function VaultVideo({ uri }: { uri: string }): React.JSX.Element {
   const player = useVideoPlayer({ uri, useCaching: false }, (instance) => {
@@ -94,7 +95,10 @@ export function VaultViewer(): React.JSX.Element {
         const restore = repair.current;
         repair.current = false;
         const value = await photoUri(owner, id, restore);
-        if (!cancelled) { setPhoto(await get(owner, id) ?? row); setDisplay({ id, uri: value }); }
+        if (!cancelled) {
+          setPhoto((await get(owner, id)) ?? row);
+          setDisplay({ id, uri: value });
+        }
       })().catch(() => {
         if (!cancelled) {
           setDisplay(undefined);
@@ -119,7 +123,7 @@ export function VaultViewer(): React.JSX.Element {
     }
   };
   const remove = () =>
-    Alert.alert(
+    dialog.alert(
       `Delete ${noun} from vault?`,
       'This removes it from your vault on all devices. The service retains a private deleted copy. Gallery copies will stay.',
       [
@@ -137,7 +141,7 @@ export function VaultViewer(): React.JSX.Element {
       ],
     );
   const removeLocal = () =>
-    Alert.alert(
+    dialog.alert(
       'Remove device copy?',
       'This frees storage used by the app. The backed-up item stays in your vault and can be downloaded again. Gallery copies are unchanged.',
       [
@@ -155,7 +159,7 @@ export function VaultViewer(): React.JSX.Element {
       ],
     );
   const more = () =>
-    Alert.alert(`${noun === 'video' ? 'Video' : 'Photo'} options`, undefined, [
+    dialog.alert(`${noun === 'video' ? 'Video' : 'Photo'} options`, undefined, [
       {
         text: photo?.hidden ? `Unhide ${noun}` : `Hide ${noun}`,
         onPress: () =>
@@ -273,7 +277,7 @@ export function VaultViewer(): React.JSX.Element {
                 onPress={() =>
                   void run(async () => {
                     if (await exportPhotos(owner, [id]))
-                      Alert.alert(
+                      dialog.alert(
                         'Saved to phone',
                         'You can find it in Gallery / Photos. Your vault copy is kept.',
                       );

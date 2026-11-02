@@ -1194,6 +1194,8 @@ function harness(overrides = {}) {
       env: { apiUrl: 'https://api.example.test/api', pinningEnabled: false, pins: [] },
     },
     '@/config/featureFlags': { featureFlags: { ENABLE_EPHEMERAL_CHAT: false } },
+    // Server wake-up checks use real fetch; these tests fake the network through axios.
+    './serverWake': { wakeServer: async () => {}, markServerAwake: () => {} },
     'expo-secure-store': {
       WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'device-only',
       getItemAsync: async (key) => secure.get(key) ?? null,
@@ -2372,7 +2374,8 @@ test('blocked group messages render only a placeholder: no text, media or reveal
   const h = harness({
     react: { memo: fn => fn },
     '@/features/safety/blockState': { useBlockState: selector => selector({ ids: [peer] }) },
-    'react-native': { Platform: { OS: 'android' }, View: 'View', Pressable: 'Pressable', Alert: { alert: () => {} }, StyleSheet: { create: value => value } },
+    'react-native': { Platform: { OS: 'android' }, View: 'View', Pressable: 'Pressable', StyleSheet: { create: value => value } },
+    '@/components/ui/dialogStore': { dialog: { alert: () => {} } },
     '@expo/vector-icons': { Ionicons: 'Icon' },
     '@/components/ui': { Text: 'Text' },
     './ChatAttachment': { ChatAttachment: 'Attachment' },
@@ -2399,9 +2402,9 @@ test('C uncertain UI offers Send again only after absent resync and never offers
       Platform: { OS: 'android' },
       View: 'View',
       Pressable: 'Pressable',
-      Alert: { alert: (...args) => alerts.push(args) },
       StyleSheet: { create: (value) => value, hairlineWidth: 1 },
     },
+    '@/components/ui/dialogStore': { dialog: { alert: (...args) => alerts.push(args) } },
     '@expo/vector-icons': { Ionicons: 'Icon' },
     '@/components/ui': { Text: 'Text' },
     './ChatAttachment': { ChatAttachment: 'Attachment' },

@@ -14,6 +14,7 @@ import { CHAT_AVATAR, ChatListItem } from '../components/ChatListItem';
 import { useConversations, useMyId, useChatVisibility } from '../hooks/useChat';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { INBOX_POLL_MS, LOCAL_SEARCH_LABEL, localSearch, prefetchInbox } from '../services/inbox';
+import { useChatConnection } from '../services/chatState';
 import { chatService } from '../services';
 import type { Conversation } from '../types';
 import { describeError } from '@/services/errors';
@@ -56,6 +57,9 @@ export function ChatsScreen(): React.JSX.Element {
   useEffect(() => {
     if (!visible) return;
     const timer = setInterval(() => {
+      // While the socket is live it delivers new messages (and resyncs every history on
+      // reconnect), so re-downloading every conversation is only needed as a fallback.
+      if (useChatConnection.getState().ready) return;
       if (prefetchTasks.current === 0) setPreviewRefresh((value) => value + 1);
     }, INBOX_POLL_MS);
     return () => clearInterval(timer);

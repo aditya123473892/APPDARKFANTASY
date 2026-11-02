@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Header, Screen } from '@/components/layout';
@@ -18,6 +18,7 @@ import { isSessionCurrent } from '@/features/auth/sessionRuntime';
 import { eventTime } from './EventsScreen';
 import { EventCover } from './EventCover';
 
+import { dialog } from '@/components/ui/dialogStore';
 export function EventDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = typeof params.id === 'string' ? params.id : '';
@@ -73,7 +74,7 @@ export function EventDetailScreen() {
   );
   const busy = decide.isPending || remove.isPending || deletion.isPending;
   const confirmDelete = () =>
-    Alert.alert('Delete event?', 'This removes the event for everyone.', [
+    dialog.alert('Delete event?', 'This removes the event for everyone.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -253,7 +254,7 @@ export function EventDetailScreen() {
                     variant="danger"
                     disabled={busy}
                     onPress={() =>
-                      Alert.alert('Remove participant?', 'They will be removed from this event.', [
+                      dialog.alert('Remove participant?', 'They will be removed from this event.', [
                         { text: 'Cancel', style: 'cancel' },
                         {
                           text: 'Remove',

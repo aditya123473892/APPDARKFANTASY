@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import type { UploadAsset } from '@/features/feed/types';
 import { createVideoThumbnail } from './videoThumbnail';
+import { whileExternal } from '@/services/externalActivity';
 
 export const VIDEO_MAX_SECONDS = 60;
 export const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
@@ -52,7 +53,7 @@ export async function prepareSingleMedia(
 }
 export async function pickSingleMedia(camera = false): Promise<SelectedMedia | null> {
   if (camera) {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    const permission = await whileExternal(() => ImagePicker.requestCameraPermissionsAsync());
     if (!permission.granted)
       throw new Error('Allow camera access in Settings to take a photo or video.');
   }
@@ -64,9 +65,10 @@ export async function pickSingleMedia(camera = false): Promise<SelectedMedia | n
     base64: false,
     exif: false,
   };
-  const result = camera
-    ? await ImagePicker.launchCameraAsync(options)
-    : await ImagePicker.launchImageLibraryAsync(options);
+  // System picker/camera: App Lock stays open while it shows.
+  const result = await whileExternal(() =>
+    camera ? ImagePicker.launchCameraAsync(options) : ImagePicker.launchImageLibraryAsync(options),
+  );
   return result.canceled || !result.assets[0] ? null : prepareSingleMedia(result.assets[0]);
 }
 
@@ -75,16 +77,18 @@ export async function pickPostMedia(camera = false): Promise<SelectedMedia[] | n
     const result = await pickSingleMedia(true);
     return result ? [result] : null;
   }
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images', 'videos'],
-    allowsMultipleSelection: true,
-    orderedSelection: true,
-    selectionLimit: POST_MAX_PHOTOS,
-    videoMaxDuration: VIDEO_MAX_SECONDS,
-    quality: 0.85,
-    base64: false,
-    exif: false,
-  });
+  const result = await whileExternal(() =>
+    ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      allowsMultipleSelection: true,
+      orderedSelection: true,
+      selectionLimit: POST_MAX_PHOTOS,
+      videoMaxDuration: VIDEO_MAX_SECONDS,
+      quality: 0.85,
+      base64: false,
+      exif: false,
+    }),
+  );
   if (result.canceled || !result.assets.length) return null;
   if (result.assets.length > POST_MAX_PHOTOS)
     throw new Error(`Choose up to ${POST_MAX_PHOTOS} photos.`);

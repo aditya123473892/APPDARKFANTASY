@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Header, KeyboardAvoidingScreen, Screen } from '@/components/layout';
@@ -24,6 +24,7 @@ import {
   type AdminGodSessionDetail,
 } from './godChatAdmin';
 
+import { dialog } from '@/components/ui/dialogStore';
 const DETAIL_POLL_MS = 3_000;
 const MAX_REPLY_CHARS = 2000;
 
@@ -133,7 +134,7 @@ export function GodSessionScreen(): React.JSX.Element {
 
   const confirmTakeOver = () =>
     heldByOther
-      ? Alert.alert(
+      ? dialog.alert(
           'Take over from another admin?',
           `${data.staff?.name ?? 'Another admin'} is answering this chat. They will no longer be able to reply.`,
           [

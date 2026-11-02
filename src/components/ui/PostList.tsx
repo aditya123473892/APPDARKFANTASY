@@ -40,27 +40,33 @@ export function PostList({
       setActive(viewableItems.find(({ item }) => item.media?.some(isVideo))?.item.id),
     [],
   );
+  // The one video allowed to play; a primitive, so rows only re-render when it changes.
+  const playing = foreground && focused ? active : undefined;
+  const renderItem = useCallback(
+    ({ item }: { item: Post }) => (
+      <PostCard
+        post={item}
+        active={playing === item.id}
+        onToggleLike={onToggleLike}
+        onOpenAuthor={onOpenAuthor}
+        onDelete={onDelete}
+      />
+    ),
+    [playing, onToggleLike, onOpenAuthor, onDelete],
+  );
   return (
     <FlatList
       {...props}
       data={posts}
       keyExtractor={(post) => post.id}
-      extraData={[active, focused, foreground]}
+      extraData={playing}
       windowSize={5}
       initialNumToRender={3}
       maxToRenderPerBatch={3}
       removeClippedSubviews
       viewabilityConfig={viewabilityConfig}
       onViewableItemsChanged={onViewableItemsChanged}
-      renderItem={({ item }) => (
-        <PostCard
-          post={item}
-          active={foreground && focused && active === item.id}
-          onToggleLike={onToggleLike}
-          onOpenAuthor={onOpenAuthor}
-          onDelete={onDelete}
-        />
-      )}
+      renderItem={renderItem}
     />
   );
 }

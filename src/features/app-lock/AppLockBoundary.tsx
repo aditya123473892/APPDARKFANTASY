@@ -11,11 +11,12 @@ import { spacing } from '@/theme';
 import { lockExpired } from './credentials';
 import { biometricUnlock, readAppLock, verifyAppPin } from './service';
 import { useAppLock } from './state';
+import { EXTERNAL_GRACE_MS, inExternalActivity } from '@/services/externalActivity';
 
 /** Protected navigation never mounts until secure storage has been read and the lock is satisfied. */
 export function AppLockBoundary({ children }: PropsWithChildren) {
-  const owner = useAuthStore(s => s.session?.userId ?? null);
-  const email = useAuthStore(s => s.currentUser?.username ?? '');
+  const owner = useAuthStore((s) => s.session?.userId ?? null);
+  const email = useAuthStore((s) => s.currentUser?.username ?? '');
   const { theme } = useTheme();
   const state = useAppLock();
   const [pin, setPin] = useState('');
@@ -24,6 +25,8 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
   const [busy, setBusy] = useState(false);
   const prompt = useRef(false);
   const background = useRef<number | null>(null);
+  // Left for a picker, camera or share sheet the app opened itself.
+  const external = useRef(false);
   const [active, setActive] = useState(AppState.currentState === 'active');
   useEffect(() => {
     if (owner && state.owner === owner && state.ready && state.locked)
@@ -33,80 +36,247 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
     let valid = true;
     // Reset account-specific entry fields at the async storage boundary.
     useAppLock.setState({ owner, ready: !owner, locked: true, config: null, error: '' });
-    if (owner && Platform.OS !== 'web') void readAppLock(owner).then(config => {
-      if (valid) { setPin(''); setPassword(''); setRecover(false); }
-      if (valid) useAppLock.setState({ ready: true, config, locked: !!config });
-    }).catch(() => {
-      if (valid) useAppLock.setState({ ready: true, locked: true, error: 'Could not read App Lock. Retry or verify your account password.' });
-    });
+    if (owner && Platform.OS !== 'web')
+      void readAppLock(owner)
+        .then((config) => {
+          if (valid) {
+            setPin('');
+            setPassword('');
+            setRecover(false);
+          }
+          if (valid) useAppLock.setState({ ready: true, config, locked: !!config });
+        })
+        .catch(() => {
+          if (valid)
+            useAppLock.setState({
+              ready: true,
+              locked: true,
+              error: 'Could not read App Lock. Retry or verify your account password.',
+            });
+        });
     else if (Platform.OS === 'web') useAppLock.setState({ ready: true, locked: false });
-    return () => { valid = false; };
+    return () => {
+      valid = false;
+    };
   }, [owner]);
   useEffect(() => {
-    const listener = AppState.addEventListener('change', next => {
+    const listener = AppState.addEventListener('change', (next) => {
       setActive(next === 'active');
       const current = useAppLock.getState();
       if (next !== 'active') {
-        if (!prompt.current) background.current ??= Date.now();
-        setPin(''); setPassword('');
+        if (!prompt.current && background.current === null) {
+          background.current = Date.now();
+          external.current = inExternalActivity();
+        }
+        setPin('');
+        setPassword('');
       } else {
-        if (current.config && lockExpired(background.current, current.config.timeout))
+        const timeout =
+          current.config && external.current
+            ? Math.max(current.config.timeout, EXTERNAL_GRACE_MS)
+            : (current.config?.timeout ?? 0);
+        if (current.config && lockExpired(background.current, timeout))
           useAppLock.setState({ locked: true });
         background.current = null;
+        external.current = false;
       }
     });
     return () => listener.remove();
   }, []);
   const unlock = async (biometric = false) => {
     if (!owner || busy || prompt.current) return;
-    prompt.current = true; setBusy(true); useAppLock.setState({ error: '' });
-    const value = pin; setPin('');
+    prompt.current = true;
+    setBusy(true);
+    useAppLock.setState({ error: '' });
+    const value = pin;
+    setPin('');
     const generation = sessionIdentity.generation;
     try {
       const config = biometric ? await biometricUnlock(owner) : await verifyAppPin(owner, value);
-      if (generation === sessionIdentity.generation && owner === useAuthStore.getState().session?.userId && AppState.currentState === 'active')
+      if (
+        generation === sessionIdentity.generation &&
+        owner === useAuthStore.getState().session?.userId &&
+        AppState.currentState === 'active'
+      )
         useAppLock.setState({ config, locked: false, ready: true });
     } catch (cause) {
-      useAppLock.setState({ error: cause instanceof Error ? cause.message : 'Could not unlock. Try your PIN.' });
-    } finally { prompt.current = false; setBusy(false); }
+      useAppLock.setState({
+        error: cause instanceof Error ? cause.message : 'Could not unlock. Try your PIN.',
+      });
+    } finally {
+      prompt.current = false;
+      setBusy(false);
+    }
   };
   const recovery = async () => {
     if (!owner || !email || busy) return;
-    setBusy(true); const value = password; setPassword('');
+    setBusy(true);
+    const value = password;
+    setPassword('');
     const generation = sessionIdentity.generation;
     try {
-      const result = await realAuthService.login({ email, password: value, strategy: 'email_password' });
-      if (generation !== sessionIdentity.generation || result.user._id !== owner || useAuthStore.getState().session?.userId !== owner)
+      const result = await realAuthService.login({
+        email,
+        password: value,
+        strategy: 'email_password',
+      });
+      if (
+        generation !== sessionIdentity.generation ||
+        result.user._id !== owner ||
+        useAuthStore.getState().session?.userId !== owner
+      )
         throw new Error('Verify the same account.');
-      await SecureStore.deleteItemAsync('darkfantasy.app-lock.'+owner);
-      await SecureStore.deleteItemAsync('darkfantasy.app-lock.'+owner+'.biometric');
+      await SecureStore.deleteItemAsync('darkfantasy.app-lock.' + owner);
+      await SecureStore.deleteItemAsync('darkfantasy.app-lock.' + owner + '.biometric');
       useAppLock.setState({ config: null, locked: false, ready: true, error: '' });
       setRecover(false);
-    } catch { useAppLock.setState({ error: 'Could not verify your account. Check your password and connection.' }); }
-    finally { setBusy(false); }
+    } catch {
+      useAppLock.setState({
+        error: 'Could not verify your account. Check your password and connection.',
+      });
+    } finally {
+      setBusy(false);
+    }
   };
+  // Offer fingerprint/face straight away each time the lock screen appears, so unlocking
+  // takes one touch. Cancelling leaves the PIN field and the biometrics button.
+  const offered = useRef(false);
+  // `unlock` is rebuilt every render; the effect below calls the latest one.
+  const latestUnlock = useRef(unlock);
+  useEffect(() => {
+    latestUnlock.current = unlock;
+  });
+  const biometricScreen =
+    Boolean(owner) &&
+    state.owner === owner &&
+    state.ready &&
+    state.locked &&
+    active &&
+    !recover &&
+    Boolean(state.config?.biometric);
+  useEffect(() => {
+    if (!state.locked) offered.current = false;
+    if (!biometricScreen || offered.current) return;
+    offered.current = true;
+    void latestUnlock.current(true);
+  }, [biometricScreen, state.locked]);
   if (!owner) return <>{children}</>;
   const ready = state.owner === owner && state.ready;
-  if (ready && !state.locked) return <View style={{ flex: 1 }}>
-    <View style={{ flex: 1 }} accessibilityElementsHidden={!active} importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}>{children}</View>
-    {!active ? <View style={{ position: 'absolute', inset: 0, backgroundColor: theme.colors.background }} /> : null}
-  </View>;
-  return <View style={{ flex: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.lg, backgroundColor: theme.colors.background }}>
-    <Text variant="heading" center>App Lock</Text>
-    {!active ? null : !ready ? <Text center>Reading App Lock…</Text> : <>
-      <Text center color="secondary">{recover ? 'Verify your account password to reset App Lock. Your vault PIN stays separate.' : 'Enter your app PIN to continue.'}</Text>
-      {recover ? <TextField label="Account password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="off" /> :
-        <TextField label="App PIN" value={pin} onChangeText={setPin} secureTextEntry keyboardType="number-pad" maxLength={12} autoComplete="off" />}
-      {state.error ? <Text accessibilityRole="alert" color="danger">{state.error}</Text> : null}
-      <Button label={recover ? 'Verify and reset App Lock' : 'Unlock'} loading={busy} disabled={busy || (recover ? !password : !pin)} onPress={() => void (recover ? recovery() : unlock())} />
-      {!recover && state.config?.biometric ? <Button label="Unlock with Biometrics" variant="secondary" disabled={busy} onPress={() => void unlock(true)} /> : null}
-      <Button label={recover ? 'Use PIN' : 'Forgot PIN? Verify account password'} variant="ghost" disabled={busy} onPress={() => { setRecover(!recover); setPin(''); setPassword(''); }} />
-      {state.error && !state.config ? <Button label="Retry reading App Lock" variant="secondary" disabled={busy} onPress={() => {
-        setBusy(true);
-        void readAppLock(owner).then(config => useAppLock.setState({ config, locked: !!config, ready: true, error: '' }))
-          .catch(() => useAppLock.setState({ error: 'App Lock is unavailable. Verify your account password to reset.' }))
-          .finally(() => setBusy(false));
-      }} /> : null}
-    </>}
-  </View>;
+  if (ready && !state.locked)
+    return (
+      <View style={{ flex: 1 }}>
+        <View
+          style={{ flex: 1 }}
+          accessibilityElementsHidden={!active}
+          importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}
+        >
+          {children}
+        </View>
+        {!active ? (
+          <View
+            style={{ position: 'absolute', inset: 0, backgroundColor: theme.colors.background }}
+          />
+        ) : null}
+      </View>
+    );
+  return (
+    <View
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        padding: spacing.xl,
+        gap: spacing.lg,
+        backgroundColor: theme.colors.background,
+      }}
+    >
+      <Text variant="heading" center>
+        App Lock
+      </Text>
+      {!active ? null : !ready ? (
+        <Text center>Reading App Lock…</Text>
+      ) : (
+        <>
+          <Text center color="secondary">
+            {recover
+              ? 'Verify your account password to reset App Lock. Your vault PIN stays separate.'
+              : state.config?.biometric
+                ? 'Use your fingerprint or enter your app PIN.'
+                : 'Enter your app PIN to continue.'}
+          </Text>
+          {recover ? (
+            <TextField
+              label="Account password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoComplete="off"
+            />
+          ) : (
+            <TextField
+              label="App PIN"
+              value={pin}
+              onChangeText={setPin}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={12}
+              autoComplete="off"
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                if (pin) void unlock();
+              }}
+            />
+          )}
+          {state.error ? (
+            <Text accessibilityRole="alert" color="danger">
+              {state.error}
+            </Text>
+          ) : null}
+          <Button
+            label={recover ? 'Verify and reset App Lock' : 'Unlock'}
+            loading={busy}
+            disabled={busy || (recover ? !password : !pin)}
+            onPress={() => void (recover ? recovery() : unlock())}
+          />
+          {!recover && state.config?.biometric ? (
+            <Button
+              label="Unlock with Biometrics"
+              variant="secondary"
+              disabled={busy}
+              onPress={() => void unlock(true)}
+            />
+          ) : null}
+          <Button
+            label={recover ? 'Use PIN' : 'Forgot PIN? Verify account password'}
+            variant="ghost"
+            disabled={busy}
+            onPress={() => {
+              setRecover(!recover);
+              setPin('');
+              setPassword('');
+            }}
+          />
+          {state.error && !state.config ? (
+            <Button
+              label="Retry reading App Lock"
+              variant="secondary"
+              disabled={busy}
+              onPress={() => {
+                setBusy(true);
+                void readAppLock(owner)
+                  .then((config) =>
+                    useAppLock.setState({ config, locked: !!config, ready: true, error: '' }),
+                  )
+                  .catch(() =>
+                    useAppLock.setState({
+                      error: 'App Lock is unavailable. Verify your account password to reset.',
+                    }),
+                  )
+                  .finally(() => setBusy(false));
+              }}
+            />
+          ) : null}
+        </>
+      )}
+    </View>
+  );
 }

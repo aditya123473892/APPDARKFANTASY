@@ -3,7 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { memo, useState } from 'react';
-import { Alert, Share, View } from 'react-native';
+import { Share, View } from 'react-native';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useBlock } from '@/features/safety/useBlock';
 import type { Post } from '@/features/feed/types';
@@ -25,7 +25,7 @@ import { PostCarousel } from './PostCarousel';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { useRefreshPost } from '@/features/feed/hooks/useFeed';
-
+import { dialog } from '@/components/ui/dialogStore';
 export const PostCard = memo(function PostCard({
   post,
   onToggleLike,
@@ -105,7 +105,7 @@ export const PostCard = memo(function PostCard({
         <Pressable
           accessibilityLabel="Post menu"
           onPress={() =>
-            Alert.alert('Post options', undefined, [
+            dialog.alert('Post options', undefined, [
               { text: 'Copy link', onPress: () => void Clipboard.setStringAsync(link) },
               { text: 'Hide post', onPress: () => setHidden(true) },
               ...(post.user.id !== me
@@ -131,7 +131,7 @@ export const PostCard = memo(function PostCard({
                       text: 'Delete post',
                       style: 'destructive' as const,
                       onPress: () =>
-                        Alert.alert('Delete this post?', undefined, [
+                        dialog.alert('Delete this post?', undefined, [
                           { text: 'Cancel', style: 'cancel' },
                           { text: 'Delete', style: 'destructive', onPress: () => onDelete(post) },
                         ]),

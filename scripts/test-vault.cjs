@@ -12,7 +12,13 @@ function load(file, modules = {}) {
     }).outputText,
     {
       exports,
-      require: (name) => modules[name] ?? (name === './backupStatus' ? load('src/features/vault/backupStatus.ts') : require(name)),
+      require: (name) =>
+        modules[name] ??
+        (name === './backupStatus'
+          ? load('src/features/vault/backupStatus.ts')
+          : name === '@/services/externalActivity'
+            ? externalActivity
+            : require(name)),
       Buffer,
       Uint8Array,
       console,
@@ -24,6 +30,8 @@ function load(file, modules = {}) {
   );
   return exports;
 }
+// Shared, real module: tests drive it to simulate the app opening a picker or share sheet.
+const externalActivity = load('src/services/externalActivity.ts');
 const crypto = load('src/features/vault/crypto.ts', {
   // Deliberately do not mock a native crypto module: checksum tests run the real JS library.
   expo: { uuid: { v4: require('node:crypto').randomUUID } },
@@ -358,6 +366,7 @@ test('existing Android photo selection still works with broad gallery permission
   let picked = 0;
   const picker = load('src/features/create-post/pickMedia.ts', {
     'react-native': { Platform: { OS: 'android' }, Alert: {}, Linking: {} },
+    '@/components/ui/dialogStore': { dialog: {} },
     'expo-image-picker': {
       requestMediaLibraryPermissionsAsync: async () => {
         throw Error('Broad access must not be requested');
@@ -374,6 +383,72 @@ test('existing Android photo selection still works with broad gallery permission
   assert.equal((await picker.pickMedia()).length, 1);
   assert.ok(await picker.pickImage());
   assert.equal(picked, 2);
+});
+test('the vault stays open through a picker or share sheet the app opened, but not past five minutes', async () => {
+  const listeners = new Set();
+  let state, cleared = 0;
+  const app = {
+    currentState: 'active',
+    addEventListener: (name, fn) => {
+      listeners.add(fn);
+      return { remove: () => listeners.delete(fn) };
+    },
+  };
+  const emit = (next) => {
+    app.currentState = next;
+    for (const fn of listeners) fn(next);
+  };
+  const lock = load('src/features/vault/lock.ts', {
+    'react-native': { AppState: app },
+    zustand: {
+      create: (init) => {
+        state = init();
+        return {
+          getState: () => state,
+          setState: (update) => {
+            state = { ...state, ...(typeof update === 'function' ? update(state) : update) };
+          },
+        };
+      },
+    },
+    'expo-local-authentication': {
+      SecurityLevel: { NONE: 0 },
+      getEnrolledLevelAsync: async () => 1,
+      authenticateAsync: async () => ({ success: true }),
+    },
+    'expo-secure-store': {},
+    './files': { clearTemps: async () => { cleared++; } },
+    './pin': { hasPin: async () => false, cancelPinPrompt() {}, requestPin: async () => '', verifyPin: async () => false, savePin: async () => {}, clearPin: async () => {} },
+    './crypto': crypto,
+    './repository': { setting: async () => '0', setSetting: async () => {} },
+  });
+  await lock.unlock('owner');
+  // Picking a photo: Android reports the app as backgrounded while the picker shows.
+  await externalActivity.whileExternal(async () => {
+    emit('background');
+    assert.equal(state.unlocked, true, 'still unlocked inside the picker');
+    emit('active');
+  });
+  assert.equal(state.unlocked, true, 'no unlock needed after picking');
+  assert.equal(cleared, 0, 'the file being shared or saved is kept');
+  // Abandoning the picker for longer than the grace period locks on return.
+  const realNow = Date.now;
+  try {
+    await externalActivity.whileExternal(async () => {
+      emit('background');
+      const later = realNow() + 6 * 60_000;
+      Date.now = () => later;
+      emit('active');
+    });
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(state.unlocked, false);
+  // Leaving the app normally still locks straight away.
+  await lock.unlock('owner');
+  emit('background');
+  assert.equal(state.unlocked, false);
+  emit('active');
 });
 test('Android device-credential activity can return successfully, and normal background still relocks', async () => {
   const listeners = new Set();
@@ -519,12 +594,12 @@ test('Android 14 exports only after confirmation, without photo-read permission,
     './media': {
       photoUri: async () => {
         prepared++;
-        return 'file:///private/photo.jpg';
+        return 'file:///cache/vault-temp/prepared.jpg';
       },
     },
-    'react-native': {
-      Platform: { OS: 'android', Version: 34 },
-      Alert: { alert: (title, message, buttons) => buttons[confirmed ? 1 : 0].onPress() },
+    'react-native': { Platform: { OS: 'android', Version: 34 } },
+    '@/components/ui/dialogStore': {
+      dialog: { alert: (title, message, buttons) => buttons[confirmed ? 1 : 0].onPress() },
     },
     get 'expo-media-library'() {
       throw Error('ExpoMediaLibraryNext is not available in this client');
@@ -572,14 +647,55 @@ test('Android 14 exports only after confirmation, without photo-read permission,
   assert.equal(await exporting.exportPhotos('owner', ['photo']), 1);
   assert.equal(prepared, 1);
   assert.deepEqual(gallery, ['file:///cache/vault-temp/export.jpg']);
-  assert.equal(deleted.length, 3);
+  // Every decrypted copy is removed, including the one made while ensuring the download.
+  assert.deepEqual(deleted.sort(), [
+    'file:///cache/ImageManipulator/clean.jpg',
+    'file:///cache/vault-temp/export.jpg',
+    'file:///cache/vault-temp/prepared.jpg',
+    'file:///cache/vault-temp/view.jpg',
+  ]);
+});
+test('Android 11 and 12 ask for the storage permission before saving, and the vault stays open meanwhile', async () => {
+  const gallery = [], asked = [];
+  const exporting = load('src/features/vault/export.ts', {
+    './media': { photoUri: async () => 'file:///cache/vault-temp/prepared.jpg' },
+    'react-native': { Platform: { OS: 'android', Version: 31 } },
+    '@/components/ui/dialogStore': { dialog: { alert: (title, message, buttons) => buttons[1].onPress() } },
+    'expo-media-library/legacy': {
+      // expo-media-library refuses to save below Android 13 without this grant.
+      requestPermissionsAsync: async (writeOnly) => {
+        asked.push({ writeOnly, external: externalActivity.inExternalActivity() });
+        return { granted: true };
+      },
+      saveToLibraryAsync: async (uri) => gallery.push({ uri, external: externalActivity.inExternalActivity() }),
+    },
+    'expo-sharing': {},
+    'expo-image-manipulator': {
+      SaveFormat: { JPEG: 'jpeg' },
+      ImageManipulator: { manipulate: () => ({ renderAsync: async () => ({ saveAsync: async () => ({ uri: 'file:///cache/ImageManipulator/clean.jpg' }) }) }) },
+    },
+    'expo-file-system/legacy': { cacheDirectory: 'file:///cache/', deleteAsync: async () => {} },
+    './lock': { assertUnlocked: () => 0, assertEpoch() {} },
+    './vaultService': { viewPhoto: async () => 'file:///cache/vault-temp/view.jpg' },
+    './repository': { get: async () => ({ kind: 'photo' }) },
+    './files': {
+      read: async () => Buffer.from('jpeg'),
+      temporaryFile: async () => 'file:///cache/vault-temp/export.jpg',
+      removeTemp: async () => {},
+    },
+  });
+  assert.equal(await exporting.exportPhotos('owner', ['a', 'b']), 2);
+  assert.deepEqual(asked, [{ writeOnly: true, external: true }]);
+  assert.equal(gallery.length, 2, 'both items saved, not just the first');
+  assert.ok(gallery.every((save) => save.external));
+  assert.equal(externalActivity.inExternalActivity(), false);
 });
 test('logout stays blocked without explicit unsynced discard; confirmed discard wipes', async () => {
   let wipe = 0,
     chooseDiscard = false;
   const logout = load('src/features/vault/logout.ts', {
-    'react-native': {
-      Alert: { alert: (title, message, buttons) => buttons[chooseDiscard ? 1 : 0].onPress() },
+    '@/components/ui/dialogStore': {
+      dialog: { alert: (title, message, buttons) => buttons[chooseDiscard ? 1 : 0].onPress() },
     },
     './vaultService': {
       hasUnsyncedPhotos: async () => true,

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo } from 'react';
 import { useBlockState } from '@/features/safety/blockState';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
 import { Text } from '@/components/ui';
 import { radius, spacing, typography } from '@/theme';
@@ -14,6 +14,7 @@ import { previewText } from '../services/chatPayload';
 import { ViewOnceAttachment } from './ViewOnceAttachment';
 import { ReplyPreview, type ReplyPreviewData } from './ReplyPreview';
 
+import { dialog } from '@/components/ui/dialogStore';
 const statusLabel: Record<ChatMessage['status'], string> = {
   sending: 'Sending',
   sent: 'Sent',
@@ -56,7 +57,7 @@ export const MessageBubble = memo(function MessageBubble({
     const clientId = message.clientId;
     const uncertain = message.status === 'uncertain';
     const canRetry = !uncertain || message.resync === 'absent';
-    Alert.alert(
+    dialog.alert(
       uncertain ? 'Send status unknown' : 'Server rejected message',
       uncertain
         ? message.resync === 'present'
@@ -70,7 +71,7 @@ export const MessageBubble = memo(function MessageBubble({
               {
                 text: 'Send again',
                 onPress: () =>
-                  Alert.alert(
+                  dialog.alert(
                     'Send again?',
                     uncertain
                       ? 'The refreshed history shows no matching message. The original may still arrive later, so this can create a duplicate.'

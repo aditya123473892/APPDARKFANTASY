@@ -14,7 +14,7 @@ Expo Go is a shared development host; app configuration, Android backup exclusio
 
 - Stores resized JPEGs in private app documents at `vault/{userId}/simple/{photoId}.jpg`; SQLite DB/WAL live in the same directory.
 - Persistent photos use versioned AES-256-GCM envelopes, authenticated against account and photo identity, with a separate random per-account key in SecureStore. Each disk write is decrypted and checksum-verified before commit. Existing ordinary JPEGs are upgraded when accessed. SQLite metadata and local videos retain their existing storage format; the app does not label them encrypted.
-- Vault authentication retains its device/PIN choices and failed-attempt lockout. App Lock is separate: a custom 6–12 digit PIN, optional biometrics, background timeout and account-password recovery under Settings → App Lock.
+- Vault authentication retains its device/PIN choices and failed-attempt lockout. App Lock is separate: a custom 4–12 digit PIN, optional biometrics, background timeout and account-password recovery under Settings → App Lock.
 - Keeps encrypted-build files/DB outside the `simple/` directory untouched during normal use. Sync old pending images with the encrypted build before switching. Cloud copies download normally into the simpler vault. Logout warns about unsynced changes from either DB before an explicit wipe removes both versions for that account.
 - Keeps offline additions, persistent SQLite upload/edit/delete jobs, retry/backoff, tombstones, moderation rejection, hide/show/order, separate 50-photo vault limit, lazy downloads and SHA-256 checks.
 - Never writes to the gallery except after explicit export confirmation. Camera/gallery originals in the gallery are not removed. Picker/manipulator temporary copies are cleaned up.

@@ -5,7 +5,6 @@ import { MessageActionPopup } from '../components/MessageActionPopup';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Keyboard,
   type AlertButton,
   Modal,
@@ -67,6 +66,7 @@ import { featureFlags } from '@/config/featureFlags';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { formatPresence } from '@/utils/formatters';
 
+import { dialog } from '@/components/ui/dialogStore';
 function MessagesSkeleton(): React.JSX.Element {
   return (
     <View style={styles.skeleton}>
@@ -82,6 +82,17 @@ function MessagesSkeleton(): React.JSX.Element {
       ))}
     </View>
   );
+}
+
+/** Subscribes to the draft itself, so typing re-renders only the input and not the message list. */
+function RoomChatInput({
+  conversationId,
+  ...props
+}: Omit<React.ComponentProps<typeof ChatInput>, 'draftValue'> & {
+  conversationId: string;
+}): React.JSX.Element {
+  const draft = useConversationState((state) => state.rooms[conversationId]?.draft ?? '');
+  return <ChatInput {...props} draftValue={draft} />;
 }
 
 export function ChatRoomScreen(): React.JSX.Element {
@@ -253,7 +264,6 @@ export function ChatRoomScreen(): React.JSX.Element {
     setShowJump(event.nativeEvent.contentOffset.y > 480);
   }, []);
 
-  const draft = useConversationState((state) => state.rooms[conversationId]?.draft ?? '');
   const firstUnread = useConversationState((state) => state.rooms[conversationId]?.firstUnread);
   const [editing, setEditing] = useState<ChatMessage>();
   const [editText, setEditText] = useState('');
@@ -271,6 +281,13 @@ export function ChatRoomScreen(): React.JSX.Element {
     actionPopupOpen.current = false;
     setActionButtons(null);
   }, []);
+  // useBlock returns a new object each render; going through a ref keeps openActions (and so
+  // renderItem) stable, instead of re-rendering every bubble on each render.
+  const blockRef = useRef(block);
+  useEffect(() => {
+    blockRef.current = block;
+  });
+  const confirmBlock = useCallback((id: string) => blockRef.current.confirm(id), []);
   const openActions = useCallback(
     (message: ChatMessage) => {
       if (actionPopupOpen.current) return;
@@ -313,7 +330,7 @@ export function ChatRoomScreen(): React.JSX.Element {
                 style: 'destructive' as const,
                 onPress: () => {
                   if (!valid()) return;
-                  Alert.alert(
+                  dialog.alert(
                     'Delete for everyone?',
                     'This permanently removes the message for all participants.',
                     [
@@ -343,7 +360,7 @@ export function ChatRoomScreen(): React.JSX.Element {
                 text: 'Block user',
                 style: 'destructive' as const,
                 onPress: () => {
-                  if (valid()) block.confirm(message.senderId);
+                  if (valid()) confirmBlock(message.senderId);
                 },
               },
               {
@@ -362,14 +379,14 @@ export function ChatRoomScreen(): React.JSX.Element {
       ];
       setActionButtons(actions);
     },
-    [myId, canSendMessages, conversationId, renderScope, block, router],
+    [myId, canSendMessages, conversationId, renderScope, confirmBlock, router],
   );
   const saveEdit = () => {
     if (!editing || !editText.trim() || !isSessionCurrent(renderScope)) return;
     const scope = renderScope;
     const id = editing.id,
       text = editText;
-    Alert.alert('Save edit?', 'Replace this message for all participants?', [
+    dialog.alert('Save edit?', 'Replace this message for all participants?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Save',
@@ -554,7 +571,7 @@ export function ChatRoomScreen(): React.JSX.Element {
                   icon="ellipsis-horizontal"
                   label="Conversation options"
                   onPress={() =>
-                    Alert.alert('Conversation', undefined, [
+                    dialog.alert('Conversation', undefined, [
                       { text: isGroup ? 'Group info' : 'View profile', onPress: openDetails },
                       ...(!isGroup
                         ? [
@@ -737,10 +754,10 @@ export function ChatRoomScreen(): React.JSX.Element {
             {uploadStatus}
           </Text>
         ) : null}
-        <ChatInput
+        <RoomChatInput
+          conversationId={conversationId}
           timerLabel={timerShortLabel(ttlSeconds)}
           onTimerPress={featureFlags.ENABLE_EPHEMERAL_CHAT ? () => setTimerSheet(true) : undefined}
-          draftValue={draft}
           onDraftChange={(text) => {
             if (isSessionCurrent(renderScope)) updateRoom(conversationId, { draft: text });
           }}

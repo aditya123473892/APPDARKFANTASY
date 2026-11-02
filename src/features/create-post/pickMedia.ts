@@ -1,14 +1,16 @@
 import * as ImagePicker from 'expo-image-picker';
-import { Alert, Linking, Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import type { UploadAsset } from '@/features/feed/types';
 
+import { dialog } from '@/components/ui/dialogStore';
+import { whileExternal } from '@/services/externalActivity';
 async function permission(): Promise<boolean> {
   // Android's system photo picker grants access to the selected URI; no broad read permission.
   if (Platform.OS === 'android') return true;
   if (Platform.OS === 'web') return true;
-  const status = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  const status = await whileExternal(() => ImagePicker.requestMediaLibraryPermissionsAsync());
   if (status.granted) return true;
-  Alert.alert('Photo access is needed', 'Allow photo access in Settings to choose a photo.', [
+  dialog.alert('Photo access is needed', 'Allow photo access in Settings to choose a photo.', [
     { text: 'Cancel', style: 'cancel' },
     {
       text: 'Settings',
@@ -35,14 +37,17 @@ function selected(asset: ImagePicker.ImagePickerAsset): UploadAsset {
 /** One media item per post or attachment. */
 export async function pickMedia(): Promise<UploadAsset[]> {
   if (!(await permission())) return [];
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images', 'videos'],
-    videoMaxDuration: 60,
-    allowsMultipleSelection: false,
-    quality: 0.85,
-    base64: false,
-    exif: false,
-  });
+  // System picker: App Lock stays open while it shows.
+  const result = await whileExternal(() =>
+    ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      videoMaxDuration: 60,
+      allowsMultipleSelection: false,
+      quality: 0.85,
+      base64: false,
+      exif: false,
+    }),
+  );
   if (result.canceled) return [];
   const assets = result.assets.slice(0, 1).map(selected);
   return assets;
@@ -50,14 +55,17 @@ export async function pickMedia(): Promise<UploadAsset[]> {
 /** One photo (JPEG/PNG/WebP), e.g. a group picture. Resolves null when cancelled. */
 export async function pickImage(): Promise<UploadAsset | null> {
   if (!(await permission())) return null;
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
-    allowsEditing: true,
-    aspect: [1, 1],
-    quality: 0.8,
-    base64: false,
-    exif: false,
-  });
+  // System picker: App Lock stays open while it shows.
+  const result = await whileExternal(() =>
+    ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+      base64: false,
+      exif: false,
+    }),
+  );
   const asset = result.canceled ? undefined : result.assets[0];
   if (!asset) return null;
   return selected(asset);

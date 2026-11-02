@@ -16,6 +16,7 @@ import {
   waitForForeground,
 } from './lock';
 import type { VaultPhoto } from './types';
+import { whileExternal } from '@/services/externalActivity';
 
 const OWNER_KEY = 'darkfantasy.vault.owner';
 let tail: Promise<unknown> = Promise.resolve();
@@ -137,25 +138,28 @@ export async function addPhotos(
   assertUnlocked(owner);
   const from: AddSource = source === true ? 'camera' : source === false ? 'library' : source;
   const camera = from !== 'library';
-  if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted)
-    throw new Error('Camera permission was denied. You can enable it in Settings.');
-  const result = camera
-    ? await ImagePicker.launchCameraAsync({
-        mediaTypes: [from === 'video-camera' ? 'videos' : 'images'],
-        videoMaxDuration: 120,
-        exif: false,
-        base64: false,
-        quality: 1,
-      })
-    : await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images', 'videos'],
-        videoMaxDuration: 120,
-        allowsMultipleSelection: true,
-        selectionLimit: 5,
-        exif: false,
-        base64: false,
-        quality: 1,
-      });
+  // The picker and camera are system screens: the vault stays open while they show.
+  const result = await whileExternal(async () => {
+    if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted)
+      throw new Error('Camera permission was denied. You can enable it in Settings.');
+    return camera
+      ? await ImagePicker.launchCameraAsync({
+          mediaTypes: [from === 'video-camera' ? 'videos' : 'images'],
+          videoMaxDuration: 120,
+          exif: false,
+          base64: false,
+          quality: 1,
+        })
+      : await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images', 'videos'],
+          videoMaxDuration: 120,
+          allowsMultipleSelection: true,
+          selectionLimit: 5,
+          exif: false,
+          base64: false,
+          quality: 1,
+        });
+  });
   if (result.canceled) return;
   // Picker/camera can background the app; keep the vault locked until re-authenticated.
   try {

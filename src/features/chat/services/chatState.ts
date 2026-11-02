@@ -39,10 +39,13 @@ const compareMessages = (a: Message, b: Message) =>
 function sorted(rows: Message[]): Message[] {
   return rows.sort(compareMessages);
 }
-function preserveRead(message: Message): Message {
-  const previous = queryClient
-    .getQueryData<Message[]>(queryKeys.messages(message.conversationId))
-    ?.find((row) => row.id === message.id);
+/** Pass `cached` (the cache indexed by id) when merging many rows, to avoid a scan per row. */
+function preserveRead(message: Message, cached?: Map<string, Message>): Message {
+  const previous = cached
+    ? cached.get(message.id)
+    : queryClient
+        .getQueryData<Message[]>(queryKeys.messages(message.conversationId))
+        ?.find((row) => row.id === message.id);
   return {
     ...message,
     clientId: message.clientId ?? previous?.clientId,
@@ -95,10 +98,14 @@ export function mergeMessage(message: Message, deleted = false): void {
     const previous = current?.find((row) => row.id === message.id);
     const merged =
       previous && previous.status === 'read' ? { ...next, status: 'read' as const } : next;
-    const rows = sorted([
-      ...(current ?? []).filter((row) => row.id !== message.id),
-      ...(deleted ? [] : [{ ...merged, clientId: merged.clientId ?? previous?.clientId }]),
-    ]);
+    const rows = (current ?? []).filter((row) => row.id !== message.id);
+    if (deleted) return rows;
+    // The cache is kept sorted and new messages are almost always the newest, so insert
+    // from the end instead of re-sorting the whole history for every message.
+    const row = { ...merged, clientId: merged.clientId ?? previous?.clientId };
+    let at = rows.length;
+    while (at > 0 && compareMessages(rows[at - 1]!, row) > 0) at--;
+    rows.splice(at, 0, row);
     return rows;
   });
   updatePreview(key, queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? []);
@@ -170,10 +177,16 @@ export function acceptMessage(value: unknown, deleted = false, _received = false
 /** Full-history snapshot; realtime edits/deletions received during loading win. */
 export function reconcileHistory(key: string, rows: Message[], started: number): Message[] {
   if (key.startsWith('user:') && isPeerBlocked(key.slice(5))) return [];
-  const result = new Map(rows.map((message) => [message.id, preserveRead(message)]));
+  const cached = new Map(
+    (queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? []).map((row) => [
+      row.id,
+      row,
+    ]),
+  );
+  const result = new Map(rows.map((message) => [message.id, preserveRead(message, cached)]));
   for (const [id, entry] of overlays.get(key) ?? []) {
     if (entry.version <= started) continue;
-    if (entry.message) result.set(id, preserveRead(entry.message));
+    if (entry.message) result.set(id, preserveRead(entry.message, cached));
     else result.delete(id);
   }
   const merged = sorted([...result.values()]);
@@ -205,9 +218,23 @@ export function acceptUnread(value: unknown): boolean {
 export function acceptRead(userId: string): void {
   const key = `user:${userId}`;
   // This event covers messages saved before it arrived, not future messages.
+  if (isPeerBlocked(userId)) return;
   const rows = queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [];
-  for (const message of rows)
-    if (message.senderId === sessionIdentity.userId) mergeMessage({ ...message, status: 'read' });
+  const read = rows.filter(
+    (message) => message.senderId === sessionIdentity.userId && message.status !== 'read',
+  );
+  if (!read.length) return;
+  // One cache write for the whole receipt; merging message by message re-sorted the
+  // history and re-rendered every observer once per message.
+  const journal = overlays.get(key) ?? new Map();
+  for (const message of read)
+    journal.set(message.id, { version: ++version, message: { ...message, status: 'read' } });
+  overlays.set(key, journal);
+  const ids = new Set(read.map((message) => message.id));
+  queryClient.setQueryData<Message[]>(queryKeys.messages(key), (current) =>
+    current?.map((message) => (ids.has(message.id) ? { ...message, status: 'read' } : message)),
+  );
+  updatePreview(key, queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? []);
 }
 export function markPeerRead(key: string): void {
   queryClient.setQueryData<Message[]>(queryKeys.messages(key), (rows) =>

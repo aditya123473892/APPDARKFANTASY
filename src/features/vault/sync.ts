@@ -18,6 +18,7 @@ import { hash } from './crypto';
 import { backupStatus } from './backupStatus';
 import { retryDelay, remoteWins, sameRemotePhoto } from './conflicts';
 import type { VaultPhoto, RemotePhoto, QueueJob } from './types';
+import { inExternalActivity } from '@/services/externalActivity';
 
 export const useVaultNetwork = create<{ offline: boolean; syncing: boolean }>(() => ({
   offline: false,
@@ -31,7 +32,8 @@ export function cancelVaultTransfers(): void {
 }
 registerSessionTeardown(cancelVaultTransfers);
 AppState.addEventListener('change', (s) => {
-  if (s !== 'active') cancelVaultTransfers();
+  // Keep backing up while the user is in a picker or share sheet the app opened.
+  if (s !== 'active' && !inExternalActivity()) cancelVaultTransfers();
 });
 function signedURL(value: string): string {
   const url = new URL(value);
@@ -147,7 +149,14 @@ export async function downloadPhoto(owner: string, id: string): Promise<void> {
       const path = await files.store(owner, id, bytes);
       assertEpoch(owner, scope);
       assertSessionCurrent(session);
-      await repo.save(owner, { ...local, localPath: path, localEncrypted: 1, remoteEncrypted: photo.remoteEncrypted, sha256: photo.sha256, size: photo.size });
+      await repo.save(owner, {
+        ...local,
+        localPath: path,
+        localEncrypted: 1,
+        remoteEncrypted: photo.remoteEncrypted,
+        sha256: photo.sha256,
+        size: photo.size,
+      });
       refreshVault();
     });
   } finally {
@@ -212,7 +221,7 @@ async function upload(owner: string, photo: VaultPhoto, valid: () => void): Prom
     let uri: string | undefined;
     try {
       valid();
-      if (bytes.length !== photo.size || await hash(bytes) !== photo.sha256)
+      if (bytes.length !== photo.size || (await hash(bytes)) !== photo.sha256)
         throw new Error('Local photo verification failed');
       uri = await files.temporaryFile(bytes);
       valid();
@@ -380,8 +389,10 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
       const rejected = status === 422;
       // An old flag is insufficient after a failed read or a damaged/deleted file.
       const local = await repo.get(owner, photo.id);
-      const safeLocal = !local?.deletedAt && local?.kind !== 'video' && local?.localPath
-        ? await files.verifyLocalPhoto(owner, local) : false;
+      const safeLocal =
+        !local?.deletedAt && local?.kind !== 'video' && local?.localPath
+          ? await files.verifyLocalPhoto(owner, local)
+          : false;
       await serial(async () => {
         valid();
         const latest = await repo.get(owner, photo.id);
@@ -409,12 +420,16 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
             : safeLocal
               ? backupStatus({ ...latest, localEncrypted: 1, syncState: 'failed' })
               : status === 401
-              ? 'Sign in again to back up this photo.'
-              : status === 403
-                ? 'Backup was denied. Check your account and storage permissions.'
-                : status === 503
-                  ? 'Photo storage is unavailable. Try backup again later.'
-                  : backupStatus({ ...latest, localEncrypted: safeLocal ? 1 : 0, syncState: 'failed' }),
+                ? 'Sign in again to back up this photo.'
+                : status === 403
+                  ? 'Backup was denied. Check your account and storage permissions.'
+                  : status === 503
+                    ? 'Photo storage is unavailable. Try backup again later.'
+                    : backupStatus({
+                        ...latest,
+                        localEncrypted: safeLocal ? 1 : 0,
+                        syncState: 'failed',
+                      }),
         });
         if (rejected)
           await db.runAsync("DELETE FROM queue WHERE photoId=? AND operation!='delete'", photo.id);

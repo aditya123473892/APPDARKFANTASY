@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
-import { Alert, FlatList, StyleSheet, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import { Header, KeyboardAvoidingScreen, Screen, SettingsButton } from '@/components/layout';
 import { useContentInsets } from '@/components/layout/useContentInsets';
@@ -25,6 +25,9 @@ import {
   type GodChatMessage,
 } from '../godChatService';
 
+import { dialog } from '@/components/ui/dialogStore';
+import { create } from 'zustand';
+import { registerSessionTeardown } from '@/features/auth/sessionRuntime';
 const SESSION_KEY = ['god-chat-session'] as const;
 /** Faster while a team member is answering, so their replies feel live. */
 const STAFF_POLL_MS = 3_000;
@@ -52,6 +55,30 @@ const TOPICS = [
   },
 ];
 
+/**
+ * The unsent message. Kept outside the screen so typing re-renders only the input; the
+ * topic chips and "New chat" write to it without subscribing.
+ */
+const useDraft = create(() => ({ draft: '' }));
+const setDraft = (draft: string) => useDraft.setState({ draft });
+// Never carry an unsent message over to the next account.
+registerSessionTeardown(() => setDraft(''));
+
+function GodChatComposer(
+  props: Omit<React.ComponentProps<typeof ChatInput>, 'draftValue' | 'onDraftChange'>,
+): React.JSX.Element {
+  const draft = useDraft((state) => state.draft);
+  return <ChatInput {...props} draftValue={draft} onDraftChange={setDraft} />;
+}
+
+const renderBubble = ({ item }: { item: GodChatMessage }) => (
+  <GodChatBubble
+    message={item}
+    mine={item.role === 'user'}
+    label={item.role === 'assistant' ? authorLabel(item) : undefined}
+  />
+);
+
 const authorLabel = (message: GodChatMessage) =>
   message.by === 'staff' ? 'DARKFANTASY team' : 'God';
 
@@ -64,7 +91,6 @@ export function GodChatScreen(): React.JSX.Element {
   const keyboardVisible = useKeyboard();
   const visible = useChatVisibility();
   const listRef = useRef<FlatList<GodChatMessage>>(null);
-  const [draft, setDraft] = useState('');
   // The message being sent; kept after a failure so "Try again" reuses its id.
   const [pending, setPending] = useState<{ id: string; content: string } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -123,7 +149,7 @@ export function GodChatScreen(): React.JSX.Element {
   };
 
   const confirmNewChat = () =>
-    Alert.alert(
+    dialog.alert(
       'Start a new chat?',
       'Your current conversation will be closed and kept in Past chats.',
       [
@@ -132,10 +158,22 @@ export function GodChatScreen(): React.JSX.Element {
       ],
     );
 
-  const stored = session.data?.messages ?? [];
-  const data: GodChatMessage[] = [GREETING, ...stored];
-  if (pending && !stored.some((message) => message.id === pending.id))
-    data.push({ ...pending, role: 'user', by: 'user', at: '' });
+  const stored = useMemo(() => session.data?.messages ?? [], [session.data]);
+  const data = useMemo(() => {
+    const rows: GodChatMessage[] = [GREETING, ...stored];
+    if (pending && !stored.some((message) => message.id === pending.id))
+      rows.push({ ...pending, role: 'user', by: 'user', at: '' });
+    return rows;
+  }, [stored, pending]);
+  // Scroll down only when something new appears (a message, the typing dots or an error),
+  // not on every layout pass.
+  const scrolledFor = useRef('');
+  const contentKey = `${data.length}:${ask.isPending}:${Boolean(failure)}`;
+  const onContentSizeChange = useCallback(() => {
+    if (scrolledFor.current === contentKey) return;
+    scrolledFor.current = contentKey;
+    listRef.current?.scrollToEnd({ animated: true });
+  }, [contentKey]);
 
   return (
     <KeyboardAvoidingScreen>
@@ -179,7 +217,7 @@ export function GodChatScreen(): React.JSX.Element {
             contentContainerStyle={[styles.list, { paddingBottom: contentInsets.bottom }]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+            onContentSizeChange={onContentSizeChange}
             onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
             ListHeaderComponent={
               <View style={styles.intro}>
@@ -215,13 +253,7 @@ export function GodChatScreen(): React.JSX.Element {
                 ) : null}
               </View>
             }
-            renderItem={({ item }) => (
-              <GodChatBubble
-                message={item}
-                mine={item.role === 'user'}
-                label={item.role === 'assistant' ? authorLabel(item) : undefined}
-              />
-            )}
+            renderItem={renderBubble}
             ListFooterComponent={
               ask.isPending && !withTeam ? (
                 <View style={styles.typing}>
@@ -253,10 +285,8 @@ export function GodChatScreen(): React.JSX.Element {
             }
           />
         )}
-        <ChatInput
+        <GodChatComposer
           minimal
-          draftValue={draft}
-          onDraftChange={setDraft}
           onSend={send}
           canSendMessages
           disabled={unavailable || ask.isPending || fresh.isPending}

@@ -10,6 +10,7 @@ import { initializePinning } from './pinning';
 import { CLIENT_PLATFORM_HEADERS } from './clientPlatform';
 import { useBlockState } from '@/features/safety/blockState';
 import { requestSignal } from './requestSignal';
+import { markServerAwake, wakeServer } from './serverWake';
 
 type RetryConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
@@ -41,6 +42,8 @@ apiClient.interceptors.request.use(async (config) => {
   assertRequestSession(guarded);
   const scope = requests;
   await initializePinning();
+  // Runs before axios starts its timeout, so a sleeping server does not fail the request.
+  await wakeServer();
   assertRequestSession(guarded);
   if (scope.signal.aborted) throw new axios.CanceledError('Session ended');
   const combined = requestSignal(scope.signal, config.signal as AbortSignal | undefined);
@@ -64,6 +67,7 @@ apiClient.interceptors.request.use(async (config) => {
 apiClient.interceptors.response.use(
   async (response) => {
     (response.config as RetryConfig)._disposeSignal?.();
+    markServerAwake();
     assertRequestSession(response.config);
     if (
       response.config.method === 'get' &&

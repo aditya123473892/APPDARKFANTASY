@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Header, Screen } from '@/components/layout';
@@ -17,6 +17,7 @@ import { useEvent } from './hooks';
 import { eventsService } from './service';
 import { localEventDate, parseEventDate, type Event, type EventInput } from './types';
 
+import { dialog } from '@/components/ui/dialogStore';
 export function EventEditorScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const eventId = typeof id === 'string' ? id : undefined;
@@ -258,7 +259,7 @@ function EventForm({ event }: { event?: Event }) {
             label="Cancel"
             variant="ghost"
             onPress={() =>
-              Alert.alert('Discard changes?', 'Your unsaved changes will be lost.', [
+              dialog.alert('Discard changes?', 'Your unsaved changes will be lost.', [
                 { text: 'Keep editing', style: 'cancel' },
                 {
                   text: 'Discard',

@@ -1,6 +1,6 @@
 import { radius, spacing } from '@/theme';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, AppState, Alert, FlatList, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, StyleSheet, View } from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import { removeDeviceCopies } from '../deviceStorage';
 import { visiblePhotos, vaultError } from '../presentation';
 import { VaultPhotoTile } from '../components/VaultPhotoTile';
 
+import { dialog } from '@/components/ui/dialogStore';
 export function VaultScreen(): React.JSX.Element {
   useScreenshotProtection('vault');
   const router = useRouter();
@@ -60,7 +61,7 @@ export function VaultScreen(): React.JSX.Element {
   );
   const pinUnlock = method === 'pin';
   const addFromCamera = () =>
-    Alert.alert('Camera', undefined, [
+    dialog.alert('Camera', undefined, [
       {
         text: 'Take a photo',
         onPress: () =>
@@ -147,7 +148,7 @@ export function VaultScreen(): React.JSX.Element {
   const toggle = (id: string) =>
     setSelected((ids) => (ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]));
   const deleteSelected = () =>
-    Alert.alert(
+    dialog.alert(
       `Delete ${selected.length === 1 ? 'item' : `${selected.length} items`} from vault?`,
       'This removes them from your vault on all devices. The service retains a private deleted copy. Gallery copies will stay.',
       [
@@ -164,7 +165,7 @@ export function VaultScreen(): React.JSX.Element {
       ],
     );
   const removeSelectedDeviceCopies = () =>
-    Alert.alert(
+    dialog.alert(
       'Remove device copies?',
       'Only fully backed-up items can be removed from app storage. They stay in your cloud vault. Gallery copies are unchanged.',
       [
@@ -394,7 +395,7 @@ export function VaultScreen(): React.JSX.Element {
                   void run(async () => {
                     const count = await exportPhotos(owner, selected);
                     if (count)
-                      Alert.alert(
+                      dialog.alert(
                         'Saved to phone',
                         `${count} item(s) saved in Gallery / Photos. Your vault copies are kept.`,
                       );

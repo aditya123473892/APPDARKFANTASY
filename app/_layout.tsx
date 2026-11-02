@@ -2,7 +2,9 @@ import 'react-native-reanimated';
 import { withCrashReporting } from '@/services/monitoring/crashReporting';
 import { useNotificationLifecycle } from '@/features/activity/useNotificationLifecycle';
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
+import { ServerWakeBanner } from '@/components/feedback/ServerWakeBanner';
+import { wakeServer } from '@/services/api/serverWake';
 import { useFonts } from 'expo-font';
 import { PlayfairDisplay_600SemiBold } from '@expo-google-fonts/playfair-display/600SemiBold';
 import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
@@ -15,14 +17,21 @@ import { StatusBar } from 'expo-status-bar';
 import { AppProviders } from '@/providers/AppProviders';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { usePreferences } from '@/features/settings/store/preferencesStore';
-import { Loader, ToastHost, Text } from '@/components/ui';
+import { DialogHost, Loader, ToastHost, Text } from '@/components/ui';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { useSessionLifecycle } from '@/features/auth/hooks/useSessionLifecycle';
 import { registerSessionTeardown } from '@/features/auth/sessionRuntime';
 import { useToastStore } from '@/components/ui/Toast';
+import { useDialogStore } from '@/components/ui/dialogStore';
 
 void SplashScreen.preventAutoHideAsync();
+// Start waking the backend while the splash screen shows, and again on return from a
+// long background spell; requests wait for it either way.
+void wakeServer();
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') void wakeServer();
+});
 
 function RootNavigator(): React.JSX.Element {
   const { theme, isDark } = useTheme();
@@ -43,7 +52,10 @@ function RootNavigator(): React.JSX.Element {
   const segments = useSegments();
   const router = useRouter();
   useEffect(() => {
-    return registerSessionTeardown(() => useToastStore.getState().hide());
+    return registerSessionTeardown(() => {
+      useToastStore.getState().hide();
+      useDialogStore.getState().clear();
+    });
   }, []);
   useEffect(() => {
     // Unlocking remounts protected navigation; the established session is already hydrated.
@@ -96,6 +108,8 @@ function RootNavigator(): React.JSX.Element {
       )}
       {/* Keep toasts clear of the tab bar on tab screens. */}
       <ToastHost key={`toast-${sessionRevision}`} bottomOffset={inTabs ? spacing.tabBar : 0} />
+      <DialogHost />
+      <ServerWakeBanner />
       {permissionError && (
         <View
           accessibilityRole="alert"

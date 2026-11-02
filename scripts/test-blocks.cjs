@@ -53,7 +53,7 @@ function harness() {
       toast: { error: (value) => notices.push(value), success: (value) => notices.push(value) },
     },
     '@/services/errors': { describeError: (_error, fallback) => fallback },
-    'react-native': { Alert: { alert: (...args) => alerts.push(args) } },
+    '@/components/ui/dialogStore': { dialog: { alert: (...args) => alerts.push(args) } },
     '@tanstack/react-query': {
       useMutation: (options) => ({
         isPending: false,

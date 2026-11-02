@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { usePreventRemove } from 'expo-router';
 import { useRef, useState } from 'react';
-import { Alert, ScrollView, TextInput, View } from 'react-native';
+import { ScrollView, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Header, Screen, KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
@@ -21,7 +21,7 @@ import { pickPostMedia, POST_MAX_PHOTOS, type SelectedMedia } from '../singleMed
 import { RecentMediaGrid } from '../RecentMediaGrid';
 import { uploadPostMedia } from '../uploadSingleMedia';
 import { ASPECTS, aspectRatioOf, cropToAspect, type AspectChoice } from '../cropMedia';
-
+import { dialog } from '@/components/ui/dialogStore';
 const isVideoAsset = (item: SelectedMedia) => item.asset.type.startsWith('video/');
 
 export function CreatePostScreen() {
@@ -50,7 +50,7 @@ export function CreatePostScreen() {
   const disablePrevention = usePreventRemove(
     Boolean(selected.length || caption.trim()) && !submitted,
     ({ repeat }) =>
-      Alert.alert('Discard this post?', "Your draft won't be saved.", [
+      dialog.alert('Discard this post?', "Your draft won't be saved.", [
         { text: 'Keep editing', style: 'cancel' },
         {
           text: 'Discard',

@@ -1,9 +1,9 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, RefreshControl, ScrollView, View } from 'react-native';
+import { RefreshControl, ScrollView, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Button, EmptyState, IconButton, Loader } from '@/components/ui';
-import { ProfileGrid } from '../components/ProfileGrid';
+import { ProfileGrid, useGridWindow } from '../components/ProfileGrid';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useProfile } from '../hooks/useProfiles';
@@ -16,6 +16,8 @@ import { spacing } from '@/theme';
 import { useBlock } from '@/features/safety/useBlock';
 import { useBlockState } from '@/features/safety/blockState';
 import { isServiceError } from '@/services/errors';
+
+import { dialog } from '@/components/ui/dialogStore';
 export function UserProfileScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const myId = useCurrentUserId();
@@ -28,6 +30,7 @@ export function UserProfileScreen() {
     enabled: Boolean(id) && id !== myId,
   });
   const toggleLike = useToggleLike();
+  const grid = useGridWindow();
   const block = useBlock();
   const blocked = useBlockState((state) => state.ids.includes(id));
   const unblocking = useBlockState((state) => state.pending.includes(id));
@@ -35,6 +38,8 @@ export function UserProfileScreen() {
   return (
     <Screen padded={false}>
       <ScrollView
+        onScroll={grid.onScroll}
+        scrollEventThrottle={100}
         contentContainerStyle={{ paddingBottom: spacing.lg, gap: spacing.lg }}
         refreshControl={
           <RefreshControl
@@ -56,7 +61,7 @@ export function UserProfileScreen() {
               icon="ellipsis-horizontal"
               label="Profile options"
               onPress={() =>
-                Alert.alert('Profile options', undefined, [
+                dialog.alert('Profile options', undefined, [
                   {
                     text: 'Report user',
                     onPress: () =>
@@ -103,10 +108,15 @@ export function UserProfileScreen() {
         ) : (
           <>
             <View style={{ paddingHorizontal: spacing.lg }}>
-              <ProfileHeader user={profile.data} posts={posts.data?.length ?? 0} followers={profile.data.followers} following={profile.data.following} />
+              <ProfileHeader
+                user={profile.data}
+                posts={posts.data?.length ?? 0}
+                followers={profile.data.followers}
+                following={profile.data.following}
+              />
             </View>
             <View style={{ flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg }}>
-<FollowButton userId={id} />
+              <FollowButton userId={id} />
               <Button
                 label="Message"
                 variant="secondary"
@@ -122,6 +132,7 @@ export function UserProfileScreen() {
             ) : posts.data?.length ? (
               <ProfileGrid
                 posts={posts.data}
+                limit={grid.limit}
                 showSaved={false}
                 onToggleLike={(item) => toggleLike.mutate({ postId: item.id, liked: !item.liked })}
               />

@@ -8,11 +8,17 @@ function load(file, modules = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     fileName:file,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX},
-  }).outputText, { exports, require:name => modules[name] ?? require(name), Uint8Array, AbortController,
+  }).outputText, { exports, require:name => modules[name] ??
+    (name === '@/services/externalActivity' ? externalActivity : require(name)), Uint8Array, AbortController,
     Date, setTimeout,clearTimeout,console,TextEncoder });
   return exports;
 }
-const credentials = load('src/features/app-lock/credentials.ts');
+// Shared, real module: tests drive it to simulate the app opening a picker or share sheet.
+const externalActivity = load('src/services/externalActivity.ts');
+// No native module in tests: PINs use the JavaScript derivation.
+const credentials = load('src/features/app-lock/credentials.ts', {
+  expo: { requireOptionalNativeModule: () => null },
+});
 
 test('follow actions share optimistic state, block double taps, reconcile success and roll back failed/offline writes', async () => {
   const relations=load('src/features/requests/relationship.ts');
@@ -179,7 +185,7 @@ test('profile count loading and failed refreshes expose retry while retaining kn
   let counts={isPending:true,isError:false,isRefetching:false,refetch:()=>{countRetries++;}};
   const auth=select=>select({user});auth.getState=()=>({refreshProfile:()=>{profileRetries++;}});
   const {MyProfileScreen}=load('src/features/profile/screens/MyProfileScreen.tsx',{
-    react:{useState:value=>[value,()=>{}]},'expo-router':{useRouter:()=>({push(){}})},
+    react:{useState:value=>[value,()=>{}],useMemo:fn=>fn()},'expo-router':{useRouter:()=>({push(){}})},
     'react-native':{RefreshControl:'Refresh',ScrollView:'Scroll',Share:{},View:'View'},
     '@tanstack/react-query':{useQuery:()=>counts},
     '@/components/layout':{Header:'Header',Screen:'Screen',SettingsButton:'Settings'},
@@ -189,7 +195,7 @@ test('profile count loading and failed refreshes expose retry while retaining kn
     '@/features/feed/hooks/useFeed':{useMyPosts:()=>({data:[]}),useDeletePost:()=>({}),useToggleLike:()=>({})},
     '@/services/api/backend':{},'@/utils/formatters':{toHandle:value=>value},'@/theme':{spacing:{}},
     '@/theme/useTheme':{useTheme:()=>({theme:{colors:{}}})},
-    '../components/EditProfileForm':{EditProfileForm:'Edit'},'../components/ProfileHeader':{ProfileHeader:'ProfileHeader'},'../components/ProfileGrid':{ProfileGrid:'Grid'},
+    '../components/EditProfileForm':{EditProfileForm:'Edit'},'../components/ProfileHeader':{ProfileHeader:'ProfileHeader'},'../components/ProfileGrid':{ProfileGrid:'Grid',useGridWindow:()=>({limit:Infinity,onScroll:()=>{}})},
   });
   const flatten=element=>Array.isArray(element)?element.flatMap(flatten):element&&typeof element==='object'?[element,...flatten(element.props?.children)]:[];
   assert.match(JSON.stringify(MyProfileScreen()),/Loading follower counts/);
@@ -236,13 +242,46 @@ test('Activity request cards share the canonical request cache and actions and e
 });
 
 test('custom PIN records use salted hashes, reject wrong PINs and validate passcode policy', async () => {
-  await assert.rejects(credentials.createCredential('1234', crypto.randomBytes(32)), /6 to 12/);
+  await assert.rejects(credentials.createCredential('123', crypto.randomBytes(32)), /4 to 12/);
+  // Four digits is the shortest allowed PIN.
+  assert.equal(await credentials.checkCredential('4821', await credentials.createCredential('4821', crypto.randomBytes(32))), true);
   const a=await credentials.createCredential('123456',crypto.randomBytes(32));
   const b=await credentials.createCredential('123456',crypto.randomBytes(32));
   assert.notEqual(a.hash,b.hash); assert.equal(a.iterations,600000);
   assert.equal(await credentials.checkCredential('123456',a),true);
   assert.equal(await credentials.checkCredential('654321',a),false);
   await assert.rejects(credentials.checkCredential('123456',{...a,iterations:1}),/unavailable/);
+});
+
+test('the native PIN derivation is used when present and matches the JavaScript one both ways', async () => {
+  const calls = [];
+  const native = load('src/features/app-lock/credentials.ts', {
+    expo: {
+      requireOptionalNativeModule: (name) =>
+        name === 'PinKdf'
+          ? {
+              pbkdf2Sha256: async (password, saltHex, iterations, length) => {
+                calls.push({ saltHex, iterations, length });
+                return crypto.pbkdf2Sync(password, Buffer.from(saltHex, 'hex'), iterations, length, 'sha256').toString('hex');
+              },
+            }
+          : null,
+    },
+  });
+  const salt = crypto.randomBytes(32);
+  const viaNative = await native.createCredential('482913', salt);
+  assert.deepEqual(calls[0], { saltHex: salt.toString('hex'), iterations: 600000, length: 32 });
+  // PINs set before the native module existed still unlock, and vice versa.
+  const viaJs = await credentials.createCredential('482913', salt);
+  assert.equal(viaNative.hash, viaJs.hash);
+  assert.equal(viaNative.salt, viaJs.salt);
+  assert.equal(await credentials.checkCredential('482913', viaNative), true);
+  assert.equal(await native.checkCredential('000000', viaNative), false);
+  // A native failure falls back to the JavaScript derivation instead of locking the user out.
+  const failing = load('src/features/app-lock/credentials.ts', {
+    expo: { requireOptionalNativeModule: () => ({ pbkdf2Sha256: async () => { throw new Error('boom'); } }) },
+  });
+  assert.equal(await failing.checkCredential('482913', viaNative), true);
 });
 
 test('App Lock persists PIN-only mode, verifies changes, protects settings and handles enrollment changes', async () => {
@@ -390,4 +429,35 @@ test('backup messages require both verified encryption and cloud acknowledgment 
   assert.equal(backupStatus({...photo,syncState:'synced',status:'approved',s3Key:'remote',remoteEncrypted:true}),'Encrypted and securely backed up.');
   assert.equal(backupStatus({...photo,syncState:'synced',status:'approved',s3Key:'legacy'}),'Encrypted locally. Cloud backup saved; cloud encryption verification pending.');
   for(const changes of [{localEncrypted:0},{localPath:null},{kind:'video'}]) assert.doesNotMatch(backupStatus({...photo,...changes,syncState:'failed'}),/encrypted local copy is safe/);
+});
+
+test('requests wait for a sleeping server instead of timing out, with one shared wake-up check', async () => {
+  let resolveFetch, fetches = 0;
+  const fetch = async (url) => {
+    fetches++;
+    assert.equal(url, 'https://api.example.test/api/health/live');
+    return new Promise((resolve) => { resolveFetch = resolve; });
+  };
+  // Like load(), plus the fetch global this module uses.
+  const exports = {};
+  const modules = {
+    '@/config/env': { env: { apiUrl: 'https://api.example.test/api' } },
+    './pinning': { initializePinning: async () => {} },
+  };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/services/api/serverWake.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { exports, require: (name) => modules[name] ?? require(name), fetch, AbortController,
+    Date, setTimeout, clearTimeout, console });
+  const first = exports.wakeServer(), second = exports.wakeServer();
+  assert.equal(first, second, 'concurrent requests share one check');
+  let done = false;
+  void first.then(() => { done = true; });
+  await new Promise(setImmediate);
+  assert.equal(fetches, 1);
+  assert.equal(done, false, 'requests wait while the server wakes');
+  resolveFetch({ ok: true });
+  await first;
+  assert.equal(exports.useServerWake.getState().waking, false);
+  await exports.wakeServer();
+  assert.equal(fetches, 1, 'no extra check while the server is known to be awake');
 });

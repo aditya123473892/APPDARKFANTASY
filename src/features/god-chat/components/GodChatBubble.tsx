@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui';
 import { radius, spacing } from '@/theme';
@@ -5,7 +6,7 @@ import { useTheme } from '@/theme/useTheme';
 import type { GodChatMessage } from '../godChatService';
 
 /** Shared by the member's chat and the admin transcript; `mine` picks the right-hand side. */
-export function GodChatBubble({
+export const GodChatBubble = memo(function GodChatBubble({
   message,
   mine,
   label,
@@ -43,7 +44,7 @@ export function GodChatBubble({
       </Text>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   bubble: {

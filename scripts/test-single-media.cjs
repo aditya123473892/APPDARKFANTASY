@@ -3,6 +3,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
+// Real, dependency-free module: picking marks the app as showing a system screen.
+function loadPlain(file) {
+  const module = { exports: {} };
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  vm.runInNewContext(`(function(require,module,exports){${code}
+})`, {})(() => ({}), module, module.exports);
+  return module.exports;
+}
 
 function pickerHarness() {
   let result = { canceled: true, assets: [] };
@@ -14,6 +22,7 @@ function pickerHarness() {
     'expo-file-system/legacy': { getInfoAsync: async () => ({ exists: true, size: 1024 }) },
     'react-native': { Platform: { OS: 'android' } },
     './videoThumbnail': { createVideoThumbnail: async () => { thumbnails++; return 'thumb.jpg'; } },
+    '@/services/externalActivity': loadPlain('src/services/externalActivity.ts'),
   };
   const code = ts.transpileModule(fs.readFileSync('src/features/create-post/singleMedia.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} };

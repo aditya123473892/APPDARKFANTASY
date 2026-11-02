@@ -2,6 +2,7 @@ import { AppState } from 'react-native';
 import { create } from 'zustand';
 import * as LA from 'expo-local-authentication';
 import { clearTemps } from './files';
+import { EXTERNAL_GRACE_MS, inExternalActivity } from '@/services/externalActivity';
 import { setting, setSetting } from './repository';
 import {
   cancelPinPrompt,
@@ -141,18 +142,36 @@ export async function setLockTimeout(owner: string, milliseconds: number): Promi
   timeoutMs = Math.min(300_000, Math.max(0, milliseconds));
   await setSetting(owner, 'timeout', String(timeoutMs));
 }
+let backgroundAt: number | null = null;
+let backgroundLimit = 0;
 AppState.addEventListener('change', (state) => {
   clearTimeout(timer);
-  if (state !== 'active') {
+  if (state === 'active') {
+    // Timers are unreliable while backgrounded, so the limit is also enforced on return.
+    if (backgroundAt !== null && Date.now() - backgroundAt >= backgroundLimit) lock();
+    backgroundAt = null;
+    return;
+  }
+  if (backgroundAt !== null) return;
+  // A picker, camera, share sheet or permission prompt the app opened itself: stay open
+  // and keep the temporary file being shared or saved.
+  const external = inExternalActivity();
+  if (!external) {
     void clearTemps().catch(() => undefined);
     cancelPinPrompt();
-    // Android device-credential fallback opens Keyguard outside the activity.
-    // Keep content locked while allowing that verified native prompt to resume.
-    if (devicePrompt) {
-      useVaultLock.setState({ unlocked: false });
-      return;
-    }
-    if (!timeoutMs) lock();
-    else timer = setTimeout(lock, timeoutMs);
   }
+  // Android device-credential fallback opens Keyguard outside the activity.
+  // Keep content locked while allowing that verified native prompt to resume.
+  if (devicePrompt) {
+    useVaultLock.setState({ unlocked: false });
+    return;
+  }
+  const limit = external ? Math.max(timeoutMs, EXTERNAL_GRACE_MS) : timeoutMs;
+  if (!limit) {
+    lock();
+    return;
+  }
+  backgroundAt = Date.now();
+  backgroundLimit = limit;
+  timer = setTimeout(lock, limit);
 });

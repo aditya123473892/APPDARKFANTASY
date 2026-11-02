@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 import { useRouter, type Href } from 'expo-router';
 import { formatPhone } from '@/features/auth/phone';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Input, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
@@ -12,6 +12,7 @@ import { apiClient } from '@/services/api/apiClient';
 import { unwrap } from '@/services/api/backend';
 import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
 
+import { dialog } from '@/components/ui/dialogStore';
 export function AccountScreen(): React.JSX.Element {
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
@@ -32,7 +33,7 @@ export function AccountScreen(): React.JSX.Element {
   });
 
   const requestDeletion = (): void =>
-    Alert.alert(
+    dialog.alert(
       'Delete your account?',
       'Your account will be disabled immediately. Your profile, photos and messages will then be permanently removed.',
       [

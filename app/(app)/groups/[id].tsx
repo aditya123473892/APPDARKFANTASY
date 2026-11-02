@@ -2,7 +2,7 @@ import { cleanupPickedAssets } from '@/services/api/photoUpload';
 import { useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
 import { Header, Screen } from '@/components/layout';
 import { Avatar, Button, EmptyState, Input, Loader, Text } from '@/components/ui';
@@ -26,9 +26,9 @@ import { describeError, isServiceError } from '@/services/errors';
 import { queryKeys } from '@/services/queryKeys';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
-
+import { dialog } from '@/components/ui/dialogStore';
 const confirm = (title: string, message: string, action: string, onConfirm: () => void) =>
-  Alert.alert(title, message, [
+  dialog.alert(title, message, [
     { text: 'Cancel', style: 'cancel' },
     { text: action, style: 'destructive', onPress: onConfirm },
   ]);

@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { radius, spacing, media } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import type { Conversation } from '../types';
+import { formatMessageTime, formatShortDate, isSameDay } from '@/utils/formatters';
 
 export const CHAT_AVATAR = media.avatar.large;
 
@@ -44,11 +45,10 @@ export const ChatListItem = memo(function ChatListItem({
   const preview = `${sender}${body}`;
   const failedPreview = conversation.previewState === 'error';
   const badgeColor = muted ? theme.colors.textMuted : theme.colors.primary;
-  const date = new Date(conversation.updatedAt);
-  const time = Number.isFinite(date.getTime())
-    ? date.toDateString() === new Date().toDateString()
-      ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const time = Number.isFinite(Date.parse(conversation.updatedAt))
+    ? isSameDay(conversation.updatedAt, new Date().toISOString())
+      ? formatMessageTime(conversation.updatedAt)
+      : formatShortDate(conversation.updatedAt)
     : '';
   return (
     <Pressable

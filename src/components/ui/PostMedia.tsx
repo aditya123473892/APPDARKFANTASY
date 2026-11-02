@@ -4,7 +4,13 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, View } from 'react-native';
 import type { PostMedia as Media } from '@/features/feed/types';
-import { durationLabel, isVideo, mediaFrame, mediaPreviews } from '@/features/feed/presentation';
+import {
+  durationLabel,
+  isVideo,
+  mediaCacheKey,
+  mediaFrame,
+  mediaPreviews,
+} from '@/features/feed/presentation';
 import type { ImageFit } from '@/utils/imageLayout';
 import { useTheme } from '@/theme/useTheme';
 import { radius, spacing } from '@/theme';
@@ -169,16 +175,19 @@ export function PostMedia({
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(openTimer.current), []);
   const video = isVideo(media);
+  // Signed URLs change on every refetch; keying on the media id keeps the cached image and
+  // its loaded state instead of re-downloading and flashing the skeleton.
+  const mediaKey = media ? mediaCacheKey(media, locked) : undefined;
   const size =
-    media?.width && media.height ? media : decoded?.uri === media?.uri ? decoded : undefined;
+    media?.width && media.height ? media : decoded?.uri === mediaKey ? decoded : undefined;
   const frame = mediaFrame(size ? { ...media!, ...size } : media);
   const frameRatio = ratio ?? mediaPreviews.get(media?.uri ?? '')?.ratio ?? frame.ratio;
   const imageFit: ImageFit = fit ?? (frameRatio === frame.ratio ? frame.fit : 'contain');
   const preview = mediaPreviews.get(media?.uri ?? '');
   const thumbnailUri =
     preview?.thumbnail ?? (thumbnail?.source === media?.uri ? thumbnail?.uri : undefined);
-  const loaded = Boolean(media?.uri && loadedUri === media.uri);
-  const failed = Boolean(media?.uri && failedUri === media.uri);
+  const loaded = Boolean(media?.uri && loadedUri === mediaKey);
+  const failed = Boolean(media?.uri && failedUri === mediaKey);
   useEffect(() => {
     if (!media || !video || !active || locked || media.locked || preview?.thumbnail) return;
     let cancelled = false;
@@ -256,7 +265,7 @@ export function PostMedia({
           {media && (!video || thumbnailUri) ? (
             <Image
               key={attempt}
-              source={{ uri: video ? thumbnailUri : media.uri }}
+              source={video ? { uri: thumbnailUri } : { uri: media.uri, cacheKey: mediaKey }}
               placeholder={media.blurhash ? { blurhash: media.blurhash } : undefined}
               placeholderContentFit="cover"
               contentFit={video ? 'cover' : imageFit}
@@ -265,13 +274,13 @@ export function PostMedia({
               allowDownscaling
               cachePolicy="memory-disk"
               onLoad={({ source }) => {
-                setLoadedUri(media.uri);
+                setLoadedUri(mediaKey);
                 if (!video && !(media.width && media.height) && source.width && source.height)
-                  setDecoded({ uri: media.uri, width: source.width, height: source.height });
+                  setDecoded({ uri: mediaKey!, width: source.width, height: source.height });
               }}
-              onError={() => setFailedUri(media.uri)}
+              onError={() => setFailedUri(mediaKey)}
               style={StyleSheet.absoluteFill}
-              recyclingKey={media.uri}
+              recyclingKey={mediaKey}
             />
           ) : null}
           {video && media ? (

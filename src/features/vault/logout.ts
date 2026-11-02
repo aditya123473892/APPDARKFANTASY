@@ -1,14 +1,14 @@
-import { Alert } from 'react-native';
 import { hasUnsyncedPhotos, wipeVault, serial } from './vaultService';
 import { cancelVaultTransfers } from './sync';
 import { lock } from './lock';
 
+import { dialog } from '@/components/ui/dialogStore';
 export async function beforeLogout(discardUnsynced = false): Promise<void> {
   lock();
   cancelVaultTransfers();
   if (!discardUnsynced && (await serial(hasUnsyncedPhotos))) {
     const discard = await new Promise<boolean>((resolve) =>
-      Alert.alert(
+      dialog.alert(
         'Keep your photos',
         'Some photos or changes are saved only on this phone. Stay signed in to keep them, or discard them and log out. Discarding cannot be undone.',
         [

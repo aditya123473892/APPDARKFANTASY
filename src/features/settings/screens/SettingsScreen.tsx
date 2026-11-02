@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { useRouter, type Href } from 'expo-router';
 import { useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Modal, Text } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
@@ -13,6 +13,7 @@ import { useTheme } from '@/theme/useTheme';
 import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
 import { EditProfileForm } from '@/features/profile/components/EditProfileForm';
 
+import { dialog } from '@/components/ui/dialogStore';
 const morePages = [
   { icon: 'compass-outline', title: 'Discover', href: '/discover' },
   { icon: 'people-outline', title: 'Matches', href: '/matches' },
@@ -37,7 +38,7 @@ export function SettingsScreen(): React.JSX.Element {
   const canCreateGroups = useCan('canCreateGroups');
 
   const confirmLogout = (): void =>
-    Alert.alert('Log out?', 'You will need to sign in again to see your messages.', [
+    dialog.alert('Log out?', 'You will need to sign in again to see your messages.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log out',
@@ -128,7 +129,13 @@ export function SettingsScreen(): React.JSX.Element {
         </SettingsGroup>
 
         <SettingsGroup title="Appearance">
-          {__DEV__ ? <SettingsRow icon="color-palette-outline" title="Social UI preview" onPress={() => router.push('/ui-preview' as Href)} /> : null}
+          {__DEV__ ? (
+            <SettingsRow
+              icon="color-palette-outline"
+              title="Social UI preview"
+              onPress={() => router.push('/ui-preview' as Href)}
+            />
+          ) : null}
           <SettingsRow
             icon="moon-outline"
             title="Dark mode"
@@ -139,7 +146,12 @@ export function SettingsScreen(): React.JSX.Element {
           />
         </SettingsGroup>
         <SettingsGroup title="Account">
-          <SettingsRow icon="lock-closed-outline" title="App Lock" subtitle="Custom PIN and optional biometrics" onPress={() => router.push('/settings/app-lock' as Href)} />
+          <SettingsRow
+            icon="lock-closed-outline"
+            title="App Lock"
+            subtitle="Custom PIN and optional biometrics"
+            onPress={() => router.push('/settings/app-lock' as Href)}
+          />
           <SettingsRow
             icon="flag-outline"
             title="My reports"
