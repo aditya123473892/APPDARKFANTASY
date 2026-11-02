@@ -2946,7 +2946,7 @@ test('stale socket and history responses cannot reset an opened photo', () => {
   h.runtime.teardownSession();
 });
 
-function photoViewerHarness(seconds) {
+function photoViewerHarness(seconds, mine = false) {
   const hooks = [], effects = [], intervals = new Map();
   let cursor = 0, now = Date.now(), intervalId = 0, background;
   const same = (a, b) => a && b && a.length === b.length && a.every((item, i) => item === b[i]);
@@ -2995,6 +2995,10 @@ function photoViewerHarness(seconds) {
   let requests = 0;
   h.apiClient.defaults.adapter = async (config) => {
     requests++;
+    if (mine) {
+      assert.match(config.url, /\/preview$/);
+      return h.ok(config, { dataUri: 'data:image/jpeg;base64,/9j/' });
+    }
     assert.match(config.url, /\/open$/);
     return h.ok(config, { dataUri: 'data:image/jpeg;base64,/9j/', message: {
       _id: '444444444444444444444444', sender: other, receiver: me,
@@ -3004,9 +3008,9 @@ function photoViewerHarness(seconds) {
   const { ViewOnceAttachment } = h.load('src/features/chat/components/ViewOnceAttachment.tsx');
   const render = () => {
     cursor = 0;
-    const tree = ViewOnceAttachment({ messageId: '444444444444444444444444', mine: false,
+    const tree = ViewOnceAttachment({ messageId: '444444444444444444444444', mine,
       media: { _id: '555555555555555555555555', mimetype: 'image/jpeg', status: 'active' },
-      viewDurationSeconds: seconds });
+      viewDurationSeconds: seconds, deliveryStatus: 'sent' });
     effects.splice(0).forEach((fn) => fn());
     return tree.props.children;
   };
@@ -3031,6 +3035,28 @@ test('view-once viewer blocks double taps and clears in-memory bytes on close', 
   closedChip.props.onPress();
   await new Promise(setImmediate);
   assert.equal(v.requests(), 1);
+  v.h.runtime.teardownSession();
+});
+
+test('the sender can preview their own view-once photo again, with no countdown', async () => {
+  const v = photoViewerHarness(3, true);
+  const [chip] = v.render();
+  assert.equal(chip.props.disabled, false);
+  assert.match(chip.props.description, /Tap to see it/);
+  chip.props.onPress();
+  await new Promise(setImmediate);
+  let [, viewer] = v.render();
+  assert.equal(viewer.props.uri, 'data:image/jpeg;base64,/9j/');
+  assert.equal(viewer.props.reportTarget, undefined);
+  viewer.props.onLoad();
+  v.render();
+  assert.equal(v.intervals.size, 0, 'the preview is not timed');
+  viewer.props.onClose();
+  const [again] = v.render();
+  again.props.onPress();
+  await new Promise(setImmediate);
+  assert.equal(v.requests(), 2, 'the preview can be opened again');
+  assert.equal(v.render()[1].props.visible, true);
   v.h.runtime.teardownSession();
 });
 

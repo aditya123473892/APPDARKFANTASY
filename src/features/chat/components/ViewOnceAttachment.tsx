@@ -53,6 +53,9 @@ export function ViewOnceAttachment({
   const mode = viewDurationSeconds ? `View Once · ${viewDurationSeconds}s photo` : 'View Once · Photo';
   const sentLabel = deliveryStatus === 'sending' ? 'Sending' : deliveryStatus === 'uncertain' ? 'Delivery unconfirmed'
     : deliveryStatus === 'failed-definitive' ? 'Not sent' : 'Sent';
+  // The sender can look at their own photo until it is opened, once the server has it.
+  const previewable = mine && (deliveryStatus === 'sent' || deliveryStatus === 'read') && !unavailable;
+  const timer = viewDurationSeconds ? `${viewDurationSeconds}s · ` : '';
   useScreenshotProtection(`chat-photo:${messageId}`, visible);
 
   const close = useCallback(() => {
@@ -90,7 +93,7 @@ export function ViewOnceAttachment({
 
   const open = async () => {
     // Refs block double taps before React has committed the loading state.
-    if (mine || unavailable || pending.current || used.current) return;
+    if ((mine && !previewable) || unavailable || pending.current || used.current) return;
     pending.current = true;
     loaded.current = false;
     const sequence = ++request.current;
@@ -101,6 +104,23 @@ export function ViewOnceAttachment({
     setVisible(true);
     setLoading(true);
     try {
+      if (mine) {
+        // Preview only: it never uses the recipient's opening.
+        const response = await apiClient.post(
+          `/chats/messages/${messageId}/media/${media._id}/preview`,
+          undefined,
+          { signal: abort.signal, timeout: 60_000 },
+        );
+        if (!valid()) return;
+        const value = unwrap<{ dataUri: string }>(response.data);
+        if (
+          typeof value.dataUri !== 'string' ||
+          !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.dataUri)
+        )
+          throw new Error('Invalid photo response');
+        setUri(value.dataUri);
+        return;
+      }
       const response = await apiClient.post(
         `/chats/messages/${messageId}/media/${media._id}/open`,
         undefined,
@@ -123,7 +143,11 @@ export function ViewOnceAttachment({
       if (axios.isAxiosError(error) && error.response?.status === 410) {
         used.current = true;
         setConsumed(true);
-        toast.error('This photo was already opened or has expired.');
+        toast.error(
+          mine
+            ? 'This photo was opened or has expired, so it is gone.'
+            : 'This photo was already opened or has expired.',
+        );
       } else toast.error(describeError(serviceError(error), 'Could not open this photo.'));
       close();
     } finally {
@@ -134,33 +158,41 @@ export function ViewOnceAttachment({
     if (loaded.current) return;
     loaded.current = true;
     setLoading(false);
-    if (viewDurationSeconds) {
+    // The sender's preview has no countdown.
+    if (viewDurationSeconds && !mine) {
       setRemaining(viewDurationSeconds);
       setDeadline(Date.now() + viewDurationSeconds * 1000);
     }
   };
-  const label = `${mode} · ${unavailable ? 'Opened or expired' : mine ? 'Not opened yet' : 'Tap to open'}`;
+  const opened = Boolean(viewedAt || consumed);
+  const label = `${mode} · ${
+    unavailable ? 'Opened or expired' : previewable ? 'Not opened yet · Tap to see your photo' : mine ? sentLabel : 'Tap to open'
+  }`;
+  const title = mine
+    ? unavailable
+      ? viewedAt ? 'Opened' : 'Photo gone'
+      : previewable ? 'Your View Once photo' : `${sentLabel} photo · View Once`
+    : unavailable ? (opened ? 'Opened photo' : 'Photo unavailable') : 'View Once · Photo';
+  const description = mine
+    ? unavailable
+      ? viewedAt ? 'They opened it · The photo is gone' : 'Opened or expired · The photo is gone'
+      : previewable ? `${timer}Not opened yet · Tap to see it` : `${timer}${sentLabel}`
+    : unavailable
+      ? (opened ? 'Opened · This photo cannot be opened again' : 'Expired · Photo unavailable')
+      : `${timer}View once · Tap to open`;
   return (
     <>
       <AttachmentCard
         label={label}
-        title={
-          mine ? `${sentLabel} photo · View Once` : unavailable ? (viewedAt || consumed ? 'Opened photo' : 'Photo unavailable') : 'View Once · Photo'
-        }
-        description={
-          unavailable
-            ? (viewedAt || consumed ? 'Opened · This photo cannot be opened again' : 'Expired · Photo unavailable')
-            : mine
-              ? `${viewDurationSeconds ? `${viewDurationSeconds}s · ` : ''}${sentLabel} · Not opened yet`
-              : `${viewDurationSeconds ? `${viewDurationSeconds}s · ` : ''}View once · Tap to open`
-        }
+        title={title}
+        description={description}
         icon={
-          unavailable ? 'checkmark-done' : viewDurationSeconds ? 'timer-outline' : 'eye-off-outline'
+          unavailable ? 'checkmark-done' : previewable ? 'eye-outline' : viewDurationSeconds ? 'timer-outline' : 'eye-off-outline'
         }
         mine={mine}
         once
         loading={loading}
-        disabled={mine || unavailable || loading}
+        disabled={(mine && !previewable) || unavailable || loading}
         onPress={() => void open()}
       />
       <ChatPhotoViewer
@@ -169,7 +201,9 @@ export function ViewOnceAttachment({
         uri={uri}
         loading={loading}
         label={
-          viewDurationSeconds && !loading ? `${remaining}s remaining` : `${mode} · one opening`
+          mine
+            ? 'Only you see this preview · It does not use their view'
+            : viewDurationSeconds && !loading ? `${remaining}s remaining` : `${mode} · one opening`
         }
         onClose={close}
         onLoad={onLoad}

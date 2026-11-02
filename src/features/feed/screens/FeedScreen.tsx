@@ -41,6 +41,11 @@ export function FeedScreen() {
           action={
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <IconButton
+                icon="search-outline"
+                label="Search people"
+                onPress={() => router.push('/search')}
+              />
+              <IconButton
                 icon="add-outline"
                 label="Create post"
                 onPress={() => router.push('/create')}

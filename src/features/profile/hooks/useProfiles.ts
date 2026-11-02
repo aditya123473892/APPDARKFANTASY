@@ -1,5 +1,4 @@
 import {
-  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -15,14 +14,17 @@ import type { UploadAsset } from '@/features/feed/types';
  * Server-side search, 20 people per page. Pickers must pass the search term and
  * load more pages: the first page alone covers only the newest accounts.
  */
-export function useDiscoverProfiles(search = '') {
+export function useDiscoverProfiles(search = '', enabled = true) {
   return useInfiniteQuery({
     queryKey: [...queryKeys.discover, search],
+    enabled,
     queryFn: ({ pageParam, signal }) => profileService.discoverPage(pageParam, search, signal),
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextSkip,
-    // Keep showing the last results while a new search term loads.
-    placeholderData: keepPreviousData,
+    // Keep showing the last results while a new search term loads, but never the
+    // unfiltered list as if it were search results.
+    placeholderData: (previous, previousQuery) =>
+      search && !previousQuery?.queryKey[previousQuery.queryKey.length - 1] ? undefined : previous,
     select: (data) => {
       const seen = new Set<string>();
       return data.pages.flatMap((page) =>
