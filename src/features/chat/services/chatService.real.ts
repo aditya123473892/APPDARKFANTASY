@@ -13,7 +13,14 @@ import { uploadChatPhoto } from '@/services/api/photoUpload';
 import { isClientId } from '@/utils/clientId';
 import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
-import { emitTyping, getHistory, refreshUnread, socketRequest, socketAck } from './socketSession';
+import {
+  emitTyping,
+  getHistory,
+  getOlderHistory,
+  refreshUnread,
+  socketRequest,
+  socketAck,
+} from './socketSession';
 import {
   isObjectId,
   mapMessage,
@@ -188,6 +195,10 @@ export const realChatService: ChatService = {
       if (!(error instanceof ServiceError) || error.code !== 'NETWORK') throw error;
       return httpHistory(key);
     }
+  },
+  async loadOlderMessages(key) {
+    target(key);
+    await getOlderHistory(key);
   },
   async editMessage(key, id, text) {
     const scope = sessionIdentity.generation;

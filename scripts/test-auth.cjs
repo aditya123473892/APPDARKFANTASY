@@ -1579,7 +1579,7 @@ test('echoed idempotency keys are validated and only the viewer’s own key corr
   h.runtime.teardownSession();
 });
 
-test('full histories reconcile snapshots and never send pagination fields', async () => {
+test('history pages keep joined older rows, never bridge a gap and request 50 at a time', async () => {
   const h = chatHarness();
   const key = `user:${h.other}`;
   const { mapMessage } = h.load('src/features/chat/services/chatPayload.ts');
@@ -1595,13 +1595,78 @@ test('full histories reconcile snapshots and never send pagination fields', asyn
   const page = (from, to) => Array.from({ length: to - from }, (_, i) => message(from + i));
   const queryKey = JSON.stringify(['chat', 'messages', key]);
 
-  h.state.reconcileHistory(key, page(0, 100), h.state.historyVersion());
-  assert.equal(h.queryData.get(queryKey).length, 100);
-  h.state.reconcileHistory(key, page(98, 101), h.state.historyVersion());
-  assert.equal(h.queryData.get(queryKey).length, 3);
+  const texts = () => [...h.queryData.get(queryKey).map((row) => row.text)];
+  const version = () => h.state.historyVersion();
+
+  // Without a limit (HTTP fallback, legacy server) a snapshot is the whole history.
+  h.state.reconcileHistory(key, page(0, 100), version());
+  assert.equal(texts().length, 100);
+  h.state.reconcileHistory(key, page(98, 101), version());
+  assert.deepEqual(texts(), ['m98', 'm99', 'm100']);
+  assert.equal(h.state.hasOlderHistory(key), false);
+
+  // A full newest page joined to the cache keeps the older rows it loaded;
+  // a row missing inside the page's range was deleted.
+  h.state.reconcileHistory(key, page(0, 100), version());
+  const newest = page(50, 101).filter((row) => row.text !== 'm60');
+  h.state.reconcileHistory(key, newest, version(), 50);
+  assert.equal(texts().length, 100);
+  assert.equal(texts()[0], 'm0');
+  assert.equal(texts().at(-1), 'm100');
+  assert.ok(!texts().includes('m60'));
+  assert.equal(h.state.hasOlderHistory(key), false);
+
+  // A newest page that does not reach the cache would leave a gap: drop older rows.
+  h.state.reconcileHistory(key, page(200, 250), version(), 50);
+  assert.deepEqual([texts()[0], texts().length], ['m200', 50]);
+  assert.equal(h.state.hasOlderHistory(key), true);
+
+  // Older pages fill in before the oldest row; a short page reaches the start.
+  const oldest = () => h.queryData.get(queryKey)[0];
+  h.state.reconcileHistory(key, page(150, 200), version(), 50, oldest());
+  assert.deepEqual([texts()[0], texts().length], ['m150', 100]);
+  assert.equal(h.state.hasOlderHistory(key), true);
+  h.state.reconcileHistory(key, page(140, 150), version(), 50, oldest());
+  assert.deepEqual([texts()[0], texts().length], ['m140', 110]);
+  assert.equal(h.state.hasOlderHistory(key), false);
+
   await h.transport.getHistory(key);
   const request = h.sockets[0].packets.find((packet) => packet.name === 'getChatHistory');
-  assert.equal(JSON.stringify(request.payload), JSON.stringify({ user2: h.other }));
+  assert.equal(JSON.stringify(request.payload), JSON.stringify({ user2: h.other, limit: 50 }));
+  h.runtime.teardownSession();
+});
+
+test('a reconnect while a chat is open does not leave deletes waiting on its own resync', async () => {
+  // The real query client and safety invalidation: the open room's history query
+  // waits for chat readiness, so the resync must not wait for that query.
+  const { QueryClient, QueryObserver } = require('@tanstack/query-core');
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const h = chatHarness({
+    '@/services/queryClient': { queryClient },
+    '@/features/safety/blockCache': undefined,
+  });
+  const key = `user:${h.other}`;
+  const own = backendMessage(h.me, h.other, {
+    _id: 'bbbbbbbbbbbbbbbbbbbbbbbb',
+    sender: h.me,
+    receiver: h.other,
+  });
+  h.history.set(h.other, [own]);
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  const room = new QueryObserver(queryClient, {
+    queryKey: ['chat', 'messages', key],
+    queryFn: () => service.listMessages(key),
+  });
+  const unsubscribe = room.subscribe(() => {});
+  await until(() => room.getCurrentResult().data?.length === 1);
+
+  const socket = h.sockets[0];
+  socket.disconnect();
+  socket.connect();
+  await until(() => h.state.useChatConnection.getState().ready);
+  await service.deleteMessage(key, own._id);
+  assert.equal(queryClient.getQueryData(['chat', 'messages', key]).length, 0);
+  unsubscribe();
   h.runtime.teardownSession();
 });
 
@@ -2690,7 +2755,7 @@ test('sends carry the disappearing timer and view-once flag only when chosen', a
   assert.deepEqual(Object.keys(JSON.parse(bodies[2])).sort(), ['clientId', 'message', 'receiver']);
 });
 
-test('vault-prepared photos upload directly without API credentials, confirm once and clean scratch files', async () => {
+test('Android post photos skip the vault, upload without API credentials, confirm once and clean scratch files', async () => {
   const requests = [],
     uploads = [],
     deleted = [],
@@ -2713,6 +2778,11 @@ test('vault-prepared photos upload directly without API credentials, confirm onc
   };
   const h = harness({
     'react-native': { Platform: { OS: 'android' } },
+    '@/features/vault/vaultService': {
+      publishPhoto: async () => {
+        throw Error('Post photos must not be imported into the vault');
+      },
+    },
     'expo-image-manipulator': {
       ImageManipulator: { manipulate: () => context },
       SaveFormat: { JPEG: 'jpeg' },
@@ -2778,8 +2848,8 @@ test('vault-prepared photos upload directly without API credentials, confirm onc
   assert.equal(uploads[0].options.parameters.key, 'temp/owner/server.jpg');
   assert.ok(requests.every((row) => row.auth?.startsWith('Bearer ')));
   assert.equal(JSON.stringify(requests).includes('file:///'), false);
-  assert.deepEqual(resize, [], 'vault preparation already resized the image');
-  assert.deepEqual(saves, [], 'transport does not create another plaintext manipulator copy');
+  assert.equal(JSON.stringify(resize), JSON.stringify([{ width: 1080 }]), 'the uploader itself resizes the photo');
+  assert.equal(saves.length, 1, 'one temporary JPEG copy');
   assert.deepEqual(deleted, ['file:///cache/sanitized.jpg']);
   h.runtime.teardownSession();
 });

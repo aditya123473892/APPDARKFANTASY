@@ -9,6 +9,7 @@ export const mockChatService: ChatService = {
   listConversations: () => respond(() => db.conversations()),
   getConversation: (conversationId) => respond(() => db.conversation(conversationId), 250),
   listMessages: (conversationId) => respond(() => db.messages(conversationId)),
+  loadOlderMessages: async () => {},
   setTyping: () => {},
   editMessage: async () => {
     throw new ServiceError('FORBIDDEN');

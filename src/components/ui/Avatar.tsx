@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { StyleSheet, View } from 'react-native';
 import { useState } from 'react';
 import { Text } from './Text';
-import { mediaUrl } from '@/services/api/backend';
+import { imageCacheKey, mediaUrl } from '@/services/api/backend';
 
 import { useTheme } from '@/theme/useTheme';
 import { radius } from '@/theme';
@@ -45,12 +45,12 @@ export function Avatar({ uri, size = 44, online, ring, label }: AvatarProps): Re
         </View>
       ) : (
         <Image
-          source={{ uri: mediaUrl(uri) }}
+          source={{ uri: mediaUrl(uri), cacheKey: imageCacheKey(uri) }}
           onError={() => setFailedUri(uri)}
           contentFit="cover"
           transition={160}
           cachePolicy="memory-disk"
-          recyclingKey={uri}
+          recyclingKey={imageCacheKey(uri) ?? uri}
           accessibilityLabel={label}
           style={[
             styles.image,

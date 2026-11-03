@@ -15,13 +15,18 @@ export const useChatConnection = create(() => ({ ready: false, epoch: 0 }));
 export function setChatReady(ready: boolean): void {
   useChatConnection.setState((state) => ({ ready, epoch: state.epoch + 1 }));
 }
+/** Newest messages requested per history page; older pages load on scroll. */
+export const HISTORY_PAGE = 50;
 const histories = new Set<string>();
+/** Conversations whose cached history does not reach their first message yet. */
+const truncated = new Set<string>();
 const overlays = new Map<string, Map<string, { version: number; message: Message | null }>>();
 let version = 0;
 /** Unread direct messages by message ID, from the server's unread arrays and live events. */
 let unread = new Map<string, string>();
 export const knownHistories = () => [...histories];
 export const historyVersion = () => version;
+export const hasOlderHistory = (key: string) => truncated.has(key);
 export function unreadFor(key: string): number {
   if (key.startsWith('group:')) return 0;
   return [...unread.values()].filter((value) => value === key).length;
@@ -32,6 +37,7 @@ export function watchHistory(key: string): void {
 /** Stop resyncing a conversation the viewer can no longer read. */
 export function forgetHistory(key: string): void {
   histories.delete(key);
+  truncated.delete(key);
   overlays.delete(key);
 }
 const compareMessages = (a: Message, b: Message) =>
@@ -174,16 +180,43 @@ export function acceptMessage(value: unknown, deleted = false, _received = false
   mergeMessage(message, deleted);
   return true;
 }
-/** Full-history snapshot; realtime edits/deletions received during loading win. */
-export function reconcileHistory(key: string, rows: Message[], started: number): Message[] {
+/**
+ * Applies one history page; realtime edits/deletions received during loading win.
+ * Cached rows inside the page's range that it omits were deleted. Without `before`
+ * it is the newest page; with it, the page of messages older than `before`. A page
+ * shorter than `limit` (or any page without a limit) reaches the first message.
+ */
+export function reconcileHistory(
+  key: string,
+  rows: Message[],
+  started: number,
+  limit?: number,
+  before?: Message,
+): Message[] {
   if (key.startsWith('user:') && isPeerBlocked(key.slice(5))) return [];
-  const cached = new Map(
-    (queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? []).map((row) => [
-      row.id,
-      row,
-    ]),
+  const current = queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [];
+  const cached = new Map(current.map((row) => [row.id, row]));
+  const page = sorted([...rows]);
+  // A legacy server ignores the limit and cursor and returns the full history.
+  const complete =
+    limit === undefined ||
+    page.length !== limit ||
+    (before !== undefined && !page.some((row) => compareMessages(row, before) < 0));
+  const from = complete ? undefined : page[0];
+  const older = (row: Message) => from !== undefined && compareMessages(row, from) < 0;
+  // Older cached rows are kept only when the newest page joins them; otherwise
+  // messages missed while offline would leave an invisible gap.
+  const joined = page.some((row) => cached.has(row.id));
+  const kept = current.filter((row) =>
+    before ? compareMessages(row, before) >= 0 || older(row) : joined && older(row),
   );
-  const result = new Map(rows.map((message) => [message.id, preserveRead(message, cached)]));
+  // Kept older rows carry the completeness of the page that loaded them.
+  if (before || !kept.some(older)) {
+    if (complete) truncated.delete(key);
+    else truncated.add(key);
+  }
+  const result = new Map(kept.map((row) => [row.id, row]));
+  for (const message of page) result.set(message.id, preserveRead(message, cached));
   for (const [id, entry] of overlays.get(key) ?? []) {
     if (entry.version <= started) continue;
     if (entry.message) result.set(id, preserveRead(entry.message, cached));
@@ -270,6 +303,7 @@ export function acceptGroupRemoved(value: unknown): void {
 }
 registerSessionTeardown(() => {
   histories.clear();
+  truncated.clear();
   overlays.clear();
   unread.clear();
   version = 0;

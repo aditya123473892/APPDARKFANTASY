@@ -14,7 +14,12 @@ import { useFocusEffect } from 'expo-router';
 import { AppState } from 'react-native';
 import { useAppState } from '@/hooks/useAppState';
 import { useCan } from '@/features/auth/hooks/useCurrentUser';
-import { isExpired, purgeExpiredMessages, useChatConnection } from '../services/chatState';
+import {
+  hasOlderHistory,
+  isExpired,
+  purgeExpiredMessages,
+  useChatConnection,
+} from '../services/chatState';
 import { useTypingUsers } from '../store/typingStore';
 import { userCache } from '@/features/auth/userCache';
 import { displayName } from '@/features/auth/userModel';
@@ -159,19 +164,39 @@ export function useMessages(conversationId: string, enabled = true) {
   const count = useConversationState(
     (state) => state.rooms[conversationId]?.window ?? LOCAL_WINDOW,
   );
+  // Every history page lands in query.data, which re-renders and rereads this.
+  const serverOlder = hasOlderHistory(conversationId);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState(false);
+  const fetchingOlder = useRef(false);
   const loadOlder = useCallback(async () => {
-    updateRoom(conversationId, { window: roomState(conversationId).window + LOCAL_WINDOW });
-  }, [conversationId]);
+    const widen = () =>
+      updateRoom(conversationId, { window: roomState(conversationId).window + LOCAL_WINDOW });
+    if (messages.length > roomState(conversationId).window) return widen();
+    if (!hasOlderHistory(conversationId) || fetchingOlder.current) return;
+    fetchingOlder.current = true;
+    setLoadingOlder(true);
+    setOlderError(false);
+    try {
+      await chatService.loadOlderMessages(conversationId);
+      widen();
+    } catch {
+      setOlderError(true);
+    } finally {
+      fetchingOlder.current = false;
+      setLoadingOlder(false);
+    }
+  }, [conversationId, messages.length]);
   // Same array until the messages or window change, so screens can memoise rows on it.
   const windowed = useMemo(() => localWindow(messages, count), [messages, count]);
   return {
     ...query,
     allMessages: messages,
     messages: windowed,
-    hasOlder: messages.length > count,
+    hasOlder: messages.length > count || serverOlder,
     loadOlder,
-    loadingOlder: false,
-    olderError: false,
+    loadingOlder,
+    olderError,
   };
 }
 

@@ -29,6 +29,7 @@ function renderer(file, extraExport = '') {
     './Pressable': { Pressable: 'Pressable' },
     './Skeleton': { Skeleton: 'Skeleton' },
     'expo-image': { Image: 'Image' },
+    '@/services/api/backend': { imageCacheKey: (uri) => uri },
     '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
     '@/theme': { spacing: {}, radius: {}, typography: { size: {} }, media: { eventRatio: 16 / 9 } },
     '@/components/ui': { Button: 'Button', FitImage: 'FitImage', Text: 'Text' },

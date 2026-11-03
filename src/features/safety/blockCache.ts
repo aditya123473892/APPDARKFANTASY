@@ -78,6 +78,11 @@ export async function purgePeer(peer: string) {
   pending.forEach((item) => outbox.remove(item.clientId));
   return { snapshots, pending };
 }
-export function invalidateSafety() {
-  return queryClient.invalidateQueries({ predicate: (query) => safetyQuery(query.queryKey) });
+/** `histories: false` leaves chat message histories to the caller, which reloads them itself. */
+export function invalidateSafety({ histories = true } = {}) {
+  return queryClient.invalidateQueries({
+    predicate: (query) =>
+      safetyQuery(query.queryKey) &&
+      (histories || query.queryKey[0] !== 'chat' || query.queryKey[1] !== 'messages'),
+  });
 }

@@ -19,6 +19,7 @@ import {
   acceptUnread,
   acceptRead,
   forgetHistory,
+  HISTORY_PAGE,
   historyVersion,
   knownHistories,
   reconcileHistory,
@@ -33,6 +34,7 @@ import { refreshBlockState } from '@/features/safety/blocks';
 import { isPeerBlocked, useBlockState } from '@/features/safety/blockState';
 import { invalidateSafety, safetyQuery } from '@/features/safety/blockCache';
 import { queryClient } from '@/services/queryClient';
+import { queryKeys } from '@/services/queryKeys';
 
 let socket: Socket | undefined;
 let socketScope = -1;
@@ -141,24 +143,29 @@ function requestOn<T>(
   queue = result.catch(() => undefined);
   return result;
 }
-/** Full history; no cursor, limit or request-correlation fields exist. */
+/**
+ * The newest page of history, or with `before` the page just older than that
+ * message. No request-correlation fields exist; requests are serialized.
+ */
 async function historyOn(
   current: Socket,
   scope: number,
   key: string,
   quiet = false,
+  before?: Message,
 ): Promise<Message[]> {
   const [kind, id] = key.split(':');
   if (!isObjectId(id) || !kind || !['user', 'group'].includes(kind))
     throw new ServiceError('NOT_FOUND');
   watchHistory(key);
   const started = historyVersion();
+  const page = { limit: HISTORY_PAGE, ...(before ? { before: before.id } : {}) };
   const rows = await requestOn<unknown>(
     current,
     scope,
     kind === 'group' ? 'getGroupChatHistory' : 'getChatHistory',
     kind === 'group' ? 'groupChatHistory' : 'chatHistory',
-    kind === 'group' ? { groupId: id } : { user2: id },
+    kind === 'group' ? { groupId: id, ...page } : { user2: id, ...page },
     undefined,
     undefined,
     quiet,
@@ -168,7 +175,7 @@ async function historyOn(
   const parsed = rows.map(parseMessage);
   if (parsed.some((row) => !row || conversationKey(row) !== key)) throw new ServiceError('UNKNOWN');
   const messages = parsed.map((row) => mapMessage(row, key));
-  return reconcileHistory(key, messages, started);
+  return reconcileHistory(key, messages, started, HISTORY_PAGE, before);
 }
 /** Access to a conversation ended (e.g. removed from a group while offline). */
 const accessLost = (error: unknown) =>
@@ -179,7 +186,10 @@ function forgetGroup(groupId: string): void {
 }
 async function resync(current: Socket, scope: number, epoch: number): Promise<void> {
   await refreshBlockState();
-  await invalidateSafety();
+  // Never await these refetches: an open chat's history query waits for this
+  // resync in ensureChatReady, so awaiting it would never finish. Histories
+  // are reloaded below instead of refetched.
+  void invalidateSafety({ histories: false }).catch(() => undefined);
   // The server already joins every member room on connect; rejoining orders
   // the room subscription before history so no live message is missed.
   for (const groupId of [...groups]) {
@@ -352,10 +362,22 @@ export async function connectSocket(): Promise<Socket> {
   });
   return connecting;
 }
+/** A stalled resync fails requests instead of leaving them pending forever. */
+const SYNC_TIMEOUT_MS = 20_000;
 export async function ensureChatReady(): Promise<Socket> {
   const scope = sessionIdentity.generation;
   const current = await connectSocket();
-  await sync;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      sync,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ServiceError('NETWORK')), SYNC_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   assertSessionCurrent(scope);
   if (current !== socket || !current.connected || !useChatConnection.getState().ready)
     throw new ServiceError('NETWORK');
@@ -429,4 +451,12 @@ export async function getHistory(key: string): Promise<Message[]> {
   const current = await ensureChatReady();
   assertSessionCurrent(scope);
   return historyOn(current, scope, key);
+}
+/** Loads the page of history just older than the oldest cached message. */
+export async function getOlderHistory(key: string): Promise<Message[]> {
+  const scope = sessionIdentity.generation;
+  const current = await ensureChatReady();
+  assertSessionCurrent(scope);
+  const oldest = queryClient.getQueryData<Message[]>(queryKeys.messages(key))?.[0];
+  return historyOn(current, scope, key, false, oldest);
 }

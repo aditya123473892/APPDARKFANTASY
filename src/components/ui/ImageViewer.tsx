@@ -20,6 +20,7 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { PostMedia } from '@/features/feed/types';
+import { mediaCacheKey } from '@/features/feed/presentation';
 import { radius, spacing } from '@/theme';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
@@ -171,7 +172,8 @@ function ZoomableImage({
       <GestureDetector gesture={gesture}>
         <Animated.View style={[{ width, height }, imageStyle]}>
           <Image
-            source={{ uri: image.uri }}
+            // The feed's key: a photo already downloaded there opens instantly.
+            source={{ uri: image.uri, cacheKey: mediaCacheKey(image) }}
             placeholder={image.blurhash ? { blurhash: image.blurhash } : undefined}
             contentFit="contain"
             allowDownscaling

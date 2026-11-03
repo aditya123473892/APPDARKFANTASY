@@ -48,6 +48,8 @@ type BackendComment = {
 };
 /** Posts per feed request. */
 export const FEED_PAGE = 20;
+/** Media uploaded at once when creating a post. */
+const UPLOAD_CONCURRENCY = 3;
 
 function author(value: string | UserSummary | undefined, fallback?: UserSummary): PostAuthor {
   const user =
@@ -275,23 +277,35 @@ export const realFeedService: FeedService = {
     if (!input.assets?.length)
       throw new ServiceError('VALIDATION', 'Choose a photo or video before posting.');
     try {
-      const photoIds: string[] = [];
-      const videoIds: string[] = [];
-      for (const [index, asset] of input.assets.entries()) {
-        let fraction = 0;
-        const progress: typeof input.onUploadProgress = (event) => {
-          fraction = Math.max(
-            fraction,
-            event.stage === 'complete' ? 1 : ((event.percent ?? 0) / 100) * 0.9,
-          );
-          input.onUploadProgress?.({
-            ...event,
-            percent: Math.round(((index + fraction) / input.assets!.length) * 95),
-          });
-        };
-        if (asset.type.startsWith('video/')) videoIds.push(await uploadVideo(asset, progress));
-        else photoIds.push(await uploadPhoto(asset, progress));
-      }
+      const assets = input.assets;
+      const fractions = assets.map(() => 0);
+      const ids: string[] = new Array(assets.length);
+      // A few at a time, in the selected order; each result keeps its own slot.
+      let next = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(UPLOAD_CONCURRENCY, assets.length) }, async () => {
+          while (next < assets.length) {
+            const index = next++;
+            const asset = assets[index]!;
+            const progress: typeof input.onUploadProgress = (event) => {
+              fractions[index] = Math.max(
+                fractions[index]!,
+                event.stage === 'complete' ? 1 : ((event.percent ?? 0) / 100) * 0.9,
+              );
+              const done = fractions.reduce((sum, fraction) => sum + fraction, 0);
+              input.onUploadProgress?.({
+                ...event,
+                percent: Math.round((done / assets.length) * 95),
+              });
+            };
+            ids[index] = asset.type.startsWith('video/')
+              ? await uploadVideo(asset, progress)
+              : await uploadPhoto(asset, progress);
+          }
+        }),
+      );
+      const photoIds = ids.filter((_, index) => !assets[index]!.type.startsWith('video/'));
+      const videoIds = ids.filter((_, index) => assets[index]!.type.startsWith('video/'));
       const response = await apiClient.post('/posts', {
         caption: input.body,
         contentVisibility: input.contentVisibility ?? 'normal',

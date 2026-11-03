@@ -31,7 +31,7 @@ export function PostImage({
         placeholder={image.blurhash ? { blurhash: image.blurhash } : undefined}
         recyclingKey={cacheKey}
         contentFit="contain"
-        cachePolicy="memory"
+        cachePolicy="memory-disk"
         accessibilityLabel={locked ? 'Locked premium image preview' : 'Post image'}
         onLoad={({ source }) => {
           if (source.width > 0 && source.height > 0) onSize?.(source.width, source.height);

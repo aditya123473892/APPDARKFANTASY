@@ -346,16 +346,20 @@ test('screen cancellation and logout each abort a request without cancelling unr
   assert.equal(requestSignal(session.signal,new AbortController().signal).signal.aborted,true);
 });
 
-test('message action selection closes the single popup before executing; backdrop and back share close', () => {
+test('message action selection closes the single popup before executing; backdrop and back share close', async () => {
   const calls=[];
   const {MessageActionPopup}=load('src/features/chat/components/MessageActionPopup.tsx',{
+    'react-native':{Platform:{OS:'android'}},
     '@/components/ui':{BottomSheet:'Sheet',Button:'Button',Text:'Text'},
   });
   const popup=MessageActionPopup({actions:[{text:'Copy',onPress:()=>calls.push('copy')},{text:'Cancel'}],onClose:()=>calls.push('close')});
   popup.props.onClose();
   popup.props.children[1][0].props.onPress();
   popup.props.children[1][1].props.onPress();
-  assert.deepEqual(calls,['close','close','copy','close']);
+  // The action runs once the sheet has started closing, so its dialog can present.
+  assert.deepEqual(calls,['close','close','close']);
+  await new Promise((resolve)=>setTimeout(resolve,0));
+  assert.deepEqual(calls,['close','close','close','copy']);
   assert.equal(MessageActionPopup({actions:null,onClose(){}}).props.visible,false);
 });
 

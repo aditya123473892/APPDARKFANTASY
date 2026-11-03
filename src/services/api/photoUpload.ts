@@ -62,13 +62,9 @@ export function uploadPhoto(
   const scope = sessionIdentity.generation;
   const cached = completed.get(asset);
   if (cached?.generation === scope) return cached.promise;
-  const operation =
-    Platform.OS === 'android' && !asset.fromVault
-      ? import('@/features/vault/vaultService').then(({ publishPhoto }) =>
-          publishPhoto(asset, (prepared) => performUpload(prepared, scope, true, onProgress)),
-        )
-      : performUpload(asset, scope, asset.fromVault === true, onProgress);
-  const promise = operation.catch((error) => {
+  // Published photos are not copied into the vault: that encrypted import and
+  // second upload made every Android post photo much slower.
+  const promise = performUpload(asset, scope, asset.fromVault === true, onProgress).catch((error) => {
     completed.delete(asset);
     if (error instanceof ServiceError) throw error;
     throw serviceError(error);
@@ -77,7 +73,7 @@ export function uploadPhoto(
   return promise;
 }
 
-/** Gallery-to-chat upload: no vault import, unlock, or persistent local copy. */
+/** Gallery-to-chat upload: no persistent local copy; retries are cached separately from posts. */
 export function uploadChatPhoto(
   asset: UploadAsset,
   onProgress?: UploadProgressListener,

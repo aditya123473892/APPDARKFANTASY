@@ -103,3 +103,14 @@ export function mediaUrl(value?: string): string {
     return '';
   }
 }
+/**
+ * Image cache key that survives re-signing. Every response signs a new S3 URL,
+ * but each object path is a fresh UUID per upload, so the path alone
+ * identifies the bytes. Other URLs (API routes) keep their full address.
+ */
+export function imageCacheKey(value?: string): string | undefined {
+  const url = mediaUrl(value);
+  if (!url) return undefined;
+  const parsed = new URL(url);
+  return parsed.searchParams.has('X-Amz-Signature') ? `${parsed.origin}${parsed.pathname}` : url;
+}

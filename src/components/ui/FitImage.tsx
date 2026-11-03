@@ -3,6 +3,7 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from '@/theme/useTheme';
 import { useState } from 'react';
 import { imageAspectRatio } from '@/utils/imageLayout';
+import { imageCacheKey } from '@/services/api/backend';
 
 /**
  * The frame follows the decoded photo, so the complete image fills its own bounds.
@@ -48,7 +49,7 @@ export function FitImage({
       accessibilityLabel={accessibilityLabel}
     >
       <Image
-        source={{ uri }}
+        source={{ uri, cacheKey: imageCacheKey(uri) }}
         contentFit="contain"
         transition={150}
         cachePolicy={cachePolicy}
