@@ -65,13 +65,19 @@ export function ChatsScreen(): React.JSX.Element {
     return () => clearInterval(timer);
   }, [visible]);
 
+  // The conversation list carries each preview. Histories are downloaded only to
+  // search message text, or for previews an older server did not include.
+  const searching = query.length > 0;
   useFocusEffect(
     useCallback(() => {
-      if (!visible || !inboxKeys || !latestData.current) return;
+      const items = latestData.current?.filter(
+        (item) => searching || item.previewState !== 'loaded',
+      );
+      if (!visible || !inboxKeys || !items?.length) return;
       let mounted = true;
       prefetchTasks.current++;
       void prefetchInbox(
-        latestData.current,
+        items,
         (key) => chatService.listMessages(key),
         () => mounted && AppState.currentState === 'active',
         previewRefresh > 0,
@@ -83,7 +89,7 @@ export function ChatsScreen(): React.JSX.Element {
       return () => {
         mounted = false;
       };
-    }, [inboxKeys, visible, previewRefresh]),
+    }, [inboxKeys, visible, previewRefresh, searching]),
   );
 
   // Most recent activity first; live messages update `updatedAt` between refetches.

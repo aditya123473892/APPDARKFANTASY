@@ -10,6 +10,8 @@ export type ContentVisibility = 'normal' | 'premium';
 export type PostImageResponse = {
   id: string;
   url: string;
+  /** Grid-sized copy; '' until the server has made one. */
+  thumbnailUrl?: string;
   blurhash: string | null;
   width: number | null;
   height: number | null;
@@ -19,6 +21,8 @@ export type PostImageResponse = {
 export type PostMedia = {
   id?: string;
   uri: string;
+  /** Grid-sized copy of an image, when the server has one. */
+  thumbnailUri?: string;
   blurhash?: string | null;
   width: number;
   height: number;

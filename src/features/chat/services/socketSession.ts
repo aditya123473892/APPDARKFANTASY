@@ -21,6 +21,7 @@ import {
   forgetHistory,
   HISTORY_PAGE,
   historyVersion,
+  mergeMessage,
   knownHistories,
   reconcileHistory,
   setChatReady,
@@ -44,6 +45,10 @@ let connectionEpoch = 0;
 let queue: Promise<unknown> = Promise.resolve();
 const pending = new Set<() => void>();
 const groups = new Set<string>();
+/** Conversations whose older cached messages were rechecked on this connection. */
+const verified = new Set<string>();
+/** Older cached messages rechecked per conversation (the server's limit). */
+const VERIFY_LIMIT = 500;
 function resetSocket(clearRooms = true): void {
   connectionEpoch++;
   pending.forEach((cancel) => cancel());
@@ -54,12 +59,29 @@ function resetSocket(clearRooms = true): void {
   connecting = undefined;
   sync = undefined;
   queue = Promise.resolve();
+  acks = false;
+  verified.clear();
   if (clearRooms) groups.clear();
   setChatReady(false);
 }
 registerSessionTeardown(resetSocket);
 
-/** No request IDs exist: serialize event requests, including group acknowledgments. */
+type AckReply = { ok: true; data: unknown } | { ok: false; error?: unknown };
+const isAckReply = (value: unknown): value is AckReply =>
+  Boolean(value && typeof value === 'object' && typeof (value as { ok?: unknown }).ok === 'boolean');
+/**
+ * Whether this connection's server answers each request in that request's own
+ * acknowledgement (`reply: 'ack'`). Learned from the first such answer, since a
+ * server deployed before that change ignores the field and replies with events.
+ */
+let acks = false;
+
+/**
+ * A server that answers in acknowledgements correlates every reply, so requests
+ * run concurrently and nothing else can fail them. Until that is known, replies
+ * are uncorrelated events: requests are serialized, and any `error` event or a
+ * timeout ends the request (and a timeout discards the connection).
+ */
 function requestOn<T>(
   current: Socket,
   scope: number,
@@ -77,6 +99,12 @@ function requestOn<T>(
     if (current !== socket || !current.connected || epoch !== connectionEpoch)
       throw new ServiceError('NETWORK');
     if (allowed && !allowed()) throw new ServiceError('FORBIDDEN');
+    const legacy = !acks;
+    // Object (or empty) payloads can carry the flag; joinGroup's bare ID cannot.
+    const body =
+      payload === undefined || (payload !== null && typeof payload === 'object')
+        ? { ...(payload as object | undefined), reply: 'ack' }
+        : payload;
     return new Promise<T>((resolve, reject) => {
       let settled = false;
       const cleanup = () => {
@@ -86,14 +114,30 @@ function requestOn<T>(
         current.off('disconnect', cancel);
         pending.delete(cancel);
       };
+      const finish = (data: T) => {
+        if (!isSessionCurrent(scope) || current !== socket || epoch !== connectionEpoch)
+          reject(new ServiceError('FORBIDDEN'));
+        else resolve(data);
+      };
       const success = (data: T) => {
         if (settled) return;
         if (matches && !matches(data)) return;
         settled = true;
         cleanup();
-        if (!isSessionCurrent(scope) || current !== socket || epoch !== connectionEpoch)
-          reject(new ServiceError('FORBIDDEN'));
-        else resolve(data);
+        finish(data);
+      };
+      const acknowledged = (value: unknown) => {
+        if (settled) return;
+        if (!isAckReply(value)) {
+          // A legacy acknowledgement; replies sent as events arrive through `success`.
+          if (!reply) success(value as T);
+          return;
+        }
+        if (current === socket && epoch === connectionEpoch) acks = true;
+        if (!value.ok) return fail(value.error);
+        settled = true;
+        cleanup();
+        finish(value.data as T);
       };
       const cancel = () => {
         if (settled) return;
@@ -125,20 +169,23 @@ function requestOn<T>(
       };
       const timer = setTimeout(() => {
         cancel();
-        // Discard this connection so late responses cannot satisfy another request.
-        if (current === socket) {
+        // Uncorrelated replies: discard this connection so a late one cannot
+        // satisfy another request. Acknowledged requests just fail.
+        if (legacy && current === socket) {
           current.disconnect();
           current.connect();
         }
       }, 15000);
       pending.add(cancel);
-      if (reply) current.on(reply, success);
-      current.once('error', fail);
+      if (legacy) {
+        if (reply) current.on(reply, success);
+        current.once('error', fail);
+      }
       current.once('disconnect', cancel);
-      if (reply) current.emit(event, payload);
-      else current.emit(event, payload, success);
+      current.emit(event, body, acknowledged);
     });
   };
+  if (acks) return operation();
   const result = queue.then(operation, operation);
   queue = result.catch(() => undefined);
   return result;
@@ -175,7 +222,42 @@ async function historyOn(
   const parsed = rows.map(parseMessage);
   if (parsed.some((row) => !row || conversationKey(row) !== key)) throw new ServiceError('UNKNOWN');
   const messages = parsed.map((row) => mapMessage(row, key));
-  return reconcileHistory(key, messages, started, HISTORY_PAGE, before);
+  const merged = reconcileHistory(key, messages, started, HISTORY_PAGE, before);
+  // Deletions are live events, so only time offline can hide one: recheck the
+  // older rows kept beside a full newest page once per connection.
+  if (!before && messages.length === HISTORY_PAGE && acks && !verified.has(key)) {
+    verified.add(key);
+    void dropDeletedOlder(current, scope, key, messages[0]!).catch(() => verified.delete(key));
+  }
+  return merged;
+}
+/** Removes cached messages older than `oldest` that no longer exist on the server. */
+async function dropDeletedOlder(
+  current: Socket,
+  scope: number,
+  key: string,
+  oldest: Message,
+): Promise<void> {
+  const [kind, id] = key.split(':');
+  const rows = (queryClient.getQueryData<Message[]>(queryKeys.messages(key)) ?? [])
+    .filter((row) => row.id !== oldest.id && Date.parse(row.createdAt) <= Date.parse(oldest.createdAt))
+    .slice(-VERIFY_LIMIT);
+  if (!rows.length) return;
+  const ids = rows.map((row) => row.id);
+  const existing = await requestOn<unknown>(
+    current,
+    scope,
+    'verifyMessages',
+    undefined,
+    kind === 'group' ? { groupId: id, ids } : { user2: id, ids },
+    undefined,
+    undefined,
+    true,
+  );
+  assertSessionCurrent(scope);
+  if (!Array.isArray(existing)) throw new ServiceError('UNKNOWN');
+  const kept = new Set(existing);
+  for (const row of rows) if (!kept.has(row.id)) mergeMessage(row, true);
 }
 /** Access to a conversation ended (e.g. removed from a group while offline). */
 const accessLost = (error: unknown) =>
@@ -326,6 +408,9 @@ export async function connectSocket(): Promise<Socket> {
     current.on('connect', () => {
       if (!valid()) return;
       setChatReady(false);
+      // A reconnect may reach a server of another version; learn it again.
+      acks = false;
+      verified.clear();
       const epoch = ++connectionEpoch;
       sync = resync(current, scope, epoch);
       void sync.catch(() => {

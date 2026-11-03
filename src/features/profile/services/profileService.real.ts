@@ -22,6 +22,7 @@ export function mapProfile(user: PublicProfile): ProfileView {
     followers: user.followers, following: user.following,
     name: displayName(user),
     avatarUri: mediaUrl(user.avatar),
+    avatarThumbUri: mediaUrl(user.avatarThumbnail) || undefined,
     photos: user.avatar ? [mediaUrl(user.avatar)] : [],
     presence:
       typeof user.isOnline === 'boolean'

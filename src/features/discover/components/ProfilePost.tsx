@@ -111,7 +111,7 @@ export const ProfilePost = memo(function ProfilePost({
         onPress={open}
       >
         <Avatar
-          uri={profile.avatarUri}
+          uri={profile.avatarThumbUri || profile.avatarUri}
           label={profile.name}
           size={40}
           online={showPresence && Boolean(profile.presence?.online)}

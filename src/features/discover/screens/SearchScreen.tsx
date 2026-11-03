@@ -38,7 +38,7 @@ const ResultRow = memo(function ResultRow({
       ]}
     >
       <Avatar
-        uri={profile.avatarUri}
+        uri={profile.avatarThumbUri || profile.avatarUri}
         label={profile.name}
         size={44}
         online={showPresence && Boolean(profile.presence?.online)}

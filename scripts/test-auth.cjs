@@ -409,7 +409,7 @@ test('real group and message writes send confirmed DTOs with idempotency keys an
   assert.deepEqual(requests[2].body, { receiver: other, message: 'Hello' });
 });
 
-test('B inbox uses confirmed REST lists, preserves array unread, and fails closed on malformed lists', async () => {
+test('B inbox falls back to REST participant lists, preserves array unread, and fails closed on malformed lists', async () => {
   const h = harness({
     'react-native': { Platform: { OS: 'android' } },
     './socketSession': { refreshUnread: async () => {} },
@@ -430,6 +430,7 @@ test('B inbox uses confirmed REST lists, preserves array unread, and fails close
   const calls = [];
   h.apiClient.defaults.adapter = async (config) => {
     calls.push(config.url);
+    if (config.url === '/chats/conversations') throw notFound(config);
     return h.ok(
       config,
       config.url === '/users/chatlist'
@@ -439,15 +440,70 @@ test('B inbox uses confirmed REST lists, preserves array unread, and fails close
   };
   const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
   const rows = await service.listConversations();
-  assert.deepEqual(calls.sort(), ['/groups/my-groups', '/users/chatlist']);
+  assert.deepEqual(calls.sort(), ['/chats/conversations', '/groups/my-groups', '/users/chatlist']);
   assert.equal(rows[0].participant.name, 'Peer');
   assert.equal(rows[0].unreadCount, 1);
   assert.equal(rows[0].presence, null);
   assert.equal(rows[0].previewState, 'loading');
   assert.equal(state.acceptUnread({ count: 999 }), false);
   assert.equal(state.unreadFor('user:' + other), 1);
-  h.apiClient.defaults.adapter = async (config) => h.ok(config, {});
+  h.apiClient.defaults.adapter = async (config) => {
+    if (config.url === '/chats/conversations') throw notFound(config);
+    return h.ok(config, {});
+  };
   await assert.rejects(service.listConversations());
+});
+
+function notFound(config) {
+  const response = { status: 404, statusText: 'Not Found', headers: {}, config, data: { statusCode: 404 } };
+  return new axios.AxiosError('Not Found', 'ERR_BAD_REQUEST', config, undefined, response);
+}
+
+test('B inbox reads every conversation with its newest message in one request', async () => {
+  const h = harness({
+    'react-native': { Platform: { OS: 'android' } },
+    './socketSession': { refreshUnread: async () => {} },
+  });
+  const me = '111111111111111111111111',
+    other = '222222222222222222222222',
+    group = '333333333333333333333333';
+  h.runtime.setSessionIdentity(me, h.token(me));
+  const calls = [];
+  h.apiClient.defaults.adapter = async (config) => {
+    calls.push(config.url);
+    return h.ok(config, {
+      conversations: [
+        {
+          id: 'group:' + group,
+          kind: 'group',
+          group: { _id: group, name: 'Crew', admin: me, memberCount: 3, createdAt: '2026-10-01T00:00:00Z' },
+          lastMessage: { _id: '555555555555555555555555', sender: other, groupId: group, message: 'Group hi', sentAt: '2026-10-16T00:00:00Z' },
+          unreadCount: 4,
+          updatedAt: '2026-10-16T00:00:00Z',
+        },
+        {
+          id: 'user:' + other,
+          kind: 'direct',
+          peer: { _id: other, displayname: 'Peer' },
+          lastMessage: { _id: '444444444444444444444444', sender: other, receiver: me, message: 'Direct hi', sentAt: '2026-10-15T00:00:00Z' },
+          unreadCount: 1,
+          updatedAt: '2026-10-15T00:00:00Z',
+        },
+      ],
+    });
+  };
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  const rows = await service.listConversations();
+  assert.deepEqual([...calls], ['/chats/conversations']);
+  assert.deepEqual([...rows.map((row) => row.id)], ['group:' + group, 'user:' + other]);
+  assert.deepEqual([...rows.map((row) => row.previewState)], ['loaded', 'loaded']);
+  assert.deepEqual([...rows.map((row) => row.lastMessage.text)], ['Group hi', 'Direct hi']);
+  assert.equal(rows[0].memberCount, 3);
+  assert.equal(rows[1].participant.name, 'Peer');
+  assert.equal(rows[1].updatedAt, '2026-10-15T00:00:00Z');
+  // Group unread needs per-member read cursors this client does not send.
+  assert.equal(rows[0].unreadCount, 0);
+  h.runtime.teardownSession();
 });
 
 test('B previews, last activity, loaded-message local search and visibility polling', () => {
@@ -516,6 +572,7 @@ test('B many-chat load measures request payloads, caps prefetch and pauses betwe
     peak = 0;
   h.apiClient.defaults.adapter = async (config) => {
     http++;
+    if (config.url === '/chats/conversations') throw notFound(config);
     const data = config.url === '/users/chatlist' ? { userChatlist: people } : groups;
     const response = h.ok(config, data);
     bytes += Buffer.byteLength(JSON.stringify(response.data));
@@ -548,7 +605,7 @@ test('B many-chat load measures request payloads, caps prefetch and pauses betwe
   await inbox.prefetchInbox(rows, load, () => true);
   assert.equal(peak, inbox.INBOX_PREFETCH_CONCURRENCY);
   assert.equal(histories, 50);
-  assert.equal(http, 2);
+  assert.equal(http, 3);
   await until(() => h.sockets[0].packets.filter((p) => p.name === 'getUnreadCount').length === 2);
   const packets = h.sockets[0].packets;
   t.diagnostic(
@@ -760,7 +817,7 @@ async function until(condition) {
   assert.fail('Expected asynchronous condition did not complete');
 }
 
-function chatHarness(overrides = {}) {
+function chatHarness(overrides = {}, server = {}) {
   const { EventEmitter } = require('node:events');
   const sockets = [];
   const history = new Map();
@@ -785,6 +842,22 @@ function chatHarness(overrides = {}) {
     }
     emit(name, payload, ack) {
       this.packets.push({ name, payload });
+      if (server.acks && payload && typeof payload === 'object' && payload.reply === 'ack') {
+        const answer = (data, delay = 0) => setTimeout(() => ack({ ok: true, data }), delay);
+        const rows = history.get(payload.user2 ?? payload.groupId) ?? [];
+        if (name === 'getChatHistory' || name === 'getGroupChatHistory') {
+          const end = payload.before ? rows.findIndex((row) => row._id === payload.before) : rows.length;
+          answer(rows.slice(Math.max(0, end - (payload.limit ?? rows.length)), end));
+        } else if (name === 'getUnreadCount' || name === 'markAsRead') answer([]);
+        else if (name === 'verifyMessages')
+          answer(payload.ids.filter((id) => rows.some((row) => row._id === id)));
+        else if (name === 'deleteMessage') {
+          const message = [...history.values()].flat().find((row) => row._id === payload.messageId);
+          setTimeout(() => this.server('messageDeleted', { ...message, messageId: payload.messageId }), 0);
+          answer({ ...message, messageId: payload.messageId }, server.deleteDelay ?? 0);
+        }
+        return true;
+      }
       if (name === 'updateMessage' || name === 'deleteMessage') {
         const message = [...history.values()].flat().find((row) => row._id === payload.messageId);
         setTimeout(() => {
@@ -1632,7 +1705,7 @@ test('history pages keep joined older rows, never bridge a gap and request 50 at
 
   await h.transport.getHistory(key);
   const request = h.sockets[0].packets.find((packet) => packet.name === 'getChatHistory');
-  assert.equal(JSON.stringify(request.payload), JSON.stringify({ user2: h.other, limit: 50 }));
+  assert.equal(JSON.stringify(request.payload), JSON.stringify({ user2: h.other, limit: 50, reply: 'ack' }));
   h.runtime.teardownSession();
 });
 
@@ -1667,6 +1740,46 @@ test('a reconnect while a chat is open does not leave deletes waiting on its own
   await service.deleteMessage(key, own._id);
   assert.equal(queryClient.getQueryData(['chat', 'messages', key]).length, 0);
   unsubscribe();
+  h.runtime.teardownSession();
+});
+
+test('acknowledged requests survive unrelated errors; offline deletions drop on reconnect', async () => {
+  const h = chatHarness({}, { acks: true, deleteDelay: 30 });
+  const key = `user:${h.other}`;
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  const rows = Array.from({ length: 60 }, (_, i) =>
+    backendMessage(h.me, h.other, {
+      _id: (i + 1).toString(16).padStart(24, '0'),
+      sender: h.me,
+      receiver: h.other,
+      sentAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(),
+      message: 'm' + i,
+    }),
+  );
+  h.history.set(h.other, rows);
+  const texts = () => [...h.queryData.get(JSON.stringify(['chat', 'messages', key])).map((row) => row.text)];
+  await service.listMessages(key);
+  assert.equal(texts().length, 50);
+  await service.loadOlderMessages(key);
+  assert.equal(texts().length, 60);
+  assert.equal(h.state.hasOlderHistory(key), false);
+
+  // Another request's error event cannot fail an acknowledged delete.
+  const socket = h.sockets[0];
+  socket.on('error', () => {});
+  const deleting = service.deleteMessage(key, rows[59]._id);
+  socket.server('error', { statusCode: 400, message: 'typing failed' });
+  await deleting;
+  assert.ok(!texts().includes('m59'));
+
+  // Deleted while offline and older than the newest page: dropped after reconnecting.
+  h.history.set(h.other, rows.filter((row) => !['m3', 'm59'].includes(row.message)));
+  socket.disconnect();
+  socket.connect();
+  await until(() => h.state.useChatConnection.getState().ready);
+  await until(() => !texts().includes('m3'));
+  assert.equal(texts().length, 58);
+  assert.ok(socket.packets.some((packet) => packet.name === 'verifyMessages'));
   h.runtime.teardownSession();
 });
 
@@ -2154,7 +2267,7 @@ test('C edit/delete own messages use confirmed events and merge incoming changes
   const edit = h.sockets[0].packets.find((p) => p.name === 'updateMessage');
   assert.equal(
     JSON.stringify(edit.payload),
-    JSON.stringify({ messageId: own._id, newMessage: 'Changed' }),
+    JSON.stringify({ messageId: own._id, newMessage: 'Changed', reply: 'ack' }),
   );
   h.sockets[0].server('messageUpdated', { ...own, message: 'Remote edit' });
   assert.equal(cache()[0].text, 'Remote edit');

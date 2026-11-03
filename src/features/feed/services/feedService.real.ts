@@ -100,6 +100,7 @@ function mapPostImages(raw: MediaSource): PostMedia[] {
       .map((image, index) => ({
         id: image.id || `${raw._id}:${index}`,
         uri: mediaUrl(image.url),
+        thumbnailUri: mediaUrl(image.thumbnailUrl) || undefined,
         blurhash: image.blurhash,
         width: size(image.width),
         height: size(image.height),

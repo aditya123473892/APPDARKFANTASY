@@ -83,6 +83,24 @@ export function updateCachedPost(
     client.setQueriesData<Post[]>({ queryKey }, (posts) => (posts ? apply(posts) : posts));
 }
 
+/** Shows a post the viewer just created, at the top of the feed, then refreshes. */
+export function insertCreatedPost(client: QueryClient, post: Post): void {
+  if (post.status === 'approved' && post.audience === 'everyone')
+    client.setQueryData<InfiniteData<FeedPage>>(queryKeys.feed, (data) =>
+      data?.pages.length
+        ? {
+            ...data,
+            pages: [
+              { ...data.pages[0]!, posts: [post, ...data.pages[0]!.posts] },
+              ...data.pages.slice(1),
+            ],
+          }
+        : data,
+    );
+  void client.invalidateQueries({ queryKey: queryKeys.myPosts });
+  void client.invalidateQueries({ queryKey: queryKeys.feed });
+}
+
 export function useCreatePost() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -91,20 +109,7 @@ export function useCreatePost() {
     onMutate: () => sessionIdentity.userId,
     onSuccess: (post, _input, identity) => {
       if (!identity || identity !== sessionIdentity.userId) return;
-      if (post.status === 'approved' && post.audience === 'everyone')
-        queryClient.setQueryData<InfiniteData<FeedPage>>(queryKeys.feed, (data) =>
-          data?.pages.length
-            ? {
-                ...data,
-                pages: [
-                  { ...data.pages[0]!, posts: [post, ...data.pages[0]!.posts] },
-                  ...data.pages.slice(1),
-                ],
-              }
-            : data,
-        );
-      void queryClient.invalidateQueries({ queryKey: queryKeys.myPosts });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.feed });
+      insertCreatedPost(queryClient, post);
     },
   });
 }

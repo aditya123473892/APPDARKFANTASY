@@ -8,10 +8,8 @@ import { Header, Screen, KeyboardAvoidingScreen, useSafeBack } from '@/component
 import { Button, Text } from '@/components/ui';
 import { PostCarousel } from '@/components/ui/PostCarousel';
 import { Pressable } from '@/components/ui/Pressable';
-import { toast } from '@/components/ui/Toast';
-import { useCreatePost } from '@/features/feed/hooks/useFeed';
-import type { ContentVisibility, PostAudience, UploadAsset } from '@/features/feed/types';
 import { mediaPreviews } from '@/features/feed/presentation';
+import type { ContentVisibility, PostAudience, UploadAsset } from '@/features/feed/types';
 import { usePhotoDraftCleanup } from '@/hooks/usePhotoDraftCleanup';
 import { createClientId } from '@/utils/clientId';
 import { describeError, ServiceError } from '@/services/errors';
@@ -19,7 +17,8 @@ import { radius, spacing, typography } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { pickPostMedia, POST_MAX_PHOTOS, type SelectedMedia } from '../singleMedia';
 import { RecentMediaGrid } from '../RecentMediaGrid';
-import { uploadPostMedia } from '../uploadSingleMedia';
+import { enqueuePost } from '../postQueue';
+import { validatePostAssets } from '../postMediaSelection';
 import { ASPECTS, aspectRatioOf, cropToAspect, type AspectChoice } from '../cropMedia';
 import { dialog } from '@/components/ui/dialogStore';
 const isVideoAsset = (item: SelectedMedia) => item.asset.type.startsWith('video/');
@@ -40,11 +39,9 @@ export function CreatePostScreen() {
   const [error, setError] = useState('');
   const [picking, setPicking] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const clientId = useRef(createClientId());
-  const create = useCreatePost();
-  usePhotoDraftCleanup([...selected.map((item) => item.asset), ...cropped]);
+  const handOff = usePhotoDraftCleanup([...selected.map((item) => item.asset), ...cropped]);
   const photosOnly = selected.length > 0 && !selected.some((item) => isVideoAsset(item));
   const cropRatio = photosOnly ? aspectRatioOf(aspect) : undefined;
   const disablePrevention = usePreventRemove(
@@ -120,10 +117,10 @@ export function CreatePostScreen() {
     setError('');
     clientId.current = createClientId();
   };
+  /** Uploading continues in the background; the feed shows its progress. */
   const publish = async () => {
     if (!selected.length || publishing || caption.length > 500) return;
     setPublishing(true);
-    setProgress(0);
     setError('');
     try {
       const assets = await uploadAssets().catch(() => {
@@ -132,32 +129,26 @@ export function CreatePostScreen() {
           "Couldn't crop your photos. Choose Original or try again.",
         );
       });
-      const post = await uploadPostMedia(
-        {
+      validatePostAssets(assets);
+      // The background upload owns these files now (and deletes them when done).
+      handOff(assets);
+      enqueuePost({
+        id: clientId.current,
+        input: {
           body: caption.trim(),
           assets,
           audience,
           contentVisibility: visibility,
           clientId: clientId.current,
         },
-        create.mutateAsync,
-        setProgress,
-      );
-      // The stored width/height now carry the chosen shape, so no ratio override is kept.
-      post.media?.forEach((item, index) => {
-        if (item.uri)
-          mediaPreviews.set(item.uri, {
-            thumbnail: selected[index]?.thumbnail,
-            duration: selected[index]?.duration,
-            location: location.trim(),
-          });
+        cover: assets[0]?.type.startsWith('image/') ? assets[0].uri : selected[0]?.thumbnail,
+        // The stored width/height carry the chosen shape, so no ratio override is kept.
+        previews: selected.map((item) => ({ thumbnail: item.thumbnail, duration: item.duration })),
+        location: location.trim(),
       });
       setSubmitted(true);
       disablePrevention();
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-        () => undefined,
-      );
-      toast.success(post.status === 'approved' ? 'Post published' : 'Post submitted for approval');
+      void Haptics.selectionAsync().catch(() => undefined);
       close();
     } catch (cause) {
       setError(describeError(cause, "Couldn't publish. Your draft is still here."));
@@ -496,25 +487,6 @@ export function CreatePostScreen() {
                 <Text accessibilityLiveRegion="polite" color="danger">
                   {error}
                 </Text>
-              ) : null}
-              {publishing ? (
-                <View
-                  accessibilityRole="progressbar"
-                  accessibilityValue={{ min: 0, max: 100, now: progress }}
-                >
-                  <View style={{ height: 3, backgroundColor: theme.colors.surfaceMuted }}>
-                    <View
-                      style={{
-                        height: 3,
-                        width: `${progress}%`,
-                        backgroundColor: theme.colors.primary,
-                      }}
-                    />
-                  </View>
-                  <Text variant="caption" color="muted">
-                    {progress ? `Uploading ${Math.round(progress)}%` : 'Preparing upload…'}
-                  </Text>
-                </View>
               ) : null}
               <Button
                 label={publishing ? 'Posting…' : 'Post'}

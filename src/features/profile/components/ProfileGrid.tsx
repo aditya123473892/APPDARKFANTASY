@@ -61,7 +61,10 @@ const GridTile = memo(function GridTile({
   const video = isVideo(media);
   const preview = mediaPreviews.get(media?.uri ?? '');
   const locked = Boolean(post.locked || media?.locked);
-  const uri = video ? preview?.thumbnail : media?.uri;
+  const thumbnail = !video && media?.thumbnailUri;
+  // The same key as the feed for originals, so photos already seen there are reused.
+  const gridKey = media ? `${mediaCacheKey(media)}${thumbnail ? ':thumb' : ''}` : undefined;
+  const uri = video ? preview?.thumbnail : thumbnail || media?.uri;
   return (
     <Pressable
       accessibilityLabel={`Open ${video ? 'video' : 'image'} post by ${post.user.name}`}
@@ -76,8 +79,8 @@ const GridTile = memo(function GridTile({
       {!locked && media && uri ? (
         <Image
           // The same key as the feed, so photos already seen there are not downloaded again.
-          source={video ? { uri } : { uri, cacheKey: mediaCacheKey(media) }}
-          recyclingKey={video ? uri : mediaCacheKey(media)}
+          source={video ? { uri } : { uri, cacheKey: gridKey }}
+          recyclingKey={video ? uri : gridKey}
           contentFit="cover"
           cachePolicy="memory-disk"
           style={{ width: '100%', height: '100%' }}

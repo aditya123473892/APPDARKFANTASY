@@ -38,6 +38,7 @@ import {
   watchHistory,
   reconcileHistory,
 } from './chatState';
+import { messagePreview } from './inbox';
 import type { ChatService } from './chatService';
 import type { Conversation, Message } from '../types';
 import { isPeerBlocked } from '@/features/safety/blockState';
@@ -123,34 +124,84 @@ async function httpHistory(key: string): Promise<Message[]> {
   );
 }
 
+/** Every conversation with its newest message, in one request; null if the server predates it. */
+async function conversationSummaries(): Promise<Conversation[] | null> {
+  let rows: unknown;
+  try {
+    rows = (await getData<{ conversations: unknown[] }>('/chats/conversations'))?.conversations;
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === 'NOT_FOUND') return null;
+    throw error;
+  }
+  if (!Array.isArray(rows)) throw new ServiceError('UNKNOWN');
+  const result: Conversation[] = [];
+  for (const row of rows as Record<string, unknown>[]) {
+    let item: Conversation;
+    if (row?.kind === 'direct') {
+      const user = parseUserSummary(row.peer);
+      if (!user) throw new ServiceError('UNKNOWN');
+      if (user._id === sessionIdentity.userId || isPeerBlocked(user._id)) continue;
+      item = directConversation(user);
+    } else if (row?.kind === 'group') {
+      const group = row.group as BackendGroup | undefined;
+      if (!group || !isObjectId(String(group._id)) || typeof group.name !== 'string')
+        throw new ServiceError('UNKNOWN');
+      item = groupConversation({ ...group, _id: String(group._id), admin: String(group.admin) });
+    } else continue;
+    const raw = parseMessage(row.lastMessage);
+    const message = raw && conversationKey(raw) === item.id ? mapMessage(raw, item.id) : undefined;
+    item.previewState = 'loaded';
+    item.lastMessage = message ? messagePreview(message) : null;
+    if (message) item.updatedAt = message.createdAt;
+    result.push(item);
+  }
+  return result;
+}
+/** Participant lists only; each preview comes from that conversation's history. */
+async function legacyConversations(): Promise<Conversation[]> {
+  const [people, groups] = await Promise.all([
+    getData<{ userChatlist: unknown[] }>('/users/chatlist'),
+    getData<BackendGroup[]>('/groups/my-groups'),
+  ]);
+  if (!Array.isArray(people?.userChatlist) || !Array.isArray(groups))
+    throw new ServiceError('UNKNOWN');
+  const direct = people.userChatlist.map(parseUserSummary);
+  if (direct.some((row) => !row)) throw new ServiceError('UNKNOWN');
+  if (groups.some((group) => !group || !isObjectId(group._id) || typeof group.name !== 'string'))
+    throw new ServiceError('UNKNOWN');
+  return [
+    ...direct
+      .filter((row) => row && row._id !== sessionIdentity.userId && !isPeerBlocked(row._id))
+      .map((row) => directConversation(row!)),
+    ...groups.map(groupConversation),
+  ];
+}
+
 export const realChatService: ChatService = {
   async listConversations() {
     const scope = sessionIdentity.generation;
-    const [people, groups] = await Promise.all([
-      getData<{ userChatlist: unknown[] }>('/users/chatlist'),
-      getData<BackendGroup[]>('/groups/my-groups'),
-    ]);
+    const summaries = await conversationSummaries();
     assertSessionCurrent(scope);
-    if (!Array.isArray(people?.userChatlist) || !Array.isArray(groups))
-      throw new ServiceError('UNKNOWN');
-    const direct = people.userChatlist.map(parseUserSummary);
-    if (direct.some((row) => !row)) throw new ServiceError('UNKNOWN');
-    if (groups.some((group) => !group || !isObjectId(group._id) || typeof group.name !== 'string'))
-      throw new ServiceError('UNKNOWN');
-    const result = [
-      ...direct
-        .filter((row) => row && row._id !== sessionIdentity.userId && !isPeerBlocked(row._id))
-        .map((row) => directConversation(row!)),
-      ...groups.map(groupConversation),
-    ];
+    const result = summaries ?? (await legacyConversations());
+    assertSessionCurrent(scope);
     const current = queryClient.getQueryData<Conversation[]>(queryKeys.conversations) ?? [];
     for (const item of result) {
       const previous = current.find((row) => row.id === item.id);
+      // A live message can be newer than the server's snapshot.
+      const newer =
+        previous?.lastMessage &&
+        (!summaries ||
+          !item.lastMessage ||
+          Date.parse(previous.updatedAt) > Date.parse(item.updatedAt));
       if (previous)
         Object.assign(item, {
-          lastMessage: previous.lastMessage,
-          updatedAt: previous.updatedAt,
-          previewState: previous.previewState,
+          ...(newer || !summaries
+            ? {
+                lastMessage: previous.lastMessage,
+                updatedAt: previous.updatedAt,
+                previewState: previous.previewState,
+              }
+            : {}),
           historyLoaded: previous.historyLoaded,
         });
       item.unreadCount = unreadFor(item.id);

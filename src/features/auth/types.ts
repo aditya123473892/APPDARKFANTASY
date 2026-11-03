@@ -33,6 +33,8 @@ export type UserView = {
   bio: string;
   interests: string[];
   avatarUri: string;
+  /** Grid-sized avatar for small avatars; falls back to avatarUri. */
+  avatarThumbUri?: string;
   /** Optional, backwards-compatible profile fields. */
   location?: string;
   distanceKm?: number;

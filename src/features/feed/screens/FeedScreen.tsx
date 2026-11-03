@@ -13,6 +13,7 @@ import { spacing } from '@/theme';
 import { useFeed, useToggleLike } from '../hooks/useFeed';
 import type { Post } from '../types';
 import { Pressable } from '@/components/ui/Pressable';
+import { PendingPosts } from '@/features/create-post/PendingPosts';
 
 export function FeedScreen() {
   const router = useRouter();
@@ -63,6 +64,7 @@ export function FeedScreen() {
       {feed.isRefetchError && feed.data ? (
         <OfflineBanner message="Can't refresh right now. Showing saved posts." />
       ) : null}
+      <PendingPosts />
       {feed.isPending ? (
         <View>
           <Skeleton style={{ height: 56, margin: spacing.md }} />

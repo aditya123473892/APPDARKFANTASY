@@ -22,6 +22,8 @@ export type User = {
   gender?: string;
   age?: number;
   avatar?: string;
+  /** Grid-sized copy of the avatar; '' until the server has made one. */
+  avatarThumbnail?: string;
   bio?: string;
   posts?: number;
   followers?: number;

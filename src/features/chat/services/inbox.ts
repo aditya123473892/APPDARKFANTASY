@@ -6,8 +6,8 @@ import { userCache } from '@/features/auth/userCache';
 import { displayName } from '@/features/auth/userModel';
 import { previewText } from './chatPayload';
 
-// Uncorrelated history replies require one request at a time on this connection.
-export const INBOX_PREFETCH_CONCURRENCY = 1;
+// Search downloads; a server without acknowledged replies serializes them anyway.
+export const INBOX_PREFETCH_CONCURRENCY = 3;
 export const INBOX_POLL_MS = 30_000;
 export const LOCAL_SEARCH_LABEL = 'Local search';
 export const pollingEnabled = (focused: boolean, state: string) => focused && state === 'active';
