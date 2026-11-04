@@ -50,9 +50,4 @@ export const useOutbox = create<OutboxState>((set) => ({
   clear: () => set({ items: {} }),
 }));
 
-export function disconnectSending(): void {
-  const state = useOutbox.getState();
-  for (const item of Object.values(state.items))
-    if (item.status === 'sending') state.setStatus(item.clientId, 'uncertain');
-}
 registerSessionTeardown(() => useOutbox.getState().clear());

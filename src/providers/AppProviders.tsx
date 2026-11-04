@@ -14,12 +14,17 @@ import { lock } from '@/features/vault/lock';
 import { localOwner, rememberOwner } from '@/features/vault/vaultService';
 import { AppLockBoundary } from '@/features/app-lock/AppLockBoundary';
 import { VaultPinPrompt } from '@/features/vault/components/VaultPinPrompt';
+import { startChatCache, wipeChatCache } from '@/features/chat/services/chatCache';
 // The local Photo Vault is device-only: it needs SecureStore and on-device
 // files, neither of which exists on web, where registering it made every
 // sign-in fail after the server had accepted the code.
 if (Platform.OS !== 'web')
   registerLocalVaultLifecycle({
-    logout: beforeLogout,
+    // Runs only on an explicit logout, after the vault agrees to it.
+    logout: async (discard) => {
+      await beforeLogout(discard);
+      await wipeChatCache();
+    },
     pause: lock,
     signIn: async (owner) => {
       const previous = await localOwner();
@@ -43,7 +48,12 @@ export function AppProviders({ children }: PropsWithChildren): React.JSX.Element
   useAppFocusManager();
   useEffect(() => {
     void cleanupStartup().catch(() => undefined);
-    return startSync();
+    const stopSync = startSync();
+    const stopChatCache = startChatCache();
+    return () => {
+      stopSync();
+      stopChatCache();
+    };
   }, []);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

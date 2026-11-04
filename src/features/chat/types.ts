@@ -43,9 +43,13 @@ export type Conversation = {
     senderName?: string;
     createdAt: string;
     status?: MessageStatus;
+    /** From a disappearing or view-once message; never saved on the device. */
+    ephemeral?: boolean;
   } | null;
   previewState?: 'loading' | 'loaded' | 'error';
   historyLoaded?: boolean;
+  /** Shown from the on-device cache until the server's list replaces it. */
+  restored?: boolean;
   unreadCount: number;
   presence: Presence | null;
   createdAt: string;

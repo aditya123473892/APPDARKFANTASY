@@ -17,6 +17,7 @@
     "test:premium": "node --test scripts/test-premium.cjs",
     "test:feed-ui": "node --test scripts/test-image-layout.cjs scripts/test-single-media.cjs",
     "test:vault": "node --test scripts/test-vault.cjs",
+    "test:chat-cache": "node --test scripts/test-chat-cache.cjs",
     "test:reliability": "node --test scripts/test-reliability.cjs",
     "test:release": "node --test scripts/test-release.cjs",
     "release:check": "node scripts/check-release.cjs",

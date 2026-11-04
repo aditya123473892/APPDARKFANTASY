@@ -30,7 +30,6 @@ import {
 } from './chatState';
 import { senderId } from '@/features/auth/userCache';
 import { setTyping } from '../store/typingStore';
-import { disconnectSending } from '../store/outboxStore';
 import { refreshBlockState } from '@/features/safety/blocks';
 import { isPeerBlocked, useBlockState } from '@/features/safety/blockState';
 import { invalidateSafety, safetyQuery } from '@/features/safety/blockCache';
@@ -49,6 +48,21 @@ const groups = new Set<string>();
 const verified = new Set<string>();
 /** Older cached messages rechecked per conversation (the server's limit). */
 const VERIFY_LIMIT = 500;
+/**
+ * Newest pages loaded on this connection. A chat opened right after a reconnect
+ * reuses the page its resync just loaded; live events keep it current after that.
+ */
+const freshHistory = new Map<string, { epoch: number; at: number }>();
+const FRESH_HISTORY_MS = 5_000;
+/** Unread counts also arrive with every resync and live; a recent answer is reused. */
+const FRESH_UNREAD_MS = 10_000;
+let unreadAt = 0;
+let unreadEpoch = -1;
+let unreadRequest: Promise<void> | undefined;
+function unreadAnswered(): void {
+  unreadAt = Date.now();
+  unreadEpoch = connectionEpoch;
+}
 function resetSocket(clearRooms = true): void {
   connectionEpoch++;
   pending.forEach((cancel) => cancel());
@@ -61,6 +75,9 @@ function resetSocket(clearRooms = true): void {
   queue = Promise.resolve();
   acks = false;
   verified.clear();
+  freshHistory.clear();
+  unreadEpoch = -1;
+  unreadRequest = undefined;
   if (clearRooms) groups.clear();
   setChatReady(false);
 }
@@ -206,6 +223,7 @@ async function historyOn(
     throw new ServiceError('NOT_FOUND');
   watchHistory(key);
   const started = historyVersion();
+  const epoch = connectionEpoch;
   const page = { limit: HISTORY_PAGE, ...(before ? { before: before.id } : {}) };
   const rows = await requestOn<unknown>(
     current,
@@ -223,6 +241,7 @@ async function historyOn(
   if (parsed.some((row) => !row || conversationKey(row) !== key)) throw new ServiceError('UNKNOWN');
   const messages = parsed.map((row) => mapMessage(row, key));
   const merged = reconcileHistory(key, messages, started, HISTORY_PAGE, before);
+  if (!before && epoch === connectionEpoch) freshHistory.set(key, { epoch, at: Date.now() });
   // Deletions are live events, so only time offline can hide one: recheck the
   // older rows kept beside a full newest page once per connection.
   if (!before && messages.length === HISTORY_PAGE && acks && !verified.has(key)) {
@@ -266,6 +285,17 @@ function forgetGroup(groupId: string): void {
   groups.delete(groupId);
   acceptGroupRemoved({ groupId });
 }
+/**
+ * Runs the first item alone, which tells whether this server correlates replies,
+ * then the rest together. Every chat opened this session is reloaded on reconnect,
+ * so one at a time made each reconnect cost a round trip per conversation.
+ */
+async function eachConcurrently<T>(items: T[], run: (item: T) => Promise<void>): Promise<void> {
+  const [first, ...rest] = items;
+  if (first === undefined) return;
+  await run(first);
+  await Promise.all(rest.map(run));
+}
 async function resync(current: Socket, scope: number, epoch: number): Promise<void> {
   await refreshBlockState();
   // Never await these refetches: an open chat's history query waits for this
@@ -274,15 +304,15 @@ async function resync(current: Socket, scope: number, epoch: number): Promise<vo
   void invalidateSafety({ histories: false }).catch(() => undefined);
   // The server already joins every member room on connect; rejoining orders
   // the room subscription before history so no live message is missed.
-  for (const groupId of [...groups]) {
+  await eachConcurrently([...groups], async (groupId) => {
     try {
       await requestOn(current, scope, 'joinGroup', undefined, groupId, undefined, undefined, true);
     } catch (error) {
       if (!accessLost(error) || !isSessionCurrent(scope)) throw error;
       forgetGroup(groupId);
     }
-  }
-  for (const key of knownHistories()) {
+  });
+  await eachConcurrently(knownHistories(), async (key) => {
     try {
       await historyOn(current, scope, key, true);
     } catch (error) {
@@ -290,10 +320,11 @@ async function resync(current: Socket, scope: number, epoch: number): Promise<vo
       if (key.startsWith('group:')) forgetGroup(key.slice(6));
       else forgetHistory(key);
     }
-  }
+  });
   const unread = await requestOn(current, scope, 'getUnreadCount', 'unreadMessageCount');
   assertSessionCurrent(scope);
   if (!acceptUnread(unread)) throw new ServiceError('UNKNOWN');
+  unreadAnswered();
   if (current !== socket || !current.connected || epoch !== connectionEpoch)
     throw new ServiceError('NETWORK');
   setChatReady(true);
@@ -372,7 +403,7 @@ export async function connectSocket(): Promise<Socket> {
       if (valid()) acceptUnread(raw);
     });
     current.on('unreadMessageCount', (raw) => {
-      if (valid()) acceptUnread(raw);
+      if (valid() && acceptUnread(raw)) unreadAnswered();
     });
     current.on('messagesRead', (raw: unknown) => {
       if (valid() && raw && typeof raw === 'object' && 'userId' in raw && isObjectId(raw.userId))
@@ -399,7 +430,7 @@ export async function connectSocket(): Promise<Socket> {
     });
     current.on('disconnect', (reason) => {
       if (!valid()) return;
-      disconnectSending();
+      // Sends go over HTTP and settle from their own response, not this socket.
       connectionEpoch++;
       sync = undefined;
       setChatReady(false);
@@ -456,6 +487,8 @@ export async function connectSocket(): Promise<Socket> {
   });
   return connecting;
 }
+export const socketConnected = (): boolean =>
+  Boolean(socket?.connected) && socketScope === sessionIdentity.generation;
 /** A stalled resync fails requests instead of leaving them pending forever. */
 const SYNC_TIMEOUT_MS = 20_000;
 export async function ensureChatReady(): Promise<Socket> {
@@ -512,9 +545,19 @@ export async function socketRequest<T>(
 }
 export async function refreshUnread(): Promise<void> {
   const scope = sessionIdentity.generation;
-  const rows = await socketRequest('getUnreadCount', 'unreadMessageCount');
+  await ensureChatReady();
   assertSessionCurrent(scope);
-  if (!acceptUnread(rows)) throw new ServiceError('UNKNOWN');
+  if (unreadEpoch === connectionEpoch && Date.now() - unreadAt < FRESH_UNREAD_MS) return;
+  unreadRequest ??= socketRequest('getUnreadCount', 'unreadMessageCount')
+    .then((rows) => {
+      assertSessionCurrent(scope);
+      if (!acceptUnread(rows)) throw new ServiceError('UNKNOWN');
+      unreadAnswered();
+    })
+    .finally(() => {
+      unreadRequest = undefined;
+    });
+  return unreadRequest;
 }
 /** Socket.IO acknowledgement request (the handler's return value is the reply). */
 export async function socketAck<T>(
@@ -545,6 +588,10 @@ export async function getHistory(key: string): Promise<Message[]> {
   if (key.startsWith('group:')) await joinGroup(key.split(':')[1] ?? '');
   const current = await ensureChatReady();
   assertSessionCurrent(scope);
+  const fresh = freshHistory.get(key);
+  const cached = queryClient.getQueryData<Message[]>(queryKeys.messages(key));
+  if (cached && fresh?.epoch === connectionEpoch && Date.now() - fresh.at < FRESH_HISTORY_MS)
+    return cached;
   return historyOn(current, scope, key);
 }
 /** Loads the page of history just older than the oldest cached message. */

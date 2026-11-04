@@ -418,7 +418,7 @@ test('real group and message writes send confirmed DTOs with idempotency keys an
   assert.equal(sent.id, '444444444444444444444444');
   assert.equal(sent.clientId, 'local-only');
   assert.equal(sent.status, 'sent');
-  assert.equal(unreadRefreshes, 1);
+  assert.equal(unreadRefreshes, 0, 'sending does not change the sender unread count');
   // A malformed key is never sent; the server would reject it.
   await realChatService.sendMessage({
     conversationId: `user:${other}`,
@@ -625,7 +625,10 @@ test('B many-chat load measures request payloads, caps prefetch and pauses betwe
   assert.equal(peak, inbox.INBOX_PREFETCH_CONCURRENCY);
   assert.equal(histories, 50);
   assert.equal(http, 3);
-  await until(() => h.sockets[0].packets.filter((p) => p.name === 'getUnreadCount').length === 2);
+  // The resync's unread answer is reused by the list refresh right after it.
+  await until(() => h.sockets[0].packets.filter((p) => p.name === 'getUnreadCount').length === 1);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(h.sockets[0].packets.filter((p) => p.name === 'getUnreadCount').length, 1);
   const packets = h.sockets[0].packets;
   t.diagnostic(
     JSON.stringify({
@@ -1827,6 +1830,7 @@ test('acknowledged requests survive unrelated errors; offline deletions drop on 
   );
   h.history.set(h.other, rows);
   const texts = () => [...h.queryData.get(JSON.stringify(['chat', 'messages', key])).map((row) => row.text)];
+  await h.transport.ensureChatReady();
   await service.listMessages(key);
   assert.equal(texts().length, 50);
   await service.loadOlderMessages(key);
@@ -1924,6 +1928,57 @@ function rejectOn(socket, event, id, statusCode = 403) {
     return true;
   };
 }
+
+test('a chat opened right after a reconnect reuses the page its resync loaded', async () => {
+  const h = chatHarness({}, { acks: true });
+  const key = `user:${h.other}`;
+  h.history.set(h.other, [backendMessage(h.me, h.other)]);
+  await h.transport.getHistory(key);
+  const socket = h.sockets[0];
+  socket.disconnect();
+  socket.connect();
+  await until(() => h.state.useChatConnection.getState().ready);
+  const loads = () => socket.packets.filter((packet) => packet.name === 'getChatHistory').length;
+  const before = loads();
+  assert.equal((await h.transport.getHistory(key)).length, 1);
+  assert.equal(loads(), before, 'no second request for the page just loaded');
+  h.runtime.teardownSession();
+});
+
+test('a delete hides the message at once and restores it when the server refuses', async () => {
+  const h = chatHarness({}, { acks: true, deleteDelay: 30 });
+  const key = `user:${h.other}`;
+  const own = backendMessage(h.me, h.other, { sender: h.me, receiver: h.other });
+  const kept = backendMessage(h.me, h.other, {
+    _id: 'cccccccccccccccccccccccc',
+    sender: h.me,
+    receiver: h.other,
+  });
+  h.history.set(h.other, [own, kept]);
+  const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  await h.transport.ensureChatReady();
+  await service.listMessages(key);
+  const ids = () =>
+    Array.from(h.queryData.get(JSON.stringify(['chat', 'messages', key])), (row) => row.id);
+  const confirmed = service.deleteMessage(key, own._id);
+  assert.deepEqual(ids(), [kept._id], 'removed before the server confirms');
+  await confirmed;
+  assert.deepEqual(ids(), [kept._id]);
+
+  const socket = h.sockets[0];
+  const original = socket.emit.bind(socket);
+  socket.emit = (name, payload, ack) => {
+    if (name !== 'deleteMessage') return original(name, payload, ack);
+    socket.packets.push({ name, payload });
+    setTimeout(() => ack({ ok: false, error: { statusCode: 500 } }));
+    return true;
+  };
+  const refused = service.deleteMessage(key, kept._id);
+  assert.deepEqual(ids(), []);
+  await assert.rejects(refused);
+  assert.deepEqual(ids(), [kept._id], 'restored after the refusal');
+  h.runtime.teardownSession();
+});
 
 test('groupUpdated refreshes the inbox; groupRemoved drops the group and its resync', async () => {
   const invalidated = [];
@@ -2329,6 +2384,7 @@ test('C edit/delete own messages use confirmed events and merge incoming changes
   const own = backendMessage(h.me, h.other, { sender: h.me, receiver: h.other });
   h.history.set(h.other, [own]);
   const service = h.load('src/features/chat/services/chatService.real.ts').realChatService;
+  await h.transport.ensureChatReady();
   await service.listMessages(key);
   await service.editMessage(key, own._id, 'Changed');
   const cache = () => h.queryData.get(JSON.stringify(['chat', 'messages', key]));
@@ -2587,7 +2643,7 @@ test('C uncertain resend rechecks absence; matching history or resync failure wi
   h.runtime.teardownSession();
 });
 
-test('C pending send becomes uncertain on disconnect and late completion cannot survive logout', async () => {
+test('C a socket disconnect leaves an HTTP send pending; late completion cannot survive logout', async () => {
   const h = sendHarness(),
     key = `user:${h.other}`;
   await h.transport.ensureChatReady();
@@ -2600,7 +2656,8 @@ test('C pending send becomes uncertain on disconnect and late completion cannot 
   });
   const item = Object.values(h.outbox.getState().items)[0];
   h.sockets[0].disconnect();
-  assert.equal(h.outbox.getState().items[item.clientId].status, 'uncertain');
+  // Sends go over HTTP; only their own response settles them.
+  assert.equal(h.outbox.getState().items[item.clientId].status, 'sending');
   h.runtime.teardownSession();
   h.runtime.setSessionIdentity(h.other, h.token(h.other));
   finish({
@@ -2701,7 +2758,8 @@ test('C uncertain UI offers Send again only after absent resync and never offers
 
 test('inbox query polling follows actual focus and foreground hook state', () => {
   let focused = true,
-    state = 'active';
+    state = 'active',
+    live = false;
   const h = harness({
     react: {
       useState: () => [focused, () => {}],
@@ -2716,6 +2774,12 @@ test('inbox query polling follows actual focus and foreground hook state', () =>
     '@/features/auth/hooks/useCurrentUser': { useCan: () => true },
     '@/features/settings/store/preferencesStore': { usePreferences: () => true },
     '../services': { chatService: { listConversations: async () => [] } },
+    '../services/chatState': {
+      useChatConnection: (select) => select({ ready: live }),
+      hasOlderHistory: () => false,
+      isExpired: () => false,
+      purgeExpiredMessages: () => null,
+    },
   });
   const hooks = h.load('src/features/chat/hooks/useChat.ts');
   const poll = () => hooks.useConversations(hooks.useChatVisibility()).refetchInterval;
@@ -2729,6 +2793,9 @@ test('inbox query polling follows actual focus and foreground hook state', () =>
   assert.equal(poll(), false);
   state = 'active';
   assert.equal(poll(), 30000);
+  live = true;
+  assert.equal(poll(), 120000, 'a live socket polls only as a safety net');
+  live = false;
   assert.equal(
     hooks.useConversations(false).refetchInterval,
     false,

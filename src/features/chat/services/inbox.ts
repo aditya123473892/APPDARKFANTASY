@@ -9,6 +9,8 @@ import { previewText } from './chatPayload';
 // Search downloads; a server without acknowledged replies serializes them anyway.
 export const INBOX_PREFETCH_CONCURRENCY = 3;
 export const INBOX_POLL_MS = 30_000;
+/** While the socket is live it adds new messages and chats itself; polling is a safety net. */
+export const INBOX_LIVE_POLL_MS = 120_000;
 export const LOCAL_SEARCH_LABEL = 'Local search';
 export const pollingEnabled = (focused: boolean, state: string) => focused && state === 'active';
 let prefetchQueue: Promise<void> = Promise.resolve();
@@ -28,6 +30,9 @@ export function messagePreview(message: Message): NonNullable<Conversation['last
     senderName: user ? displayName(user) : message.senderName,
     createdAt: message.createdAt,
     status: message.status,
+    ...(message.expiresAt || message.viewOnce || message.viewDurationSeconds
+      ? { ephemeral: true }
+      : {}),
   };
 }
 export function localSearch(items: Conversation[], query: string): Conversation[] {

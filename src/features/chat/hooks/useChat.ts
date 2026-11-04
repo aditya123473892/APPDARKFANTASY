@@ -35,7 +35,7 @@ import {
   isSessionCurrent,
   registerSessionTeardown,
 } from '@/features/auth/sessionRuntime';
-import { INBOX_POLL_MS, pollingEnabled } from '../services/inbox';
+import { INBOX_LIVE_POLL_MS, INBOX_POLL_MS, pollingEnabled } from '../services/inbox';
 
 /** A message as rendered: either server-confirmed or still in the local outbox. */
 export type ChatMessage = Omit<Message, 'status'> & {
@@ -45,6 +45,8 @@ export type ChatMessage = Omit<Message, 'status'> & {
 };
 
 const MESSAGE_POLL_MS = 15_000;
+/** While the socket is live it delivers every change; polling is only a safety net. */
+const LIVE_MESSAGE_POLL_MS = 60_000;
 
 export function useChatVisibility() {
   const [focused, setFocused] = useState(false);
@@ -64,10 +66,11 @@ export function useMyId(): string {
 
 export function useConversations(poll = false) {
   const active = useAppState() === 'active';
+  const live = useChatConnection((state) => state.ready);
   return useQuery({
     queryKey: queryKeys.conversations,
     queryFn: () => chatService.listConversations(),
-    refetchInterval: poll && active ? INBOX_POLL_MS : false,
+    refetchInterval: poll && active ? (live ? INBOX_LIVE_POLL_MS : INBOX_POLL_MS) : false,
   });
 }
 
@@ -102,6 +105,7 @@ export function useMessages(conversationId: string, enabled = true) {
   const myId = useMyId();
   const readReceipts = usePreferences((state) => state.readReceipts);
   const visible = useChatVisibility();
+  const live = useChatConnection((state) => state.ready);
   const query = useQuery({
     queryKey: queryKeys.messages(conversationId),
     queryFn: () => chatService.listMessages(conversationId),
@@ -109,7 +113,7 @@ export function useMessages(conversationId: string, enabled = true) {
     refetchOnMount: 'always',
     enabled: enabled && Boolean(conversationId),
     // Socket events merge immediately; polling also catches missed server updates.
-    refetchInterval: visible ? MESSAGE_POLL_MS : false,
+    refetchInterval: visible ? (live ? LIVE_MESSAGE_POLL_MS : MESSAGE_POLL_MS) : false,
   });
   const outbox = useOutbox(
     useShallow((state) =>

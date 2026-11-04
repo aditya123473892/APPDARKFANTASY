@@ -5,7 +5,11 @@ import { env } from '@/config/env';
 import { MESSAGE_TIMERS } from '../disappearing';
 import { displayName } from '@/features/auth/userModel';
 import { userCache } from '@/features/auth/userCache';
-import { sessionIdentity, assertSessionCurrent } from '@/features/auth/sessionRuntime';
+import {
+  sessionIdentity,
+  assertSessionCurrent,
+  isSessionCurrent,
+} from '@/features/auth/sessionRuntime';
 import { apiClient } from '@/services/api/apiClient';
 import { getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
 import { ServiceError } from '@/services/errors';
@@ -15,9 +19,11 @@ import { queryClient } from '@/services/queryClient';
 import { queryKeys } from '@/services/queryKeys';
 import {
   emitTyping,
+  ensureChatReady,
   getHistory,
   getOlderHistory,
   refreshUnread,
+  socketConnected,
   socketRequest,
   socketAck,
 } from './socketSession';
@@ -37,6 +43,7 @@ import {
   historyVersion,
   watchHistory,
   reconcileHistory,
+  HISTORY_PAGE,
 } from './chatState';
 import { messagePreview } from './inbox';
 import type { ChatService } from './chatService';
@@ -112,7 +119,16 @@ async function httpHistory(key: string): Promise<Message[]> {
   const scope = sessionIdentity.generation;
   watchHistory(key);
   const started = historyVersion();
-  const rows = await getData<unknown[]>('/chats/messages', to);
+  let limit: number | undefined = HISTORY_PAGE;
+  let rows: unknown[];
+  try {
+    rows = await getData<unknown[]>('/chats/messages', { ...to, limit });
+  } catch (error) {
+    // A server without paging rejects the field; it returns the full history instead.
+    if (!(error instanceof ServiceError) || error.code !== 'VALIDATION') throw error;
+    limit = undefined;
+    rows = await getData<unknown[]>('/chats/messages', to);
+  }
   assertSessionCurrent(scope);
   if (!Array.isArray(rows)) throw new ServiceError('UNKNOWN');
   const parsed = rows.map(parseMessage);
@@ -121,6 +137,7 @@ async function httpHistory(key: string): Promise<Message[]> {
     key,
     parsed.map((row) => mapMessage(row, key)),
     started,
+    limit,
   );
 }
 
@@ -188,8 +205,10 @@ export const realChatService: ChatService = {
     for (const item of result) {
       const previous = current.find((row) => row.id === item.id);
       // A live message can be newer than the server's snapshot.
+      // A preview restored from the device cache is never newer than the server's.
       const newer =
         previous?.lastMessage &&
+        !previous.restored &&
         (!summaries ||
           !item.lastMessage ||
           Date.parse(previous.updatedAt) > Date.parse(item.updatedAt));
@@ -239,6 +258,12 @@ export const realChatService: ChatService = {
   async listMessages(key) {
     // The local HTTP proxy can deliver history before its realtime handshake is ready.
     if (env.localApiProxy) return httpHistory(key);
+    // Without a connected socket (cold start, reconnecting), read over HTTP right away
+    // instead of waiting for the handshake; the socket catches up behind it.
+    if (!socketConnected()) {
+      void ensureChatReady().catch(() => undefined);
+      return httpHistory(key);
+    }
     try {
       return await getHistory(key);
     } catch (error) {
@@ -264,17 +289,26 @@ export const realChatService: ChatService = {
   },
   async deleteMessage(key, id) {
     const scope = sessionIdentity.generation;
-    ownMessage(key, id);
-    const raw = await socketRequest<unknown>(
-      'deleteMessage',
-      'messageDeleted',
-      { messageId: id },
-      undefined,
-      (value) =>
-        Boolean(
-          value && typeof value === 'object' && 'messageId' in value && value.messageId === id,
-        ),
-    );
+    const message = ownMessage(key, id);
+    // Remove it right away; put it back if the server does not confirm.
+    mergeMessage(message, true);
+    let raw: unknown;
+    try {
+      raw = await socketRequest<unknown>(
+        'deleteMessage',
+        'messageDeleted',
+        { messageId: id },
+        undefined,
+        (value) =>
+          Boolean(
+            value && typeof value === 'object' && 'messageId' in value && value.messageId === id,
+          ),
+      );
+    } catch (error) {
+      if (isSessionCurrent(scope) && !(error instanceof ServiceError && error.code === 'NOT_FOUND'))
+        mergeMessage(message);
+      throw error;
+    }
     assertSessionCurrent(scope);
     const parsed = parseMessage(raw);
     if (!parsed || parsed._id !== id) throw new ServiceError('UNKNOWN');
@@ -320,8 +354,6 @@ export const realChatService: ChatService = {
         clientId: input.clientId,
       };
       mergeMessage(message);
-      // A successful send stays successful even when the unread refresh is offline.
-      void refreshUnread().catch(() => undefined);
       return message;
     } catch (error) {
       assertSessionCurrent(scope);
