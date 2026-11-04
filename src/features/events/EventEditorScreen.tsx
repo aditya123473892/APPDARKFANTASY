@@ -135,7 +135,9 @@ function EventForm({ event }: { event?: Event }) {
       await client.invalidateQueries({ queryKey: ['events'] });
       if (!isSessionCurrent(scope)) return;
       toast.success(event ? 'Event updated' : 'Event created');
-      router.replace({ pathname: '/events/[id]', params: { id: result._id } });
+      // An edit returns to the detail it came from; replacing it stacked a second copy.
+      if (event && router.canGoBack()) router.back();
+      else router.replace({ pathname: '/events/[id]', params: { id: result._id } });
     } catch (failure) {
       if (isSessionCurrent(scope))
         setError(

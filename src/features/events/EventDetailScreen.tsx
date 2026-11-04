@@ -19,6 +19,7 @@ import { eventTime } from './EventsScreen';
 import { EventCover } from './EventCover';
 
 import { dialog } from '@/components/ui/dialogStore';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 export function EventDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = typeof params.id === 'string' ? params.id : '';
@@ -48,6 +49,9 @@ export function EventDetailScreen() {
     void refetchParticipants();
     if (owner) void refetchRequests();
   }, [refetchEvent, refetchParticipants, refetchRequests, owner]);
+  const pull = usePullToRefresh(() =>
+    Promise.all([refetchEvent(), refetchParticipants(), owner ? refetchRequests() : undefined]),
+  );
   const hasEvent = Boolean(event);
   useFocusEffect(
     useCallback(() => {
@@ -82,7 +86,8 @@ export function EventDetailScreen() {
         onPress: () =>
           deletion.mutate(undefined, {
             onSuccess: (scope) => {
-              if (isSessionCurrent(scope)) router.replace('/events');
+              // Back to the existing Events tab; replacing pushed a second tabs screen.
+              if (isSessionCurrent(scope)) router.dismissTo('/events');
             },
           }),
       },
@@ -105,8 +110,8 @@ export function EventDetailScreen() {
           contentContainerStyle={styles.content}
           refreshControl={
             <RefreshControl
-              refreshing={query.isRefetching || participants.isRefetching || requests.isRefetching}
-              onRefresh={refresh}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               tintColor={theme.colors.primary}
             />
           }

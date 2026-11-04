@@ -6,6 +6,9 @@ import { EXPIRY_MARGIN_MS } from '../session';
 import { env } from '@/config/env';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
 
+/** Time away after which roles and account state are checked again on return. */
+const PROFILE_RECHECK_MS = 30_000;
+
 export function useSessionLifecycle(): boolean {
   const [privateScreen, setPrivateScreen] = useState(AppState.currentState !== 'active');
   const session = useAuthStore((state) => state.session);
@@ -24,15 +27,21 @@ export function useSessionLifecycle(): boolean {
       const elapsed = backgroundAt === null ? 0 : Date.now() - backgroundAt;
       backgroundAt = null;
       const store = useAuthStore.getState();
-      if (store.session) {
-        const action =
-          env.backgroundTimeoutMinutes > 0 && elapsed >= env.backgroundTimeoutMinutes * 60_000
-            ? store.expire()
-            : store.refreshProfile();
-        void action
+      const expired =
+        env.backgroundTimeoutMinutes > 0 && elapsed >= env.backgroundTimeoutMinutes * 60_000;
+      if (store.session && expired) {
+        // Keep the content covered until the expired session has been closed.
+        void store
+          .expire()
           .catch(() => undefined)
           .finally(() => setPrivateScreen(AppState.currentState !== 'active'));
-      } else setPrivateScreen(false);
+        return;
+      }
+      // The cover is only for the app-switcher snapshot. Waiting for the profile check
+      // blanked the screen after every notification shade, picker or Face ID prompt.
+      setPrivateScreen(false);
+      if (store.session && elapsed >= PROFILE_RECHECK_MS)
+        void store.refreshProfile().catch(() => undefined);
     });
     return () => {
       subscription.remove();

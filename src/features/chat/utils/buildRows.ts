@@ -12,7 +12,16 @@ const gap = (a: string, b: string): number => new Date(b).getTime() - new Date(a
  * Builds rows newest-first for an inverted list, inserting a divider before each new day and
  * marking consecutive messages from the same sender (within 5 minutes) as one visual group.
  */
-export function buildRows(messages: ChatMessage[]): ChatRow[] {
+type MessageRow = Extract<ChatRow, { type: 'message' }>;
+
+/**
+ * Pass the same `cache` on every call: a row whose message and grouping are unchanged is
+ * returned as the same object, so the list only re-renders the cells that changed.
+ */
+export function buildRows(
+  messages: ChatMessage[],
+  cache?: WeakMap<ChatMessage, MessageRow>,
+): ChatRow[] {
   const rows: ChatRow[] = [];
   messages.forEach((message, index) => {
     const prev = messages[index - 1];
@@ -34,13 +43,15 @@ export function buildRows(messages: ChatMessage[]): ChatRow[] {
       next.senderId === message.senderId &&
       isSameDay(next.createdAt, message.createdAt) &&
       gap(message.createdAt, next.createdAt) < GROUP_WINDOW_MS;
-    rows.push({
-      type: 'message',
-      key: message.clientId ? `c-${message.clientId}` : message.id,
-      message,
-      first: !joinsPrev,
-      last: !joinsNext,
-    });
+    const key = message.clientId ? `c-${message.clientId}` : message.id;
+    const cached = cache?.get(message);
+    if (cached && cached.key === key && cached.first === !joinsPrev && cached.last === !joinsNext) {
+      rows.push(cached);
+      return;
+    }
+    const row: MessageRow = { type: 'message', key, message, first: !joinsPrev, last: !joinsNext };
+    cache?.set(message, row);
+    rows.push(row);
   });
   return rows.reverse();
 }

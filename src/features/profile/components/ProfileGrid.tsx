@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -20,6 +20,7 @@ import {
   isVideo,
   mediaCacheKey,
   mediaPreviews,
+  previewKey,
   singleMedia,
   usePostPresentation,
 } from '@/features/feed/presentation';
@@ -36,13 +37,21 @@ const GRID_THRESHOLD = 800;
  * with hundreds of posts does not mount (and download) every image at once. Pass
  * `onScroll` to the ScrollView (with scrollEventThrottle) and `limit` to ProfileGrid.
  */
-export function useGridWindow() {
+export function useGridWindow(total = Infinity) {
   const [limit, setLimit] = useState(GRID_STEP);
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    if (layoutMeasurement.height + contentOffset.y >= contentSize.height - GRID_THRESHOLD)
-      setLimit((value) => value + GRID_STEP);
-  }, []);
+  const grownAt = useRef(-1);
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+      // Once per content height (the added tiles change it) and only while posts remain;
+      // growing on every scroll event re-rendered the whole profile near the bottom.
+      if (contentSize.height === grownAt.current) return;
+      if (layoutMeasurement.height + contentOffset.y < contentSize.height - GRID_THRESHOLD) return;
+      grownAt.current = contentSize.height;
+      setLimit((value) => (value < total ? value + GRID_STEP : value));
+    },
+    [total],
+  );
   return { limit, onScroll };
 }
 
@@ -60,7 +69,7 @@ const GridTile = memo(function GridTile({
   const { theme } = useTheme();
   const media = singleMedia(post);
   const video = isVideo(media);
-  const preview = mediaPreviews.get(media?.uri ?? '');
+  const preview = mediaPreviews.get(previewKey(media));
   const locked = Boolean(post.locked || media?.locked);
   const thumbnail = !video && media?.thumbnailUri;
   // The same key as the feed for originals, so photos already seen there are reused.

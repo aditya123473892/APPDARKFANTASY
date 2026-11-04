@@ -10,12 +10,15 @@ import { useProfile } from '../hooks/useProfiles';
 import { ProfileHeader } from '../components/ProfileHeader';
 import { listUserPosts } from '@/features/feed/services/feedService.real';
 import { useToggleLike } from '@/features/feed/hooks/useFeed';
+import type { Post } from '@/features/feed/types';
+import { useCallback } from 'react';
 import { FollowButton } from '@/features/requests/components/FollowButton';
 import { useTheme } from '@/theme/useTheme';
 import { spacing } from '@/theme';
 import { useBlock } from '@/features/safety/useBlock';
 import { useBlockState } from '@/features/safety/blockState';
 import { isServiceError } from '@/services/errors';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 
 import { dialog } from '@/components/ui/dialogStore';
 export function UserProfileScreen() {
@@ -29,8 +32,13 @@ export function UserProfileScreen() {
     queryFn: () => listUserPosts(id),
     enabled: Boolean(id) && id !== myId,
   });
-  const toggleLike = useToggleLike();
-  const grid = useGridWindow();
+  const pull = usePullToRefresh(() => Promise.all([profile.refetch(), posts.refetch()]));
+  const { mutate: like } = useToggleLike();
+  const onToggleLike = useCallback(
+    (item: Post) => like({ postId: item.id, liked: !item.liked }),
+    [like],
+  );
+  const grid = useGridWindow(posts.data?.length);
   const block = useBlock();
   const blocked = useBlockState((state) => state.ids.includes(id));
   const unblocking = useBlockState((state) => state.pending.includes(id));
@@ -43,12 +51,9 @@ export function UserProfileScreen() {
         contentContainerStyle={{ paddingBottom: spacing.lg, gap: spacing.lg }}
         refreshControl={
           <RefreshControl
-            refreshing={profile.isRefetching || posts.isRefetching}
+            refreshing={pull.refreshing}
             tintColor={theme.colors.primary}
-            onRefresh={() => {
-              void profile.refetch();
-              void posts.refetch();
-            }}
+            onRefresh={pull.onRefresh}
           />
         }
       >
@@ -134,7 +139,7 @@ export function UserProfileScreen() {
                 posts={posts.data}
                 limit={grid.limit}
                 showSaved={false}
-                onToggleLike={(item) => toggleLike.mutate({ postId: item.id, liked: !item.liked })}
+                onToggleLike={onToggleLike}
               />
             ) : (
               <EmptyState

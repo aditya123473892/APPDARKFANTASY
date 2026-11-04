@@ -14,6 +14,7 @@ import { useDiscoverProfiles } from '@/features/profile/hooks/useProfiles';
 import { useTheme } from '@/theme/useTheme';
 import { describeError } from '@/services/errors';
 import { useDebounce } from '@/hooks/useDebounce';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 
 const NO_INTERESTS: string[] = [];
 
@@ -44,6 +45,7 @@ export function DiscoverScreen() {
   const [search, setSearch] = useState('');
   const needle = useDebounce(search.trim(), 250);
   const query = useDiscoverProfiles(needle);
+  const pull = usePullToRefresh(() => query.refetch());
   const users = query.data ?? [];
   const onOpen = useCallback(
     (profile: ProfileView) => router.push(`/profile/${profile.id}`),
@@ -98,8 +100,8 @@ export function DiscoverScreen() {
           }
           refreshControl={
             <RefreshControl
-              refreshing={query.isRefetching && !query.isFetchingNextPage}
-              onRefresh={() => void query.refetch()}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               tintColor={theme.colors.primary}
               colors={[theme.colors.primary]}
               progressBackgroundColor={theme.colors.surfaceElevated}

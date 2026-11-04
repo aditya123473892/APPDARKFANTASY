@@ -17,6 +17,14 @@ test('temporary profile validation failure locks the vault without discarding lo
   await h.useAuthStore.getState().hydrate();
   assert.equal(wiped, 0); assert.ok(paused > 0);
   assert.equal(h.useAuthStore.getState().status, 'unverified'); assert.equal(h.runtime.sessionIdentity.userId, null);
+  // Being offline says nothing about the session: the saved sign-in survives and Retry finishes it.
+  assert.equal(h.secure.has('darkfantasy.token.v2'), true);
+  assert.equal(h.useAuthStore.getState().tokenPresent, true);
+  assert.equal(h.useAuthStore.getState().user, null, 'no profile is shown until it is verified');
+  h.apiClient.defaults.adapter = async (config) => h.ok(config, h.user);
+  await h.useAuthStore.getState().hydrate();
+  assert.equal(h.useAuthStore.getState().status, 'authenticated');
+  assert.equal(h.runtime.sessionIdentity.userId, h.user._id);
 });
 
 test('only the explicit development EAS profile allows HTTP when doctor sets production NODE_ENV', () => {
@@ -1928,6 +1936,26 @@ function rejectOn(socket, event, id, statusCode = 403) {
     return true;
   };
 }
+
+test('chat rows are reused unless their message or grouping changed', () => {
+  const h = chatHarness();
+  const { buildRows } = h.load('src/features/chat/utils/buildRows.ts');
+  const at = (minute) => new Date(Date.UTC(2026, 10, 4, 10, minute)).toISOString();
+  const message = (id, minute, senderId = 'a') => ({ id, senderId, text: id, createdAt: at(minute) });
+  const first = message('one', 0), second = message('two', 1);
+  const cache = new WeakMap();
+  const before = buildRows([first, second], cache);
+  const again = buildRows([first, second], cache);
+  assert.equal(again[0], before[0]);
+  assert.equal(again[1], before[1]);
+  // A new message from the same sender regroups the previous one, and only that row changes.
+  const after = buildRows([first, second, message('three', 2)], cache);
+  const row = (rows, id) => rows.find((item) => item.message?.id === id);
+  assert.equal(row(after, 'one'), row(before, 'one'));
+  assert.notEqual(row(after, 'two'), row(before, 'two'));
+  assert.equal(row(after, 'two').last, false);
+  h.runtime.teardownSession();
+});
 
 test('a chat opened right after a reconnect reuses the page its resync loaded', async () => {
   const h = chatHarness({}, { acks: true });

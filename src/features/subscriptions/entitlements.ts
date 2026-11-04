@@ -5,7 +5,7 @@ import { useAuthStore } from '@/features/auth/store/authStore';
 import { getData } from '@/services/api/backend';
 import { queryClient } from '@/services/queryClient';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
-import { usePostPresentation, mediaPreviews } from '@/features/feed/presentation';
+import { usePostPresentation, mediaPreviews, previewKey } from '@/features/feed/presentation';
 import { getPost } from '@/features/feed/services/feedService.real';
 
 export type EntitlementStatus = {
@@ -39,7 +39,7 @@ export async function refreshPostImages(client: QueryClient): Promise<void> {
     for (const id of ids) {
       const post = saved[id];
       if (!post) continue;
-      for (const media of post.media ?? []) mediaPreviews.delete(media.uri);
+      for (const media of post.media ?? []) mediaPreviews.delete(previewKey(media));
       saved[id] = {
         ...post,
         locked: true,

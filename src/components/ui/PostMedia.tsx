@@ -10,6 +10,7 @@ import {
   mediaCacheKey,
   mediaFrame,
   mediaPreviews,
+  previewKey,
 } from '@/features/feed/presentation';
 import type { ImageFit } from '@/utils/imageLayout';
 import { useTheme } from '@/theme/useTheme';
@@ -34,11 +35,14 @@ function ActiveVideo({
   const { theme } = useTheme();
   const [muted, setMuted] = useState(true);
   const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(mediaPreviews.get(media.uri)?.duration ?? 0);
+  const [duration, setDuration] = useState(mediaPreviews.get(previewKey(media))?.duration ?? 0);
   const [retryError, setRetryError] = useState(false);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastTap = useRef(0);
-  const player = useVideoPlayer({ uri: media.uri }, (instance) => {
+  // The first URL only: a refetch re-signs it, and a new source would restart playback.
+  // Retry loads the current one.
+  const [source] = useState(() => ({ uri: media.uri }));
+  const player = useVideoPlayer(source, (instance) => {
     instance.loop = true;
     instance.muted = true;
     instance.timeUpdateEventInterval = 0.25;
@@ -182,20 +186,21 @@ export function PostMedia({
   const size =
     media?.width && media.height ? media : decoded?.uri === mediaKey ? decoded : undefined;
   const frame = mediaFrame(size ? { ...media!, ...size } : media);
-  const frameRatio = ratio ?? mediaPreviews.get(media?.uri ?? '')?.ratio ?? frame.ratio;
+  const frameRatio = ratio ?? mediaPreviews.get(previewKey(media))?.ratio ?? frame.ratio;
   const imageFit: ImageFit = fit ?? (frameRatio === frame.ratio ? frame.fit : 'contain');
-  const preview = mediaPreviews.get(media?.uri ?? '');
+  const preview = mediaPreviews.get(previewKey(media));
   const thumbnailUri =
-    preview?.thumbnail ?? (thumbnail?.source === media?.uri ? thumbnail?.uri : undefined);
+    preview?.thumbnail ?? (thumbnail?.source === previewKey(media) ? thumbnail?.uri : undefined);
   const loaded = Boolean(media?.uri && loadedUri === mediaKey);
   const failed = Boolean(media?.uri && failedUri === mediaKey);
   useEffect(() => {
     if (!media || !video || !active || locked || media.locked || preview?.thumbnail) return;
     let cancelled = false;
+    const key = previewKey(media);
     void createVideoThumbnail(media.uri)
       .then((uri) => {
-        mediaPreviews.set(media.uri, { ...mediaPreviews.get(media.uri), thumbnail: uri });
-        if (!cancelled) setThumbnail({ source: media.uri, uri });
+        mediaPreviews.set(key, { ...mediaPreviews.get(key), thumbnail: uri });
+        if (!cancelled) setThumbnail({ source: key, uri });
       })
       .catch(() => undefined);
     return () => {
@@ -290,7 +295,12 @@ export function PostMedia({
           ) : null}
           {video && media ? (
             active ? (
-              <ActiveVideo key={media.uri} media={media} onDoubleTap={pop} onRetry={onRetry} />
+              <ActiveVideo
+                key={previewKey(media)}
+                media={media}
+                onDoubleTap={pop}
+                onRetry={onRetry}
+              />
             ) : (
               <Pressable
                 accessibilityLabel={

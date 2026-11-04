@@ -79,15 +79,16 @@ function useInvalidateSocial() {
   const queryClient = useQueryClient();
   return () =>
     Promise.all([
+      // What the action visibly changes refreshes now.
       queryClient.invalidateQueries({ queryKey: queryKeys.requests }),
       queryClient.invalidateQueries({ queryKey: ['social-lists'] }),
       queryClient.invalidateQueries({ queryKey: ['social-counts'] }),
       queryClient.invalidateQueries({ queryKey: ['relationships'] }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.feed }),
-      queryClient.invalidateQueries({ queryKey: ['user-posts'] }),
-      queryClient.invalidateQueries({ queryKey: ['profiles'] }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.conversations }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.notifications }),
+      // The rest refreshes when next shown. Refetching all of it on one Follow tap
+      // reloaded every Discover page, the feed and the chats at once.
+      ...[queryKeys.feed, ['user-posts'], ['profiles'], queryKeys.conversations, queryKeys.notifications].map(
+        (queryKey) => queryClient.invalidateQueries({ queryKey, refetchType: 'none' }),
+      ),
     ]);
 }
 

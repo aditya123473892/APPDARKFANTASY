@@ -68,7 +68,14 @@ function GodChatComposer(
   props: Omit<React.ComponentProps<typeof ChatInput>, 'draftValue' | 'onDraftChange'>,
 ): React.JSX.Element {
   const draft = useDraft((state) => state.draft);
-  return <ChatInput {...props} draftValue={draft} onDraftChange={setDraft} />;
+  return (
+    <ChatInput
+      {...props}
+      maxLength={GOD_CHAT_MAX_CHARS}
+      draftValue={draft}
+      onDraftChange={setDraft}
+    />
+  );
 }
 
 const renderBubble = ({ item }: { item: GodChatMessage }) => (

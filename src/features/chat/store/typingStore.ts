@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { registerSessionTeardown } from '@/features/auth/sessionRuntime';
 
 /** An indicator disappears this long after the last "typing" event, even if "stopped" never arrives. */
@@ -31,8 +32,8 @@ export function setTyping(key: string, userId: string, active: boolean): void {
 
 /** IDs of people currently typing in a conversation. */
 export function useTypingUsers(key: string): string[] {
-  const users = useTypingStore((state) => state.typing[key]);
-  return users ? Object.keys(users) : [];
+  // Each typing pulse renews an expiry; only a change in who is typing re-renders.
+  return useTypingStore(useShallow((state) => Object.keys(state.typing[key] ?? {})));
 }
 
 registerSessionTeardown(() => {

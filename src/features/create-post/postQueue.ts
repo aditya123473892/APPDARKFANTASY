@@ -7,7 +7,7 @@ import {
   sessionIdentity,
 } from '@/features/auth/sessionRuntime';
 import { insertCreatedPost } from '@/features/feed/hooks/useFeed';
-import { mediaPreviews } from '@/features/feed/presentation';
+import { mediaPreviews, previewKey } from '@/features/feed/presentation';
 import { feedService } from '@/features/feed/services';
 import type { CreatePostInput, UploadAsset } from '@/features/feed/types';
 import { cleanupPickedAssets } from '@/services/api/photoUpload';
@@ -27,7 +27,6 @@ export type PendingPost = {
   cover?: string;
   /** Local video frames and durations for the new post's media, by index. */
   previews: { thumbnail?: string; duration?: number }[];
-  location: string;
   progress: number;
   state: 'uploading' | 'finishing' | 'failed';
   error?: string;
@@ -59,8 +58,7 @@ async function run(id: string): Promise<void> {
     );
     if (!isSessionCurrent(scope)) return;
     post.media?.forEach((media, index) => {
-      if (media.uri)
-        mediaPreviews.set(media.uri, { ...item.previews[index], location: item.location });
+      if (media.uri) mediaPreviews.set(previewKey(media), { ...item.previews[index] });
     });
     insertCreatedPost(queryClient, post);
     remove(id);

@@ -14,6 +14,7 @@ import { useFeed, useToggleLike } from '../hooks/useFeed';
 import type { Post } from '../types';
 import { Pressable } from '@/components/ui/Pressable';
 import { PendingPosts } from '@/features/create-post/PendingPosts';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 
 export function FeedScreen() {
   const router = useRouter();
@@ -21,6 +22,7 @@ export function FeedScreen() {
   const insets = useContentInsets();
   const me = useAuthStore((state) => state.user);
   const feed = useFeed();
+  const pull = usePullToRefresh(() => feed.refetch());
   const toggle = useToggleLike();
   // Stable handlers keep every PostCard from re-rendering when the feed screen does.
   const { mutate: like } = toggle;
@@ -80,8 +82,8 @@ export function FeedScreen() {
           contentContainerStyle={{ paddingBottom: insets.bottom }}
           refreshControl={
             <RefreshControl
-              refreshing={feed.isRefetching}
-              onRefresh={() => void feed.refetch()}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               tintColor={theme.colors.primary}
             />
           }

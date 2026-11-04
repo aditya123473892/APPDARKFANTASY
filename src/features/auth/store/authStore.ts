@@ -53,6 +53,12 @@ type AuthState = {
   sessionRevision: number;
 };
 
+/**
+ * The server could not be reached or asked to slow down. Not 'SERVER': that also covers
+ * malformed or unsupported profiles, which must keep failing closed.
+ */
+const unreachable = (error: unknown) =>
+  error instanceof AuthError && ['NETWORK', 'RATE_LIMITED'].includes(error.code);
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'loading',
   user: null,
@@ -96,6 +102,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     } catch (error) {
       // Fail closed; no cached profile is rendered while validation is unavailable.
+      if (current === revision && unreachable(error)) {
+        // A connection problem says nothing about the session. Keep the saved sign-in so
+        // Retry can finish it, instead of making the user sign in again (a new SMS code).
+        pauseLocalVault();
+        setRuntimeToken(null);
+        set({
+          status: 'unverified',
+          session: null,
+          user: null,
+          currentUser: null,
+          roles: [],
+          tokenPresent: true,
+          profileError: "Couldn't reach DARKFANTASY. Check your connection, then retry.",
+        });
+        return;
+      }
       if (current === revision) {
         await get().logout({ preserveVault: true });
         if (error instanceof AuthError && error.code === 'BLOCKED') set({ status: 'blocked' });
@@ -200,6 +222,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
       if (current !== revision || request !== profileRevision) return;
+      // Offline or a server hiccup after returning to the app: the profile already shown
+      // is still this account's. Ejecting the user from the app lost whatever they were doing.
+      if (unreachable(error) && get().status === 'authenticated') return;
       set({
         currentUser: null,
         user: null,

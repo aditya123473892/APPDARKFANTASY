@@ -11,6 +11,7 @@ import { useRequestActions, useRequests } from '@/features/requests/hooks/useReq
 import { useTheme } from '@/theme/useTheme';
 import { useState } from 'react';
 import { NotificationsScreen } from './NotificationsScreen';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 export function ActivityScreen() {
   const [tab, setTab] = useState<'notifications' | 'requests'>('notifications');
   const { theme } = useTheme();
@@ -64,6 +65,7 @@ export function FollowRequestsScreen() {
   const router = useRouter();
   const { theme } = useTheme();
   const query = useRequests();
+  const pull = usePullToRefresh(() => query.refetch());
   const actions = useRequestActions();
   const busy = actions.accept.isPending || actions.decline.isPending;
   return (
@@ -78,7 +80,7 @@ export function FollowRequestsScreen() {
       </View>
       {query.isPending ? (
         <Loader />
-      ) : query.isError ? (
+      ) : query.isError && !query.data ? (
         <ErrorState onRetry={() => void query.refetch()} />
       ) : (
         <FlashList
@@ -88,8 +90,8 @@ export function FollowRequestsScreen() {
           ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
           refreshControl={
             <RefreshControl
-              refreshing={query.isRefetching}
-              onRefresh={() => void query.refetch()}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               tintColor={theme.colors.primary}
             />
           }

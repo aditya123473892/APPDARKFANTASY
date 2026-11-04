@@ -11,6 +11,7 @@ import { getData } from '@/services/api/backend';
 import type { User } from '@/features/auth/userModel';
 import { FollowButton } from '@/features/requests/components/FollowButton';
 import { mapProfile } from '../services/profileService.real';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { spacing } from '@/theme';
 
 export function ConnectionsScreen() {
@@ -22,13 +23,14 @@ export function ConnectionsScreen() {
     if (!Array.isArray(data[tab])) throw new Error('Relationship list unavailable');
     return data[tab]!.map(mapProfile);
   } });
+  const pull = usePullToRefresh(() => query.refetch());
   return <Screen padded={false}><Header title="Connections" back backFallback="/profile" />
     <View style={{ flexDirection: 'row', gap: spacing.sm, padding: spacing.md }}>
       <Button label="Followers" size="sm" fullWidth={false} style={{ flex: 1 }} variant={tab === 'followers' ? 'primary' : 'secondary'} onPress={() => setTab('followers')} />
       <Button label="Following" size="sm" fullWidth={false} style={{ flex: 1 }} variant={tab === 'following' ? 'primary' : 'secondary'} onPress={() => setTab('following')} />
     </View>
     {query.isPending ? <Loader /> : query.isError ? <ErrorState onRetry={() => void query.refetch()} /> :
-      <FlashList data={query.data} keyExtractor={user => user.id} refreshing={query.isRefetching} onRefresh={() => void query.refetch()}
+      <FlashList data={query.data} keyExtractor={user => user.id} refreshing={pull.refreshing} onRefresh={pull.onRefresh}
         ListEmptyComponent={<EmptyState title={tab === 'followers' ? 'No followers yet' : 'You are not following anyone yet'} message="Your connections will appear here." />}
         renderItem={({ item }) => <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md }}>
           <Pressable style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md }} onPress={() => router.push(`/profile/${item.id}`)} accessibilityLabel={`Open ${item.name}'s profile`}>

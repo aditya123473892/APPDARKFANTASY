@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { radius, spacing, media } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import type { Conversation } from '../types';
+import { usePreferences } from '@/features/settings/store/preferencesStore';
 import { formatMessageTime, formatShortDate, isSameDay } from '@/utils/formatters';
 
 export const CHAT_AVATAR = media.avatar.large;
@@ -30,6 +31,9 @@ export const ChatListItem = memo(function ChatListItem({
   const unread = unreadCount > 0;
   const isGroup = conversation.kind === 'group';
   const fromMe = lastMessage?.senderId === myId;
+  // Read receipts are reciprocal, as in the conversation itself.
+  const receipts = usePreferences((state) => state.readReceipts);
+  const read = receipts && lastMessage?.status === 'read';
   const sender = lastMessage
     ? isGroup
       ? `${fromMe ? 'You' : lastMessage.senderName || 'Someone'}: `
@@ -90,12 +94,10 @@ export const ChatListItem = memo(function ChatListItem({
           ) : null}
           {fromMe && !isGroup ? (
             <Ionicons
-              accessibilityLabel={lastMessage?.status === 'read' ? 'Read' : 'Sent'}
-              name={lastMessage?.status === 'read' ? 'checkmark-done' : 'checkmark'}
+              accessibilityLabel={read ? 'Read' : 'Sent'}
+              name={read ? 'checkmark-done' : 'checkmark'}
               size={16}
-              color={
-                lastMessage?.status === 'read' ? theme.colors.primaryText : theme.colors.textMuted
-              }
+              color={read ? theme.colors.primaryText : theme.colors.textMuted}
             />
           ) : null}
           <Text variant="caption" color={unread && !muted ? 'primary' : 'muted'}>

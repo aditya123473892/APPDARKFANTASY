@@ -141,6 +141,7 @@ test('collection loading terminates repeated pages and invalid counts, preserves
   const backend=load('src/services/api/backend.ts',{
     './apiClient':{apiClient:{get:async(url,options)=>{requests.push(options);return {data:{data:await transport(options)}};}}},
     '../errors':errors,'@/config/env':{env:{apiUrl:'https://api.example.test'}},
+    '@/features/auth/sessionRuntime':{sessionIdentity:{generation:1}},
   });
   const rows=Array.from({length:50},(_,i)=>({_id:String(i)}));
   transport=async()=>({users:rows,count:200});
@@ -185,7 +186,8 @@ test('profile count loading and failed refreshes expose retry while retaining kn
   let counts={isPending:true,isError:false,isRefetching:false,refetch:()=>{countRetries++;}};
   const auth=select=>select({user});auth.getState=()=>({refreshProfile:()=>{profileRetries++;}});
   const {MyProfileScreen}=load('src/features/profile/screens/MyProfileScreen.tsx',{
-    react:{useState:value=>[value,()=>{}],useMemo:fn=>fn()},'expo-router':{useRouter:()=>({push(){}})},
+    react:{useState:value=>[value,()=>{}],useMemo:fn=>fn(),useCallback:fn=>fn},'expo-router':{useRouter:()=>({push(){}})},
+    '@/hooks/usePullToRefresh':{usePullToRefresh:()=>({refreshing:false,onRefresh(){}})},
     'react-native':{RefreshControl:'Refresh',ScrollView:'Scroll',Share:{},View:'View'},
     '@tanstack/react-query':{useQuery:()=>counts},
     '@/components/layout':{Header:'Header',Screen:'Screen',SettingsButton:'Settings'},
@@ -225,6 +227,7 @@ test('Activity request cards share the canonical request cache and actions and e
     '@/components/feedback/ErrorState':{ErrorState:'ErrorState'},
     '@/features/requests/hooks/useRequests':{useRequests:()=>query,useRequestActions:()=>({accept:{mutate:item=>accepted.push(item)},decline:{mutate:item=>declined.push(item)}})},
     '@/theme/useTheme':{useTheme:()=>({theme:{colors:{}}})},react:{},'./NotificationsScreen':{},
+    '@/hooks/usePullToRefresh':{usePullToRefresh:()=>({refreshing:false,onRefresh(){}})},
   });
   const flatten=element=>Array.isArray(element)?element.flatMap(flatten):element&&typeof element==='object'?[element,...flatten(element.props?.children)]:[];
   const list=flatten(FollowRequestsScreen()).find(node=>node.type==='List');
@@ -236,7 +239,11 @@ test('Activity request cards share the canonical request cache and actions and e
   card.find(node=>node.type==='Pressable').props.onPress();assert.equal(routes[0],'/profile/peer');
   query.isPending=true;assert.ok(flatten(FollowRequestsScreen()).some(node=>node.type==='Loader'));
   query.isPending=false;query.isError=true;
+  // A failed background refresh keeps the requests already shown.
+  assert.ok(!flatten(FollowRequestsScreen()).some(node=>node.type==='ErrorState'));
+  const loaded=query.data;query.data=undefined;
   const error=flatten(FollowRequestsScreen()).find(node=>node.type==='ErrorState');error.props.onRetry();assert.equal(retries,1);
+  query.data=loaded;
   query.isError=false;query.data={incoming:[],outgoing:[]};
   assert.equal(flatten(FollowRequestsScreen()).find(node=>node.type==='List').props.data.length,0);
 });

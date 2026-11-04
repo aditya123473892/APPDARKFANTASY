@@ -22,7 +22,7 @@ export function BlockedUsersScreen() {
       <Header title="Blocked users" back />
       {query.isPending ? (
         <Loader />
-      ) : query.isError ? (
+      ) : query.isError && !query.data ? (
         <ErrorState onRetry={() => void query.refetch()} />
       ) : (
         <>

@@ -8,6 +8,7 @@ import { Header, Screen, SettingsButton } from '@/components/layout';
 import { EmptyState, IconButton, SearchField, Skeleton } from '@/components/ui';
 import { Can } from '@/features/auth/components/Access';
 import { useDebounce } from '@/hooks/useDebounce';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { spacing, radius } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { CHAT_AVATAR, ChatListItem } from '../components/ChatListItem';
@@ -47,8 +48,11 @@ export function ChatsScreen(): React.JSX.Element {
   const prefetchTasks = useRef(0);
   const [search, setSearch] = useState('');
   const query = useDebounce(search.trim().toLowerCase(), 200);
-  const { data, error, isPending, isError, isRefetchError, refetch, isRefetching } =
-    useConversations(visible);
+  const { data, error, isPending, isError, isRefetchError, refetch } = useConversations(visible);
+  const pull = usePullToRefresh(() => {
+    setPreviewRefresh((value) => value + 1);
+    return refetch();
+  });
   const inboxKeys = data?.map((item) => item.id).join('|');
   const latestData = useRef(data);
   useEffect(() => {
@@ -157,11 +161,8 @@ export function ChatsScreen(): React.JSX.Element {
           )}
           refreshControl={
             <RefreshControl
-              refreshing={isRefetching}
-              onRefresh={() => {
-                void refetch();
-                setPreviewRefresh((value) => value + 1);
-              }}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               tintColor={theme.colors.primary}
               colors={[theme.colors.primary]}
               progressBackgroundColor={theme.colors.surfaceElevated}

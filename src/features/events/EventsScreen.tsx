@@ -12,6 +12,7 @@ import { useContentInsets } from '@/components/layout/useContentInsets';
 import { useTheme } from '@/theme/useTheme';
 import { useEvents } from './hooks';
 import { EventCover } from './EventCover';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 
 export const eventTime = (value: string) =>
   Number.isFinite(Date.parse(value))
@@ -24,6 +25,7 @@ export function EventsScreen() {
   const { theme } = useTheme();
   const admin = useCan('canViewAdminScreens');
   const query = useEvents();
+  const pull = usePullToRefresh(() => query.refetch());
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const events = (query.data ?? [])
@@ -93,8 +95,8 @@ export function EventsScreen() {
           contentContainerStyle={[styles.list, { paddingBottom: contentInsets.bottom }]}
           refreshControl={
             <RefreshControl
-              refreshing={query.isRefetching}
-              onRefresh={() => void query.refetch()}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               tintColor={theme.colors.primary}
             />
           }

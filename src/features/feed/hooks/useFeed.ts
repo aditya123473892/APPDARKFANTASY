@@ -23,6 +23,14 @@ import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { usePostPresentation } from '../presentation';
 
+// New posts shift offsets, so a later page can repeat a post already shown. A stable
+// function lets the query reuse its result instead of re-running this on every render.
+const uniquePosts = (data: InfiniteData<FeedPage>) => {
+  const seen = new Set<string>();
+  return data.pages.flatMap((page) =>
+    page.posts.filter((post) => !seen.has(post.id) && seen.add(post.id)),
+  );
+};
 /** The public feed, loaded page by page. `data` is the flattened, de-duplicated list. */
 export function useFeed() {
   return useInfiniteQuery({
@@ -30,13 +38,7 @@ export function useFeed() {
     queryFn: ({ pageParam, signal }) => feedService.listPage(pageParam, signal),
     initialPageParam: 'start',
     getNextPageParam: (last: FeedPage) => last.nextCursor,
-    // New posts shift offsets, so a later page can repeat a post already shown.
-    select: (data) => {
-      const seen = new Set<string>();
-      return data.pages.flatMap((page) =>
-        page.posts.filter((post) => !seen.has(post.id) && seen.add(post.id)),
-      );
-    },
+    select: uniquePosts,
   });
 }
 export function useMyPosts() {
@@ -229,9 +231,10 @@ export function useAddComment(postId: string) {
     },
     onSettled: () => {
       void client.invalidateQueries({ queryKey: queryKeys.comments(postId) });
-      void client.invalidateQueries({ queryKey: queryKeys.feed });
-      void client.invalidateQueries({ queryKey: queryKeys.myPosts });
-      void client.invalidateQueries({ queryKey: ['user-posts'] });
+      // The comment count is already patched in every list; refetching the whole feed
+      // here only showed a spinner and re-rendered every card. Refresh them next time.
+      for (const queryKey of [queryKeys.feed, queryKeys.myPosts, ['user-posts']])
+        void client.invalidateQueries({ queryKey, refetchType: 'none' });
     },
   });
 }

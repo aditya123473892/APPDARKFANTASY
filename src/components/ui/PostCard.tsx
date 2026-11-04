@@ -7,12 +7,7 @@ import { Share, View } from 'react-native';
 import { useCurrentUserId } from '@/features/auth/hooks/useCurrentUser';
 import { useBlock } from '@/features/safety/useBlock';
 import type { Post } from '@/features/feed/types';
-import {
-  isVideo,
-  mediaPreviews,
-  singleMedia,
-  usePostPresentation,
-} from '@/features/feed/presentation';
+import { isVideo, singleMedia, usePostPresentation } from '@/features/feed/presentation';
 import { ImageViewer } from './ImageViewer';
 import { formatRelativeTime } from '@/utils/formatters';
 import { spacing } from '@/theme';
@@ -96,10 +91,9 @@ export const PostCard = memo(function PostCard({
             <Text weight="semibold" numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 14 }}>
               {username}
             </Text>
-            {mediaPreviews.get(media?.uri ?? '')?.location ||
-            (post.status && post.status !== 'approved') ? (
+            {post.location || (post.status && post.status !== 'approved') ? (
               <Text variant="caption" weight="regular" color="muted" numberOfLines={1}>
-                {mediaPreviews.get(media?.uri ?? '')?.location || post.status}
+                {post.location || post.status}
               </Text>
             ) : null}
           </View>

@@ -140,11 +140,11 @@ export function CreatePostScreen() {
           audience,
           contentVisibility: visibility,
           clientId: clientId.current,
+          ...(location.trim() ? { location: location.trim() } : {}),
         },
         cover: assets[0]?.type.startsWith('image/') ? assets[0].uri : selected[0]?.thumbnail,
         // The stored width/height carry the chosen shape, so no ratio override is kept.
         previews: selected.map((item) => ({ thumbnail: item.thumbnail, duration: item.duration })),
-        location: location.trim(),
       });
       setSubmitted(true);
       disablePrevention();

@@ -3,7 +3,14 @@ import { toUserView, displayName } from '@/features/auth/userModel';
 import { userCache } from '@/features/auth/userCache';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { apiClient } from '@/services/api/apiClient';
-import { getCollection, getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
+import {
+  getCollection,
+  getData,
+  getDataShared,
+  mediaUrl,
+  unwrap,
+  serviceError,
+} from '@/services/api/backend';
 import { ServiceError } from '@/services/errors';
 import type { ProfileView } from '../types';
 import type { ProfileService } from './profileService';
@@ -60,10 +67,11 @@ export const realProfileService: ProfileService = {
       nextSkip: data.users.length && next < data.count ? next : undefined,
     };
   },
-  async get(id, signal) {
+  async get(id) {
     if (isPeerBlocked(id)) throw new ServiceError('NOT_FOUND');
     // The server evaluates visibility for the authenticated caller.
-    const { user } = await getData<{ user: PublicProfile }>(`/users/${id}`, undefined, signal);
+    // Shared with the profile's post list, which reads the same endpoint at the same time.
+    const { user } = await getDataShared<{ user: PublicProfile }>(`/users/${id}`);
     if (isPeerBlocked(id)) throw new ServiceError('NOT_FOUND');
     return mapProfile(user);
   },

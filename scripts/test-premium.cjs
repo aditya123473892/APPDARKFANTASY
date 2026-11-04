@@ -80,7 +80,7 @@ test('entitlement transitions clear stale post images across feed, post, profile
   const { refreshAfterSubscription } = load('src/features/subscriptions/entitlements.ts', {
     '@/features/auth/store/authStore': {}, '@/services/api/backend': {}, '@/services/queryClient': { queryClient: client },
     '@/features/auth/sessionRuntime': {sessionIdentity:{generation:1,userId:'me'}},
-    '@/features/feed/presentation': {usePostPresentation:{getState:()=>({saved:{}}),setState(){}},mediaPreviews:new Map()},
+    '@/features/feed/presentation': {usePostPresentation:{getState:()=>({saved:{}}),setState(){}},mediaPreviews:new Map(),previewKey:m=>m?.id||m?.uri||''},
     '@/features/feed/services/feedService.real': {},
   });
   await refreshAfterSubscription();
@@ -99,7 +99,7 @@ function savedHarness(saved, getPost) {
   const service=load('src/features/subscriptions/entitlements.ts',{
     '@/features/auth/store/authStore':{},'@/services/api/backend':{},'@/services/queryClient':{queryClient:client},
     '@/features/auth/sessionRuntime':runtime,
-    '@/features/feed/presentation':{usePostPresentation:store,mediaPreviews:previews},
+    '@/features/feed/presentation':{usePostPresentation:store,mediaPreviews:previews,previewKey:m=>m?.id||m?.uri||''},
     '@/features/feed/services/feedService.real':{getPost},
   });
   return {service,store,runtime,previews,client};
@@ -112,7 +112,7 @@ test('saved premium originals are cleared before revalidation, including offline
   const own={...premium,id:'own',user:{id:'me'}};
   let resolve;
   const h=savedHarness({premium,normal,own},()=>new Promise(r=>{resolve=r;}));
-  h.previews.set(premium.media[0].uri,{thumbnail:'clear-frame'});
+  h.previews.set(premium.media[0].id,{thumbnail:'clear-frame'});
   const task=h.service.refreshPostImages(h.client);
   const safe=h.store.getState().saved.premium;
   assert.equal(safe.locked,true);assert.equal(safe.media[0].uri,'');assert.equal(safe.media[0].thumbnailUri,undefined);

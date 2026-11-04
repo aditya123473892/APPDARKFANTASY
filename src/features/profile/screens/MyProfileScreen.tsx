@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter, type Href } from 'expo-router';
 import { RefreshControl, ScrollView, Share, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
@@ -7,8 +7,10 @@ import { Button, Loader, Modal, Text } from '@/components/ui';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { useDeletePost, useMyPosts, useToggleLike } from '@/features/feed/hooks/useFeed';
+import type { Post } from '@/features/feed/types';
 import { getData } from '@/services/api/backend';
 import { toHandle } from '@/utils/formatters';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
 import { EditProfileForm } from '../components/EditProfileForm';
@@ -27,14 +29,21 @@ export function MyProfileScreen() {
       getData<{ followers: number; following: number }>('/users/follow/counts', undefined, signal),
     enabled: !!user,
   });
-  const toggle = useToggleLike();
-  const grid = useGridWindow();
+  const pull = usePullToRefresh(() => Promise.all([feed.refetch(), counts.refetch()]));
   // Memoised so the grid's tiles only re-render when the posts change.
   const posts = useMemo(
     () => feed.data?.filter((post) => post.user.id === user?.id) ?? [],
     [feed.data, user?.id],
   );
-  const remove = useDeletePost();
+  const grid = useGridWindow(posts.length);
+  // Stable handlers keep every card from re-rendering on each like or delete.
+  const { mutate: like } = useToggleLike();
+  const { mutate: removePost } = useDeletePost();
+  const onToggleLike = useCallback(
+    (post: Post) => like({ postId: post.id, liked: !post.liked }),
+    [like],
+  );
+  const onDelete = useCallback((post: Post) => removePost(post.id), [removePost]);
   if (!user)
     return (
       <Screen>
@@ -53,11 +62,8 @@ export function MyProfileScreen() {
         contentContainerStyle={{ paddingBottom: spacing.xl }}
         refreshControl={
           <RefreshControl
-            refreshing={feed.isRefetching || counts.isRefetching}
-            onRefresh={() => {
-              void feed.refetch();
-              void counts.refetch();
-            }}
+            refreshing={pull.refreshing}
+            onRefresh={pull.onRefresh}
             tintColor={theme.colors.primary}
           />
         }
@@ -123,8 +129,8 @@ export function MyProfileScreen() {
           <ProfileGrid
             posts={posts}
             limit={grid.limit}
-            onToggleLike={(post) => toggle.mutate({ postId: post.id, liked: !post.liked })}
-            onDelete={(post) => remove.mutate(post.id)}
+            onToggleLike={onToggleLike}
+            onDelete={onDelete}
           />
         )}
       </ScrollView>

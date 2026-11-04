@@ -23,6 +23,7 @@ export function ChatInput({
   onDraftChange,
   timerLabel,
   onTimerPress,
+  maxLength = MAX_LENGTH,
 }: {
   onSend: (value: string) => void;
   /** Called with the draft as it changes (e.g. for typing indicators). */
@@ -39,6 +40,8 @@ export function ChatInput({
   onDraftChange?: (text: string) => void;
   timerLabel?: string | null;
   onTimerPress?: () => void;
+  /** The destination's own limit, so a draft is never cleared and then rejected. */
+  maxLength?: number;
 }): React.JSX.Element {
   const [localValue, setLocalValue] = useState('');
   const value = draftValue ?? localValue;
@@ -108,7 +111,7 @@ export function ChatInput({
             disabled={disabled || !canSendMessages}
             hitSlop={4}
             onPress={() => {
-              const next = `${value}😊`.slice(0, MAX_LENGTH);
+              const next = `${value}😊`.slice(0, maxLength);
               setValue(next);
               onChangeText?.(next);
             }}
@@ -126,7 +129,7 @@ export function ChatInput({
           multiline
           scrollEnabled
           editable={!disabled && canSendMessages}
-          maxLength={MAX_LENGTH}
+          maxLength={maxLength}
           maxFontSizeMultiplier={typography.maxFontScale}
           value={value}
           onChangeText={(text) => {
@@ -136,13 +139,13 @@ export function ChatInput({
           textAlignVertical="top"
           style={[styles.input, { color: theme.colors.text }]}
         />
-        {value.length > MAX_LENGTH * 0.9 ? (
+        {value.length > maxLength * 0.9 ? (
           <Text
             variant="caption"
-            color={value.length >= MAX_LENGTH ? 'danger' : 'muted'}
+            color={value.length >= maxLength ? 'danger' : 'muted'}
             style={styles.counter}
           >
-            {MAX_LENGTH - value.length}
+            {maxLength - value.length}
           </Text>
         ) : null}
         {onAttach && canShareMedia ? (

@@ -13,9 +13,11 @@ import { type Href } from 'expo-router';
 import { notificationTarget } from '../notificationTarget';
 import { NotificationRow } from '../components/NotificationRow';
 import { useMarkNotificationsRead, useNotifications } from '../hooks/useActivity';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 
 export function NotificationsScreen({ embedded = false }: { embedded?: boolean }) {
   const query = useNotifications();
+  const pull = usePullToRefresh(() => query.refetch());
   const read = useMarkNotificationsRead();
   const router = useRouter();
   const { theme } = useTheme();
@@ -71,8 +73,8 @@ export function NotificationsScreen({ embedded = false }: { embedded?: boolean }
           contentContainerStyle={{ paddingHorizontal: spacing.screen, paddingBottom: spacing.xl }}
           refreshControl={
             <RefreshControl
-              refreshing={query.isRefetching && !query.isFetchingNextPage}
-              onRefresh={() => void query.refetch()}
+              refreshing={pull.refreshing}
+              onRefresh={pull.onRefresh}
               tintColor={theme.colors.primary}
             />
           }

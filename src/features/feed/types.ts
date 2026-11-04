@@ -53,6 +53,8 @@ export type Post = {
   liked: boolean;
   audience: PostAudience;
   status?: string;
+  /** Where the author says it was taken; free text, optional. */
+  location?: string;
   likeStateKnown?: boolean;
   comments?: PostComment[];
 };
@@ -75,5 +77,6 @@ export type CreatePostInput = {
   clientId?: string;
   body: string;
   audience: PostAudience;
+  location?: string;
   assets?: UploadAsset[];
 };

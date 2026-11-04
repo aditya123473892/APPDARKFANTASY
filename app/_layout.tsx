@@ -80,6 +80,13 @@ function RootNavigator(): React.JSX.Element {
       router.replace('/account-state');
     if (fontsLoaded || fontError) void SplashScreen.hideAsync();
   }, [router, segments, status, fontsLoaded, fontError]);
+  useEffect(() => {
+    // A slow sign-in check (the server may be waking up) shows the in-app loader and
+    // wake banner after a moment, instead of a splash that looks frozen.
+    if (status !== 'loading' || (!fontsLoaded && !fontError)) return;
+    const timer = setTimeout(() => void SplashScreen.hideAsync(), 1500);
+    return () => clearTimeout(timer);
+  }, [status, fontsLoaded, fontError]);
   const inTabs = (segments as string[])[1] === '(tabs)';
   if (!fontsLoaded && !fontError)
     return <View style={{ flex: 1, backgroundColor: theme.colors.background }} />;

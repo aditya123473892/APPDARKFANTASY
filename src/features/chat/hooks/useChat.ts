@@ -45,6 +45,15 @@ export type ChatMessage = Omit<Message, 'status'> & {
 };
 
 const MESSAGE_POLL_MS = 15_000;
+/**
+ * Rendered messages reused while their source is unchanged. The cache keeps unchanged
+ * rows as the same objects, so mapping them again made every bubble re-render (and
+ * every list cell re-measure) whenever any message, send state or receipt changed.
+ */
+const confirmedRows = new WeakMap<Message, { readReceipts: boolean; row: ChatMessage }>();
+const pendingRows = new WeakMap<object, { myId: string; row: ChatMessage }>();
+const byTime = (a: { createdAt: string }, b: { createdAt: string }) =>
+  a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0;
 /** While the socket is live it delivers every change; polling is only a safety net. */
 const LIVE_MESSAGE_POLL_MS = 60_000;
 
@@ -143,26 +152,37 @@ export function useMessages(conversationId: string, enabled = true) {
     );
     const pending: ChatMessage[] = outbox
       .filter((item) => !confirmedClientIds.has(item.clientId))
-      .map((item) => ({
-        id: `local-${item.clientId}`,
-        clientId: item.clientId,
-        conversationId: item.conversationId,
-        senderId: myId,
-        text: item.text,
-        createdAt: item.createdAt,
-        status: item.status,
-        local: true,
-        resync: item.resync,
-      }));
-    return [
-      ...confirmed.map((message) => ({
+      .map((item) => {
+        const cached = pendingRows.get(item);
+        if (cached?.myId === myId) return cached.row;
+        const row: ChatMessage = {
+          id: `local-${item.clientId}`,
+          clientId: item.clientId,
+          conversationId: item.conversationId,
+          senderId: myId,
+          text: item.text,
+          createdAt: item.createdAt,
+          status: item.status,
+          local: true,
+          resync: item.resync,
+        };
+        pendingRows.set(item, { myId, row });
+        return row;
+      });
+    const rows = confirmed.map((message) => {
+      const cached = confirmedRows.get(message);
+      if (cached?.readReceipts === readReceipts) return cached.row;
+      const row: ChatMessage = {
         ...message,
         // Read receipts are reciprocal: hide "read" when the viewer has them turned off.
-        status: !readReceipts && message.status === 'read' ? ('sent' as const) : message.status,
+        status: !readReceipts && message.status === 'read' ? 'sent' : message.status,
         local: false,
-      })),
-      ...pending,
-    ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      };
+      confirmedRows.set(message, { readReceipts, row });
+      return row;
+    });
+    // The cache is already in time order; only pending sends need placing.
+    return pending.length ? [...rows, ...pending].sort(byTime) : rows;
   }, [conversationId, myId, outbox, query.data, readReceipts, clock]);
 
   const count = useConversationState(

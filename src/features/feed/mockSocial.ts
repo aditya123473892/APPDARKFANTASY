@@ -25,7 +25,6 @@ const video = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBigger
 mediaPreviews.set(video, {
   thumbnail: photo('photo-1464822759023-fed622ff2c3b'),
   duration: 15,
-  location: 'Out of office',
 });
 export const mockSocialComments: PostComment[] = mockSocialUsers.map((author, index) => ({
   id: `preview-comment-${index}`,
@@ -67,6 +66,7 @@ export const mockSocialPosts: Post[] = [
     id: 'preview-post-2',
     user: mockSocialUsers[1]!,
     body: 'A moment in motion. Sound on for a little escape.',
+    location: 'Out of office',
     media: [{ uri: video, width: 1920, height: 1080, mimetype: 'video/mp4' }],
   },
   {

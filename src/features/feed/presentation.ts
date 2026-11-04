@@ -21,10 +21,16 @@ export const usePostPresentation = create<{
 export type MediaPreview = {
   thumbnail?: string;
   duration?: number;
-  location?: string;
   ratio?: number;
 };
+/** Local video frames and durations, keyed by previewKey. */
 export const mediaPreviews = new Map<string, MediaPreview>();
+/**
+ * The media's id, which survives refetches; signed URLs change on every one, so
+ * anything keyed by the URL was lost (video frames went blank, players restarted).
+ */
+export const previewKey = (media?: { id?: string; uri?: string }): string =>
+  media?.id || media?.uri || '';
 export const singleMedia = (post: Post): PostMedia | undefined => post.media?.[0];
 export const isVideo = (media?: PostMedia) => Boolean(media?.mimetype?.startsWith('video/'));
 /**
@@ -43,7 +49,7 @@ export const mediaFrame = (media?: PostMedia): { ratio: number; fit: ImageFit } 
     ? { ratio: FEED_MIN_RATIO, fit: 'cover' }
     : feedFrame(media?.width, media?.height);
 export const postRatio = (media?: PostMedia) =>
-  mediaPreviews.get(media?.uri ?? '')?.ratio ?? mediaFrame(media).ratio;
+  mediaPreviews.get(previewKey(media))?.ratio ?? mediaFrame(media).ratio;
 export const durationLabel = (seconds = 0) =>
   `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60)
     .toString()

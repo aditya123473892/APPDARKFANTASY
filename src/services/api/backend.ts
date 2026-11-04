@@ -2,6 +2,7 @@ import axios from 'axios';
 import { apiClient } from './apiClient';
 import { ServiceError } from '../errors';
 import { env } from '@/config/env';
+import { sessionIdentity } from '@/features/auth/sessionRuntime';
 
 export type Envelope<T> = {
   data: T;
@@ -34,6 +35,21 @@ export async function getData<T>(url: string, params?: Record<string, unknown>, 
   } catch (error) {
     throw serviceError(error);
   }
+}
+const sharedReads = new Map<string, Promise<unknown>>();
+/**
+ * Concurrent identical reads in one session share a single request, e.g. a profile
+ * and its posts, which come from the same endpoint. It takes no abort signal: one
+ * caller must not cancel a response another is waiting for.
+ */
+export function getDataShared<T>(url: string): Promise<T> {
+  const key = `${sessionIdentity.generation}:${url}`;
+  let pending = sharedReads.get(key);
+  if (!pending) {
+    pending = getData<T>(url).finally(() => sharedReads.delete(key));
+    sharedReads.set(key, pending);
+  }
+  return pending as Promise<T>;
 }
 export function serviceError(error: unknown): Error {
   if (axios.isCancel(error)) return error as Error;

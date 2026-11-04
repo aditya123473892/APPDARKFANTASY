@@ -239,7 +239,8 @@ export function ChatRoomScreen(): React.JSX.Element {
     !messagesQuery.isFetching && messagesQuery.isSuccess,
   );
 
-  const rows = useMemo(() => buildRows(messages), [messages]);
+  const [rowCache] = useState(() => new WeakMap<ChatMessage, Extract<Row, { type: 'message' }>>());
+  const rows = useMemo(() => buildRows(messages, rowCache), [messages, rowCache]);
 
   const scrollToLatest = useCallback(() => {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -430,7 +431,8 @@ export function ChatRoomScreen(): React.JSX.Element {
         setJumpTarget(undefined);
       });
   }, [rows, jumpTarget, renderScope]);
-  const seenIncoming = useRef<Set<string> | undefined>(undefined);
+  /** Newest incoming message already accounted for; older pages never count as new. */
+  const seenIncoming = useRef<string | undefined>(undefined);
   const [newIncoming, setNewIncoming] = useState(0);
   useEffect(
     () =>
@@ -443,13 +445,12 @@ export function ChatRoomScreen(): React.JSX.Element {
     [],
   );
   useEffect(() => {
-    const ids = allMessages
-      .filter((message) => !message.local && message.senderId !== myId)
-      .map((message) => message.id);
-    const added = seenIncoming.current
-      ? ids.filter((id) => !seenIncoming.current!.has(id)).length
+    const incoming = allMessages.filter((message) => !message.local && message.senderId !== myId);
+    const previous = seenIncoming.current;
+    const added = previous
+      ? incoming.filter((message) => message.createdAt > previous).length
       : 0;
-    seenIncoming.current = new Set(ids);
+    seenIncoming.current = incoming[incoming.length - 1]?.createdAt ?? previous;
     if (showJump && added) setNewIncoming((count) => count + added);
     if (!showJump) setNewIncoming(0);
   }, [allMessages, myId, showJump]);
@@ -699,6 +700,15 @@ export function ChatRoomScreen(): React.JSX.Element {
               }}
               onEndReached={onEndReached}
               onEndReachedThreshold={0.4}
+              // Inside the list, next to the newest message: below it, it shrank the list
+              // and moved every message each time the other person started or stopped.
+              ListHeaderComponent={
+                typingLabel ? (
+                  <View style={styles.inverted}>
+                    <TypingDots />
+                  </View>
+                ) : null
+              }
               ListFooterComponent={
                 <View style={styles.inverted}>
                   {loadingOlder ? (
@@ -748,7 +758,6 @@ export function ChatRoomScreen(): React.JSX.Element {
             </Animated.View>
           ) : null}
         </View>
-        {typingLabel ? <TypingDots /> : null}
         {attach.isPending && uploadStatus ? (
           <Text accessibilityLiveRegion="polite" style={{ paddingHorizontal: spacing.screen }}>
             {uploadStatus}

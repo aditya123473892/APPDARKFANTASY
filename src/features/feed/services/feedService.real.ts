@@ -1,5 +1,12 @@
 import { apiClient } from '@/services/api/apiClient';
-import { getCollection, getData, mediaUrl, unwrap, serviceError } from '@/services/api/backend';
+import {
+  getCollection,
+  getData,
+  getDataShared,
+  mediaUrl,
+  unwrap,
+  serviceError,
+} from '@/services/api/backend';
 import { uploadPhoto } from '@/services/api/photoUpload';
 import { uploadVideo } from '@/services/api/videoUpload';
 import { createClientId } from '@/utils/clientId';
@@ -21,6 +28,7 @@ import type { FeedService } from './feedService';
 export type BackendPost = {
   _id: string;
   caption?: string;
+  location?: string;
   user: string | UserSummary;
   createdAt: string;
   visibility?: string;
@@ -128,6 +136,7 @@ export function mapPost(raw: BackendPost, fallbackAuthor?: UserSummary): Post {
     locked,
     id: raw._id,
     body: raw.caption ?? '',
+    ...(raw.location?.trim() ? { location: raw.location.trim() } : {}),
     createdAt: raw.createdAt,
     user: author(raw.user, fallbackAuthor),
     media: mapPostMedia(raw),
@@ -196,7 +205,7 @@ export async function listMyPosts(): Promise<Post[]> {
 }
 export async function listUserPosts(id: string): Promise<Post[]> {
   // The server decides visibility for the authenticated viewer.
-  const { user } = await getData<{ user: UserSummary & { usersPost: BackendPost[] } }>(
+  const { user } = await getDataShared<{ user: UserSummary & { usersPost: BackendPost[] } }>(
     `/users/${id}`,
   );
   userCache.put(user);
@@ -311,6 +320,7 @@ export const realFeedService: FeedService = {
       const videoIds = ids.filter((_, index) => assets[index]!.type.startsWith('video/'));
       const response = await apiClient.post('/posts', {
         caption: input.body,
+        ...(input.location?.trim() ? { location: input.location.trim().slice(0, 200) } : {}),
         contentVisibility: input.contentVisibility ?? 'normal',
         visibility:
           input.audience === 'everyone'

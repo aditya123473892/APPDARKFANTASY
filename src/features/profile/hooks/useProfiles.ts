@@ -52,7 +52,8 @@ export function useUpdateMyProfile() {
     onSuccess: (user) => {
       updateUser(user);
       // Posts embed author details; refresh them so the new name shows everywhere.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.feed });
+      for (const queryKey of [queryKeys.feed, queryKeys.myPosts, ['user-posts']])
+        void queryClient.invalidateQueries({ queryKey });
     },
   });
 }
@@ -67,6 +68,8 @@ export function useUpdateMyAvatar() {
       await refreshProfile();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.feed }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.myPosts }),
+        queryClient.invalidateQueries({ queryKey: ['user-posts'] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.discover }),
       ]);
     },
