@@ -298,6 +298,18 @@ async function resync(current: Socket, scope: number, epoch: number): Promise<vo
     throw new ServiceError('NETWORK');
   setChatReady(true);
 }
+/** Failed synchronization is retryable even while the transport stays connected. */
+function startResync(current: Socket, scope: number, epoch: number): Promise<void> {
+  const task = resync(current, scope, epoch);
+  sync = task;
+  void task.catch(() => {
+    if (current === socket && isSessionCurrent(scope) && epoch === connectionEpoch && sync === task) {
+      sync = undefined;
+      setChatReady(false);
+    }
+  });
+  return task;
+}
 export async function connectSocket(): Promise<Socket> {
   const scope = sessionIdentity.generation;
   assertSessionCurrent(scope);
@@ -412,10 +424,7 @@ export async function connectSocket(): Promise<Socket> {
       acks = false;
       verified.clear();
       const epoch = ++connectionEpoch;
-      sync = resync(current, scope, epoch);
-      void sync.catch(() => {
-        if (valid() && epoch === connectionEpoch) setChatReady(false);
-      });
+      startResync(current, scope, epoch);
     });
     current.on('authError', () => {
       if (valid()) void invalidateSession(`Bearer ${sessionIdentity.getToken()}`);
@@ -452,6 +461,7 @@ const SYNC_TIMEOUT_MS = 20_000;
 export async function ensureChatReady(): Promise<Socket> {
   const scope = sessionIdentity.generation;
   const current = await connectSocket();
+  if (!sync && !useChatConnection.getState().ready) startResync(current, scope, connectionEpoch);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([

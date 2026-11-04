@@ -69,7 +69,7 @@ export function RecentMediaGrid({
       setBusy(false);
     }
   };
-  if (Platform.OS === 'web')
+  if (Platform.OS === 'web' || Platform.OS === 'android')
     return (
       <Text variant="caption" weight="regular" color="muted" style={{ padding: spacing.lg }}>
         Use Choose media to browse your device.

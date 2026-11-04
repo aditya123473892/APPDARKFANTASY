@@ -26,7 +26,13 @@ export async function refreshBlockState() {
     before = page.nextCursor ?? undefined;
   } while (before);
   assertSessionCurrent(scope);
-  if (useBlockState.getState().version === version && !useBlockState.getState().pending.length)
-    useBlockState.setState({ ids: rows.map((row) => row.id), version: version + 1 });
+  const current = useBlockState.getState();
+  if (current.version === version && !current.pending.length) {
+    const ids = [...new Set(rows.map((row) => row.id))];
+    // Reconnecting refreshes this list while feed/profile requests are running.
+    // Only a real visibility change should invalidate their in-flight responses.
+    const changed = ids.length !== current.ids.length || ids.some((id) => !current.ids.includes(id));
+    if (changed) useBlockState.setState({ ids, version: version + 1 });
+  }
   return rows;
 }

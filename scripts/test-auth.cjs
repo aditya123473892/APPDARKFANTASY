@@ -142,6 +142,25 @@ test('real backend mappings preserve identities, media types, like state and con
   );
 });
 
+test('premium image mapping keeps only blurred previews and drops clear thumbnails for locked viewers', () => {
+  const h = harness({ 'react-native': { Platform: { OS: 'android' } } });
+  const { mapPost } = h.load('src/features/feed/services/feedService.real.ts');
+  const raw={_id:'333333333333333333333333',user:{_id:'222222222222222222222222',displayname:'Author'},
+    createdAt:'2026-10-14T00:00:00Z',contentVisibility:'premium',locked:true,
+    images:[{id:'photo',url:'https://preview.test/blurred.jpg',thumbnailUrl:'https://original.test/clear-thumb.jpg',blurhash:'00TI:j',width:1080,height:1350}],
+    media:[{url:'https://original.test/clear.jpg',mimetype:'image/jpeg'}]};
+  const locked=mapPost(raw);
+  assert.equal(locked.locked,true);assert.equal(locked.media[0].locked,true);
+  assert.equal(locked.media[0].uri,'https://preview.test/blurred.jpg');
+  assert.equal(locked.media[0].thumbnailUri,undefined);
+  assert.equal(JSON.stringify(locked).includes('original.test'),false);
+  const legacy=mapPost({...raw,images:undefined});
+  assert.equal(legacy.media.length,0,'a missing preview never falls back to legacy original URLs');
+  const subscriber=mapPost({...raw,locked:false,images:[{...raw.images[0],url:'https://original.test/clear.jpg'}]});
+  assert.equal(subscriber.media[0].locked,false);
+  assert.equal(subscriber.media[0].thumbnailUri,'https://original.test/clear-thumb.jpg');
+});
+
 test('carousel publishing uploads every photo in order and reports whole-post progress', async () => {
   const uploads = [];
   const progress = [];
@@ -927,6 +946,56 @@ function backendMessage(me, other, extras = {}) {
     ...extras,
   };
 }
+
+test('unchanged block refresh preserves an in-flight feed response, but changed visibility rejects it', async () => {
+  const h = chatHarness({ '@/features/safety/blocks': undefined });
+  try {
+    const blocks = h.load('src/features/safety/blockState.ts').useBlockState;
+    const { refreshBlockState } = h.load('src/features/safety/blocks.ts');
+    let ids = [], finish;
+    h.apiClient.defaults.adapter = async config => {
+      if (config.url === '/users/me/blocks')
+        return h.ok(config, { blocks: ids.map(id => ({ id })), nextCursor: null });
+      return new Promise(resolve => { finish = () => resolve(h.ok(config, { posts: [], count: 0 })); });
+    };
+    const feed = h.apiClient.get('/posts/public/feeds');
+    await until(() => Boolean(finish));
+    await refreshBlockState();
+    finish();
+    assert.equal((await feed).status, 200);
+    assert.equal(blocks.getState().version, 0);
+    blocks.setState({ ids: ['a', 'b'], version: 1 });
+    ids = ['b', 'a'];
+    await refreshBlockState();
+    assert.equal(blocks.getState().version, 1, 'ordering is not a visibility change');
+    finish = undefined;
+    const stale = h.apiClient.get('/posts/public/feeds');
+    const rejected = assert.rejects(stale, error => axios.isCancel(error));
+    await until(() => Boolean(finish));
+    ids = ['a'];
+    await refreshBlockState();
+    finish();
+    await rejected;
+    assert.equal(blocks.getState().version, 2, 'actual visibility changes still reject old responses');
+  } finally { h.runtime.teardownSession(); }
+});
+
+test('a failed chat resync can retry on the same connection without restarting the app', async () => {
+  let refreshes = 0;
+  const h = chatHarness({ '@/features/safety/blocks': { refreshBlockState: async () => {
+    if (++refreshes === 1) throw Error('Temporary API failure');
+    return [];
+  } } });
+  try {
+    await assert.rejects(h.transport.ensureChatReady());
+    assert.equal(h.sockets[0].connected, true);
+    assert.equal(h.state.useChatConnection.getState().ready, false);
+    await Promise.all([h.transport.ensureChatReady(), h.transport.ensureChatReady()]);
+    assert.equal(h.state.useChatConnection.getState().ready, true);
+    assert.equal(refreshes, 2, 'retry is shared by concurrent callers');
+    assert.equal(h.sockets.length, 1);
+  } finally { h.runtime.teardownSession(); }
+});
 
 test('anonymous visibility invalidation resets active social queries and rejects late pre-restriction responses', async () => {
   let resets = 0;

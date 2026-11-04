@@ -13,6 +13,7 @@ import { Pressable } from '@/components/ui/Pressable';
 import { Text } from '@/components/ui/Text';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PostList } from '@/components/ui/PostList';
+import { PostImage } from '@/components/ui/PostImage';
 import type { Post } from '@/features/feed/types';
 import {
   durationLabel,
@@ -65,6 +66,8 @@ const GridTile = memo(function GridTile({
   // The same key as the feed for originals, so photos already seen there are reused.
   const gridKey = media ? `${mediaCacheKey(media)}${thumbnail ? ':thumb' : ''}` : undefined;
   const uri = video ? preview?.thumbnail : thumbnail || media?.uri;
+  if (locked && media && !video)
+    return <PostImage image={media} locked compact width={size} height={size} contentFit="cover" />;
   return (
     <Pressable
       accessibilityLabel={`Open ${video ? 'video' : 'image'} post by ${post.user.name}`}

@@ -21,3 +21,10 @@ infrastructure/
 **/coverage/
 **/dist/
 vault-build-preflight/
+artifacts/
+# Store submission assets only; keep src/**/store/ in the build archive.
+/store/
+# Generate native projects on EAS so config plugins run for each build profile.
+/android/
+/ios/
+.credentials/

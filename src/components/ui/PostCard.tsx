@@ -52,7 +52,9 @@ export const PostCard = memo(function PostCard({
   const [localLiked, setLocalLiked] = useState(post.liked);
   const [viewing, setViewing] = useState<number | null>(null);
   // The viewer pages through photos only; videos keep their inline player.
-  const photos = (post.media ?? []).filter((item) => item.uri && !isVideo(item));
+  const photos = (post.media ?? []).filter(
+    (item) => !post.locked && !item.locked && item.uri && !isVideo(item),
+  );
   const saved = usePostPresentation((state) => Boolean(state.saved[post.id]));
   const toggleSaved = usePostPresentation((state) => state.toggleSaved);
   const media = singleMedia(post);

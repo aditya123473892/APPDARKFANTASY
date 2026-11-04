@@ -17,6 +17,7 @@ import { radius, spacing } from '@/theme';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
 import { Skeleton } from './Skeleton';
+import { PostImage } from './PostImage';
 import { createVideoThumbnail } from '@/features/create-post/videoThumbnail';
 import { useRouter } from 'expo-router';
 import { useEvent } from 'expo';
@@ -233,14 +234,18 @@ export function PostMedia({
       }}
     >
       {locked || media?.locked ? (
-        <Pressable
-          accessibilityLabel="Subscribe to view media"
-          onPress={() => router.push('/subscribe')}
-          style={styles.center}
-        >
-          <Ionicons name="lock-closed-outline" size={28} color={theme.colors.textMuted} />
-          <Text color="muted">Subscribe to view</Text>
-        </Pressable>
+        media && !video ? (
+          <PostImage image={media} locked contentFit={imageFit} onRetry={onRetry} />
+        ) : (
+          <Pressable
+            accessibilityLabel="Subscribe to view media"
+            onPress={() => router.push('/subscribe')}
+            style={styles.center}
+          >
+            <Ionicons name="lock-closed-outline" size={28} color={theme.colors.textMuted} />
+            <Text color="muted">Subscribe to view</Text>
+          </Pressable>
+        )
       ) : media && !media.uri ? (
         <Pressable
           accessibilityLabel={`${video ? 'Video' : 'Photo'} unavailable. Tap to refresh post`}

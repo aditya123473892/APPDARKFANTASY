@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Href } from 'expo-router';
+import { useRouter } from 'expo-router';
+import { BrandLogo } from '@/components/BrandLogo';
 import { Keyboard, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
 import { Header, Screen } from '@/components/layout';
 import { Pressable } from '@/components/ui/Pressable';
@@ -23,6 +25,7 @@ export function AuthScaffold({
   footer?: ReactNode;
   children: ReactNode;
 }): React.JSX.Element {
+  const router = useRouter();
   return (
     <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
       {/* Tapping outside a field dismisses the keyboard; not a screen-reader target. */}
@@ -31,6 +34,7 @@ export function AuthScaffold({
           <View>
             <Header title={title} content={<View />} back backFallback={backFallback} />
             <View style={styles.copy}>
+              <BrandLogo size={64} />
               <Text serif accessibilityRole="header" style={styles.title}>
                 {title}
               </Text>
@@ -38,7 +42,13 @@ export function AuthScaffold({
             </View>
             {children}
           </View>
-          {footer ? <View style={styles.footer}>{footer}</View> : null}
+          <View style={styles.footer}>
+            {footer}
+            <AuthLink
+              label="Privacy, terms and support"
+              onPress={() => router.push('/about' as Href)}
+            />
+          </View>
         </View>
       </TouchableWithoutFeedback>
     </Screen>

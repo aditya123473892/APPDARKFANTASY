@@ -1,6 +1,6 @@
 {
   "cli": {
-    "appVersionSource": "local"
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -9,6 +9,7 @@
       "env": { "APP_VARIANT": "development", "EXPO_PUBLIC_API_URL": "http://10.0.2.2:9000/api" }
     },
     "apk": {
+      "autoIncrement": true,
       "distribution": "internal",
       "environment": "production",
       "env": {
@@ -23,6 +24,8 @@
       }
     },
     "production": {
+      "distribution": "store",
+      "autoIncrement": true,
       "environment": "production",
       "env": {
         "APP_VARIANT": "production",
@@ -30,7 +33,12 @@
         "EXPO_PUBLIC_PHONE_AUTH_REQUIRED": "true",
         "EXPO_PUBLIC_DEV_API_PROXY": "false",
         "EXPO_DEV_API_PROXY": "false"
-      }
+      },
+      "android": { "buildType": "app-bundle" },
+      "ios": { "simulator": false }
     }
+  },
+  "submit": {
+    "production": { "android": { "track": "internal" } }
   }
 }

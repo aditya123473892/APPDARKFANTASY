@@ -100,7 +100,9 @@ function mapPostImages(raw: MediaSource): PostMedia[] {
       .map((image, index) => ({
         id: image.id || `${raw._id}:${index}`,
         uri: mediaUrl(image.url),
-        thumbnailUri: mediaUrl(image.thumbnailUrl) || undefined,
+        // Locked images carry only the server's blurred preview, never an original thumbnail.
+        thumbnailUri: locked ? undefined : mediaUrl(image.thumbnailUrl) || undefined,
+        locked,
         blurhash: image.blurhash,
         width: size(image.width),
         height: size(image.height),

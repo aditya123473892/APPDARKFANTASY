@@ -1,5 +1,16 @@
 # Premium images: implementation and rollout
 
+The active feed/carousel and profile/saved grids render the server-blurred image
+through the shared `PostImage` component, with a lock and subscription action.
+Subscribers and authors retain their clear-image viewer. Missing or failed previews
+stay locked with a BlurHash placeholder; the feed offers preview retry. Locked
+images never use a clear grid thumbnail or enter the full-screen viewer.
+
+On an entitlement change, saved premium media is locked and its old clear URLs
+are removed before revalidation. Refreshes run at most two at a time and cannot
+restore a removed bookmark or another account's data. Purchase checkout remains
+disabled; this uses the existing server-verified `premiumUntil` entitlement.
+
 Active backend: `dfbackend`. Mobile: repository root. The nested
 `darkfantasy-share/` duplicate is not part of this change.
 
@@ -132,7 +143,7 @@ Both are documented in `dfbackend/.env.example`:
 
 | Variable | Setting |
 | --- | --- |
-| `PHOTO_PREVIEW_BASE_URL` | Required HTTPS CloudFront origin, e.g. `https://YOUR-DISTRIBUTION.cloudfront.net`; no path/query/credentials |
+| `PHOTO_PREVIEW_BASE_URL` | Optional HTTPS CloudFront origin, e.g. `https://YOUR-DISTRIBUTION.cloudfront.net`; no path/query/credentials. When empty, use expiring private S3 URLs for blurred previews only. |
 | `POST_IMAGE_URL_SECONDS` | Default `900`; integer `300..3600` for authorized post originals |
 
 Existing `PHOTO_MEDIA_BUCKET` (fallback `AWS_DEFAULT_S3_BUCKET`) stores previews

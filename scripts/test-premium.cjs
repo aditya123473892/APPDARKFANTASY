@@ -79,10 +79,66 @@ test('entitlement transitions clear stale post images across feed, post, profile
     invalidateQueries: async ({ queryKey }) => calls.push(['invalidate', queryKey[0]]) };
   const { refreshAfterSubscription } = load('src/features/subscriptions/entitlements.ts', {
     '@/features/auth/store/authStore': {}, '@/services/api/backend': {}, '@/services/queryClient': { queryClient: client },
+    '@/features/auth/sessionRuntime': {sessionIdentity:{generation:1,userId:'me'}},
+    '@/features/feed/presentation': {usePostPresentation:{getState:()=>({saved:{}}),setState(){}},mediaPreviews:new Map()},
+    '@/features/feed/services/feedService.real': {},
   });
   await refreshAfterSubscription();
   for (const key of ['feed', 'posts', 'my-posts', 'user-posts', 'profiles', 'bookmarks']) {
     assert.ok(calls.some(([operation, prefix]) => operation === 'reset' && prefix === key));
   }
   assert.deepEqual(calls[calls.length - 1], ['invalidate', 'entitlements']);
+});
+
+function savedHarness(saved, getPost) {
+  let state={saved};
+  const runtime={sessionIdentity:{generation:1,userId:'me'}};
+  const store={getState:()=>state,setState:update=>{state={...state,...(typeof update==='function'?update(state):update)};}};
+  const previews=new Map();
+  const client={cancelQueries:async()=>{},resetQueries:async()=>{}};
+  const service=load('src/features/subscriptions/entitlements.ts',{
+    '@/features/auth/store/authStore':{},'@/services/api/backend':{},'@/services/queryClient':{queryClient:client},
+    '@/features/auth/sessionRuntime':runtime,
+    '@/features/feed/presentation':{usePostPresentation:store,mediaPreviews:previews},
+    '@/features/feed/services/feedService.real':{getPost},
+  });
+  return {service,store,runtime,previews,client};
+}
+
+test('saved premium originals are cleared before revalidation, including offline expiry; own and normal posts remain', async () => {
+  const premium={id:'premium',user:{id:'author'},contentVisibility:'premium',locked:false,
+    media:[{id:'photo',uri:'https://original.test/photo.jpg',thumbnailUri:'https://original.test/thumb.jpg',blurhash:'00TI:j'}]};
+  const normal={...premium,id:'normal',contentVisibility:'normal'};
+  const own={...premium,id:'own',user:{id:'me'}};
+  let resolve;
+  const h=savedHarness({premium,normal,own},()=>new Promise(r=>{resolve=r;}));
+  h.previews.set(premium.media[0].uri,{thumbnail:'clear-frame'});
+  const task=h.service.refreshPostImages(h.client);
+  const safe=h.store.getState().saved.premium;
+  assert.equal(safe.locked,true);assert.equal(safe.media[0].uri,'');assert.equal(safe.media[0].thumbnailUri,undefined);
+  assert.equal(h.previews.size,0);assert.equal(h.store.getState().saved.normal,normal);assert.equal(h.store.getState().saved.own,own);
+  resolve({...premium,locked:true,media:[{...premium.media[0],uri:'https://preview.test/blurred.jpg',thumbnailUri:undefined,locked:true}]});
+  await task;
+  assert.equal(h.store.getState().saved.premium.media[0].uri,'https://preview.test/blurred.jpg');
+  const offline=savedHarness({premium},async()=>{throw new Error('offline');});
+  await offline.service.refreshPostImages(offline.client);
+  assert.equal(offline.store.getState().saved.premium.locked,true);
+  assert.equal(offline.store.getState().saved.premium.media[0].uri,'');
+});
+
+test('saved premium refreshes are bounded and cannot restore posts after removal or account switch', async () => {
+  const post=id=>({id,user:{id:'author'},contentVisibility:'premium',locked:false,media:[{id,uri:'original:'+id}]});
+  const pending=new Map();let active=0,peak=0;
+  const h=savedHarness(Object.fromEntries(['a','b','c'].map(id=>[id,post(id)])),id=>{
+    active++;peak=Math.max(active,peak);
+    return new Promise(resolve=>pending.set(id,()=>{active--;resolve({...post(id),locked:true,media:[]});}));
+  });
+  const task=h.service.refreshPostImages(h.client);
+  assert.equal(pending.size,2);
+  const saved={...h.store.getState().saved};delete saved.a;h.store.setState({saved});
+  pending.get('a')();pending.get('b')();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.store.getState().saved.a,undefined);
+  h.runtime.sessionIdentity.generation++;h.store.setState({saved:{}});
+  pending.get('c')();await task;
+  assert.equal(Object.keys(h.store.getState().saved).length,0);assert.equal(peak,2);
 });

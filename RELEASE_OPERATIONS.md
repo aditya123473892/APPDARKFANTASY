@@ -1,5 +1,42 @@
 # Mobile release operations
 
+For current icons, Android/iOS store build profiles, the release preflight and
+remaining owner configuration, see [store/README.md](store/README.md).
+
+## Local Android release APK
+
+From the repository root on Windows, run:
+
+```powershell
+rtk npm run android:apk
+# Verify only the Expo config and release JavaScript bundle:
+rtk npm run android:apk -- --verify
+```
+
+The launcher supplies the existing EAS `apk` profile environment to Gradle,
+including the HTTPS API URL, and disables development dotenv loading. Direct
+`gradlew assembleRelease` does not load `eas.json` or `.env.mobile`; without an
+explicit release environment, Expo config fails with
+`EXPO_PUBLIC_API_URL must be configured`.
+
+Use an installed Android SDK and a supported JDK through `ANDROID_HOME` and
+`JAVA_HOME` (or Android Studio's SDK/Gradle configuration). The launcher also
+detects the default Windows SDK at `%LOCALAPPDATA%/Android/Sdk`. If `android/` has not
+been generated, set the release environment before running Expo prebuild:
+
+```powershell
+$env:APP_VARIANT = 'production'
+$env:EXPO_PUBLIC_API_URL = 'https://dfbackend.onrender.com/api'
+$env:NODE_ENV = 'production'
+$env:EXPO_NO_DOTENV = '1'
+rtk proxy node node_modules/expo/bin/cli prebuild --platform android
+rtk npm run android:apk
+```
+
+The APK is written to `android/app/build/outputs/apk/release/app-release.apk`.
+The generated project currently signs release builds with its debug key; use
+the EAS `production` profile and store signing configuration for distribution.
+
 ## Crash reports
 
 The Expo app uses the SDK-compatible Sentry React Native package, its Expo config

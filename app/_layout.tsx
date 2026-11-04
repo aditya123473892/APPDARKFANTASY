@@ -66,12 +66,16 @@ function RootNavigator(): React.JSX.Element {
     if (status === 'loading') return;
     const inAuth = segments[0] === '(auth)';
     if (status === 'authenticated' && inAuth) router.replace('/home');
-    else if (status === 'unauthenticated' && !inAuth && (segments as string[])[0] !== 'vault')
+    else if (
+      status === 'unauthenticated' &&
+      !inAuth &&
+      !['vault', 'about'].includes((segments as string[])[0] ?? '')
+    )
       router.replace('/login');
     else if (
       ['blocked', 'unverified', 'expired'].includes(status) &&
       segments[0] !== 'account-state' &&
-      (segments as string[])[0] !== 'vault'
+      !['vault', 'about'].includes((segments as string[])[0] ?? '')
     )
       router.replace('/account-state');
     if (fontsLoaded || fontError) void SplashScreen.hideAsync();
@@ -103,6 +107,7 @@ function RootNavigator(): React.JSX.Element {
           <Stack.Screen name="index" />
           <Stack.Screen name="account-state" />
           <Stack.Screen name="not-allowed" />
+          <Stack.Screen name="about" />
           <Stack.Screen name="vault" />
         </Stack>
       )}

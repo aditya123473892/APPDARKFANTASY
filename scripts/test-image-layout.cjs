@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function renderer(file, extraExport = '') {
+function renderer(file, extraExport = '', overrides = {}) {
   let cursor = 0;
   const state = [];
   const element = (type, props) => ({ type, props });
@@ -28,6 +28,7 @@ function renderer(file, extraExport = '') {
     '@/features/auth/sessionRuntime': { registerSessionTeardown() {} },
     './Pressable': { Pressable: 'Pressable' },
     './Skeleton': { Skeleton: 'Skeleton' },
+    './Text': { Text: 'Text' },
     'expo-image': { Image: 'Image' },
     '@/services/api/backend': { imageCacheKey: (uri) => uri },
     '@/theme/useTheme': { useTheme: () => ({ theme: { colors: {} } }) },
@@ -36,6 +37,8 @@ function renderer(file, extraExport = '') {
     './PostImage': { PostImage: 'PostImage' },
     './PostMedia': { PostMedia: 'PostMedia' },
     './RemoteMedia': { RemoteMedia: 'RemoteMedia' },
+    '@/components/ui/PostImage': { PostImage: 'PostImage' },
+    ...overrides,
   };
   function load(filename, suffix = '') {
     const module = { exports: {} };
@@ -150,6 +153,74 @@ test('inactive and locked videos have no mounted player; only an active video mo
   assert.equal(players(locked).length, 0);
   assert.equal(nodes(locked).filter((node) => node.type === 'Image').length, 0);
   assert.equal(players(r.render(r.exports.PostMedia, props)).length, 0);
+});
+
+test('feed media renders the server blurred preview for locked photos and never activates full-screen actions', () => {
+  const r = renderer('src/components/ui/PostMedia.tsx');
+  const image = { id:'photo',uri:'https://preview.test/blurred.jpg',blurhash:'00TI:j',width:1080,height:1350,mimetype:'image/jpeg' };
+  let opens=0,likes=0,retries=0;
+  const props = { media:image,locked:true,active:true,onOpen:()=>opens++,onDoubleTap:()=>likes++,onRetry:()=>retries++ };
+  const tree = r.render(r.exports.PostMedia,props);
+  const preview = nodes(tree).find(node=>node.type==='PostImage');
+  assert.equal(preview.props.image,image);
+  assert.equal(preview.props.locked,true);
+  assert.equal(preview.props.contentFit,'contain');
+  assert.equal(preview.props.onOpen,undefined);
+  assert.equal(nodes(tree).some(node=>node.type==='Image'),false,'the generic/original image branch must not mount');
+  preview.props.onRetry();assert.equal(retries,1);assert.equal(opens,0);assert.equal(likes,0);
+  const mediaLocked = r.render(r.exports.PostMedia,{...props,locked:false,media:{...image,locked:true}});
+  assert.equal(nodes(mediaLocked).some(node=>node.type==='PostImage'),true);
+});
+
+test('profile locked tiles use the blurred preview instead of a clear thumbnail; subscribers keep normal tiles', () => {
+  const r = renderer('src/features/profile/components/ProfileGrid.tsx','\nexport { GridTile };');
+  const image = { id:'photo',uri:'https://preview.test/blurred.jpg',thumbnailUri:'https://original.test/thumbnail.jpg',width:1080,height:1350,mimetype:'image/jpeg' };
+  const post = { id:'post',locked:true,user:{name:'Author'},media:[image] };
+  let opened=0;
+  let tree=r.render(r.exports.GridTile,{post,index:0,size:120,onOpen:()=>opened++});
+  assert.equal(tree.type,'PostImage');assert.equal(tree.props.image.uri,image.uri);
+  assert.equal(tree.props.locked,true);assert.equal(tree.props.compact,true);
+  assert.equal(tree.props.width,120);assert.equal(tree.props.height,120);
+  assert.equal(tree.props.onOpen,undefined);assert.equal(opened,0);
+  tree=r.render(r.exports.GridTile,{post:{...post,locked:false,media:[{...image,locked:true}]},index:0,size:120,onOpen:()=>opened++});
+  assert.equal(tree.type,'PostImage','per-image locking is also enforced');
+  tree=r.render(r.exports.GridTile,{post:{...post,locked:false},index:0,size:120,onOpen:()=>opened++});
+  assert.equal(nodes(tree).find(node=>node.type==='Image').props.source.uri,image.thumbnailUri);
+  tree.props.onPress();assert.equal(opened,1);
+});
+
+test('blurred preview retries preserve the lock and only subscription navigation is exposed', () => {
+  const routes=[];
+  const r = renderer('src/components/ui/PostImage.tsx','',{'expo-router':{useRouter:()=>({push:route=>routes.push(route)})}});
+  let retried=0;
+  const props={image:{id:'photo',uri:'https://preview.test/blurred.jpg',blurhash:'00TI:j'},locked:true,onRetry:()=>retried++};
+  let tree=r.render(r.exports.PostImage,props);
+  let image=nodes(tree).find(node=>node.type==='Image');
+  assert.equal(image.props.source.uri,props.image.uri);assert.equal(image.props.source.cacheKey,'photo:locked');
+  image.props.onError();tree=r.render(r.exports.PostImage,props);
+  image=nodes(tree).find(node=>node.type==='Image');
+  assert.equal(image.props.source,undefined);assert.equal(image.props.placeholder.blurhash,'00TI:j');
+  const subscribe=nodes(tree).find(node=>node.props?.accessibilityLabel==='Subscribe to view');
+  subscribe.props.onPress();assert.deepEqual(routes,['/subscribe']);
+  nodes(tree).find(node=>node.props?.accessibilityLabel==='Retry blurred preview').props.onPress();
+  assert.equal(retried,1);tree=r.render(r.exports.PostImage,props);
+  assert.equal(nodes(tree).find(node=>node.type==='Image').props.source.uri,props.image.uri);
+  assert.ok(nodes(tree).some(node=>node.props?.accessibilityLabel==='Subscribe to view'));
+  tree=r.render(r.exports.PostImage,{...props,image:{...props.image,uri:''}});
+  assert.equal(nodes(tree).find(node=>node.type==='Image').props.source,undefined);
+  assert.ok(nodes(tree).some(node=>node.props?.accessibilityLabel==='Retry blurred preview'));
+});
+
+test('subscriber and non-subscriber renders never share image cache entries', () => {
+  const r = renderer('src/components/ui/PostImage.tsx');
+  const image={id:'same-photo',uri:'https://original.test/photo.jpg'};
+  let tree=r.render(r.exports.PostImage,{image,locked:false});
+  assert.equal(nodes(tree).find(node=>node.type==='Image').props.source.cacheKey,'same-photo:unlocked');
+  assert.equal(nodes(tree).some(node=>node.props?.accessibilityLabel==='Subscribe to view'),false);
+  tree=r.render(r.exports.PostImage,{image:{...image,uri:'https://preview.test/blurred.jpg'},locked:true});
+  const preview=nodes(tree).find(node=>node.type==='Image');
+  assert.equal(preview.props.source.cacheKey,'same-photo:locked');
+  assert.equal(preview.props.source.uri,'https://preview.test/blurred.jpg');
 });
 
 test('carousel preserves media order, uses measured page width and activates only its current page', () => {

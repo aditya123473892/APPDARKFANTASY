@@ -226,6 +226,12 @@ export function SettingsScreen(): React.JSX.Element {
 
         <SettingsGroup>
           <SettingsRow
+            icon="information-circle-outline"
+            title="About DARKFANTASY"
+            subtitle="Privacy policy, terms and support"
+            onPress={() => router.push('/about' as Href)}
+          />
+          <SettingsRow
             icon="log-out-outline"
             title="Log out"
             subtitle="Securely clear this session from this device"
