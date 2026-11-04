@@ -9,16 +9,15 @@ import { eventsService } from './service';
 
 export function useEvents() {
   const userId = useCurrentUserId();
-  const query = useQuery({
-    queryKey: ['events', userId, 'list'],
-    queryFn: eventsService.list,
-    enabled: Boolean(userId),
-  });
-  const { refetch } = query;
+  const client = useQueryClient();
+  const queryKey = ['events', userId, 'list'];
+  const query = useQuery({ queryKey, queryFn: eventsService.list, enabled: Boolean(userId) });
   useFocusEffect(
     useCallback(() => {
-      void refetch();
-    }, [refetch]),
+      // Only when stale: forcing it on every focus reloaded the list (and re-signed every
+      // cover) each time Events or an event's details came into view.
+      void client.refetchQueries({ queryKey: ['events', userId, 'list'], stale: true });
+    }, [client, userId]),
   );
   return query;
 }

@@ -238,7 +238,15 @@ export const realChatService: ChatService = {
     if (!isObjectId(id)) throw new ServiceError('NOT_FOUND');
     if (kind === 'user') {
       // A cached summary cannot establish that this peer is still visible.
-      const result = await getData<{ user: unknown }>(`/users/${id}`);
+      let result: { user: unknown };
+      try {
+        result = await getData<{ user: unknown }>(`/users/${id}`);
+      } catch (error) {
+        // Offline the server can't say either way; the inbox entry (from the server or
+        // the device cache) still names the chat, so its messages open instead of an error.
+        if (cached && error instanceof ServiceError && error.code === 'NETWORK') return cached;
+        throw error;
+      }
       assertSessionCurrent(scope);
       target(key);
       const user = parseUserSummary(result.user);

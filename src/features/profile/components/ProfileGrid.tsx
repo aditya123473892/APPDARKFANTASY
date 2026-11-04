@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -14,7 +14,9 @@ import { Text } from '@/components/ui/Text';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PostList } from '@/components/ui/PostList';
 import { PostImage } from '@/components/ui/PostImage';
-import type { Post } from '@/features/feed/types';
+import type { Post, PostMedia } from '@/features/feed/types';
+import { sessionIdentity } from '@/features/auth/sessionRuntime';
+import { createVideoThumbnail } from '@/features/create-post/videoThumbnail';
 import {
   durationLabel,
   isVideo,
@@ -55,6 +57,44 @@ export function useGridWindow(total = Infinity) {
   return { limit, onScroll };
 }
 
+/**
+ * Video tiles get a frame made on the device: the server has no poster images, so they
+ * showed an empty square unless that video had played in the feed this session. At most
+ * two are made at once, and one per video is shared by every tile and the feed.
+ */
+const framing = new Map<string, Promise<string>>();
+let framesRunning = 0;
+const framesWaiting: (() => void)[] = [];
+async function oneOfTwo<T>(task: () => Promise<T>): Promise<T> {
+  if (framesRunning >= 2) await new Promise<void>((resolve) => framesWaiting.push(resolve));
+  framesRunning++;
+  try {
+    return await task();
+  } finally {
+    framesRunning--;
+    framesWaiting.shift()?.();
+  }
+}
+function videoFrame(media: PostMedia): Promise<string> {
+  const key = previewKey(media);
+  const known = mediaPreviews.get(key)?.thumbnail;
+  if (known) return Promise.resolve(known);
+  let pending = framing.get(key);
+  if (!pending) {
+    const scope = sessionIdentity.generation;
+    pending = oneOfTwo(() => createVideoThumbnail(media.uri))
+      .then((uri) => {
+        // Never hand one account's frame to the next session.
+        if (scope === sessionIdentity.generation)
+          mediaPreviews.set(key, { ...mediaPreviews.get(key), thumbnail: uri });
+        return uri;
+      })
+      .finally(() => framing.delete(key));
+    framing.set(key, pending);
+  }
+  return pending;
+}
+
 const GridTile = memo(function GridTile({
   post,
   index,
@@ -74,7 +114,23 @@ const GridTile = memo(function GridTile({
   const thumbnail = !video && media?.thumbnailUri;
   // The same key as the feed for originals, so photos already seen there are reused.
   const gridKey = media ? `${mediaCacheKey(media)}${thumbnail ? ':thumb' : ''}` : undefined;
-  const uri = video ? preview?.thumbnail : thumbnail || media?.uri;
+  const [frame, setFrame] = useState<{ key: string; uri: string }>();
+  const needsFrame = video && !locked && Boolean(media?.uri) && !preview?.thumbnail;
+  useEffect(() => {
+    if (!needsFrame || !media) return;
+    let alive = true;
+    const key = previewKey(media);
+    void videoFrame(media)
+      .then((uri) => {
+        if (alive) setFrame({ key, uri });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [needsFrame, media]);
+  const ownFrame = frame?.key === previewKey(media) ? frame.uri : undefined;
+  const uri = video ? (preview?.thumbnail ?? ownFrame) : thumbnail || media?.uri;
   if (locked && media && !video)
     return <PostImage image={media} locked compact width={size} height={size} contentFit="cover" />;
   return (

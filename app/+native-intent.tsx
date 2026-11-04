@@ -1,5 +1,6 @@
 // Deep links never supply arbitrary post-login destinations or navigation params.
-const allowed = new Set(['/login', '/welcome', '/discover', '/matches', '/chats', '/profile']);
+// '/' is a normal launch (darkfantasy:///); the index route then chooses Welcome or Home.
+const allowed = new Set(['/', '/login', '/welcome', '/discover', '/matches', '/chats', '/profile']);
 export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
   try {
     if (path.length > 2048 || /[\\\u0000-\u001f]/.test(path)) return '/login';

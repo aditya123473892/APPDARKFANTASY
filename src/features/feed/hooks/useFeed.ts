@@ -15,13 +15,19 @@ import {
   deleteComment,
   deletePost,
   listComments,
+  listLikers,
   listMyPosts,
+  listSavedPosts,
   getPost,
+  setCommentLiked,
+  setPostSaved,
 } from '../services/feedService.real';
+import { isPreviewPost } from '../mockSocial';
 import type { CommentPage, CreatePostInput, FeedPage, Post, PostComment } from '../types';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { usePostPresentation } from '../presentation';
+import { useCallback } from 'react';
 
 // New posts shift offsets, so a later page can repeat a post already shown. A stable
 // function lets the query reuse its result instead of re-running this on every render.
@@ -274,5 +280,157 @@ export function useDeletePost() {
       toast.success('Post deleted');
     },
     onError: (error) => toast.error(describeError(error, "Couldn't delete that post.")),
+  });
+}
+
+/** People who liked a post, loaded page by page while the sheet is open. */
+export function useLikers(postId: string, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: ['posts', postId, 'likes'],
+    queryFn: ({ pageParam }) => listLikers(postId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: { nextCursor?: string }) => last.nextCursor,
+    enabled: enabled && Boolean(postId),
+  });
+}
+
+function updateComment(
+  client: QueryClient,
+  postId: string,
+  commentId: string,
+  update: (comment: PostComment) => PostComment,
+) {
+  client.setQueryData<InfiniteData<CommentPage>>(queryKeys.comments(postId), (data) =>
+    data
+      ? {
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page,
+            comments: page.comments.map((comment) =>
+              comment.id === commentId ? update(comment) : comment,
+            ),
+          })),
+        }
+      : data,
+  );
+}
+
+/** The newest tap per comment or post; only that one may roll back or settle the UI. */
+const commentLikeIntent = new Map<string, boolean>();
+const savedIntent = new Map<string, boolean>();
+
+/** A heart on a comment: shown at once, settled by the server's count, undone on failure. */
+export function useToggleCommentLike(postId: string) {
+  const client = useQueryClient();
+  const show = useCallback(
+    (commentId: string, liked: boolean, count?: number) =>
+      updateComment(client, postId, commentId, (comment) => {
+        const current = comment.likeCount ?? 0;
+        return {
+          ...comment,
+          likedByMe: liked,
+          likeCount:
+            count ??
+            (Boolean(comment.likedByMe) === liked
+              ? current
+              : Math.max(0, current + (liked ? 1 : -1))),
+        };
+      }),
+    [client, postId],
+  );
+  const { mutate } = useMutation({
+    scope: { id: `comment-like:${postId}` },
+    mutationFn: ({ commentId, liked }: { commentId: string; liked: boolean }) =>
+      setCommentLiked(postId, commentId, liked),
+    onSuccess: (state, { commentId, liked }) => {
+      if (commentLikeIntent.get(commentId) !== liked) return;
+      commentLikeIntent.delete(commentId);
+      show(commentId, state.liked, state.likeCount);
+    },
+    onError: (error, { commentId, liked }) => {
+      if (commentLikeIntent.get(commentId) === liked) {
+        commentLikeIntent.delete(commentId);
+        show(commentId, !liked);
+      }
+      toast.error(describeError(error, "Couldn't update that like."));
+    },
+  });
+  return useCallback(
+    (comment: PostComment) => {
+      if (comment.pending) return;
+      const liked = !(commentLikeIntent.get(comment.id) ?? comment.likedByMe ?? false);
+      commentLikeIntent.set(comment.id, liked);
+      show(comment.id, liked);
+      mutate({ commentId: comment.id, liked });
+    },
+    [mutate, show],
+  );
+}
+
+function showSaved(post: Post, saved: boolean) {
+  usePostPresentation.setState(({ saved: current }) => {
+    const next = { ...current };
+    if (saved) next[post.id] = current[post.id] ?? post;
+    else delete next[post.id];
+    return { saved: next };
+  });
+}
+
+/** Save or unsave a post on the server; shown at once and undone if it fails. */
+export function useToggleSaved() {
+  const { mutate } = useMutation({
+    scope: { id: 'post-saved' },
+    mutationFn: ({ post, saved }: { post: Post; saved: boolean }) => setPostSaved(post.id, saved),
+    onSuccess: (_data, { post, saved }) => {
+      if (savedIntent.get(post.id) === saved) savedIntent.delete(post.id);
+    },
+    onError: (error, { post, saved }) => {
+      if (savedIntent.get(post.id) === saved) {
+        savedIntent.delete(post.id);
+        showSaved(post, !saved);
+      }
+      toast.error(describeError(error, saved ? "Couldn't save that post." : "Couldn't remove that post."));
+    },
+  });
+  return useCallback(
+    (post: Post) => {
+      // Built-in preview posts exist only on this device.
+      if (isPreviewPost(post)) return usePostPresentation.getState().toggleSaved(post);
+      const saved = !(savedIntent.get(post.id) ?? Boolean(usePostPresentation.getState().saved[post.id]));
+      savedIntent.set(post.id, saved);
+      showSaved(post, saved);
+      mutate({ post, saved });
+    },
+    [mutate],
+  );
+}
+
+/**
+ * Loads the viewer's saved posts from the server once per session (and again after an
+ * entitlement change resets it). They used to live in memory only and vanished on restart.
+ */
+export function useSavedPostsSync() {
+  const signedIn = useAuthStore((state) => state.status === 'authenticated');
+  return useQuery({
+    queryKey: ['bookmarks'],
+    queryFn: async () => {
+      const scope = sessionIdentity.generation;
+      const posts = await listSavedPosts();
+      if (scope !== sessionIdentity.generation) return posts.length;
+      usePostPresentation.setState(({ saved }) => {
+        const next: Record<string, Post> = {};
+        for (const post of posts) next[post.id] = post;
+        // A save or unsave still on its way wins over a list fetched before it landed.
+        for (const [id, wanted] of savedIntent) {
+          if (!wanted) delete next[id];
+          else if (saved[id]) next[id] = saved[id];
+        }
+        for (const post of Object.values(saved)) if (isPreviewPost(post)) next[post.id] = post;
+        return { saved: next };
+      });
+      return posts.length;
+    },
+    staleTime: 5 * 60_000,
+    enabled: signedIn,
   });
 }

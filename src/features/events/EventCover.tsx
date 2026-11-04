@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, FitImage, Text } from '@/components/ui';
 import { media, radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
+import { imageCacheKey } from '@/services/api/backend';
 
 export function EventCover({
   uri,
@@ -21,7 +22,9 @@ export function EventCover({
   const [failed, setFailed] = useState<string>();
   const [loaded, setLoaded] = useState<string>();
   const [retrying, setRetrying] = useState(false);
-  const key = `${uri}:${attempt}`;
+  // The same cover keeps its key when the server re-signs its URL on every fetch;
+  // keying by the URL remounted it each time, with a spinner and a collapsed frame.
+  const key = `${imageCacheKey(uri) ?? uri}:${attempt}`;
   const unavailable = !uri || failed === key;
   const retry = async () => {
     if (retrying) return;

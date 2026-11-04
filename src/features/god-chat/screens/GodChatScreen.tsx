@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import {
+  FlatList,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import { Header, KeyboardAvoidingScreen, Screen, SettingsButton } from '@/components/layout';
 import { useContentInsets } from '@/components/layout/useContentInsets';
@@ -10,7 +16,7 @@ import { toast } from '@/components/ui/Toast';
 import { ChatInput } from '@/features/chat/components/ChatInput';
 import { TypingDots } from '@/features/chat/components/TypingDots';
 import { useChatVisibility } from '@/features/chat/hooks/useChat';
-import { useKeyboard } from '@/hooks/useKeyboard';
+import { KeyboardInsetSpacer } from '@/components/layout/KeyboardInsetSpacer';
 import { describeError } from '@/services/errors';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/useTheme';
@@ -28,6 +34,9 @@ import {
 import { dialog } from '@/components/ui/dialogStore';
 import { create } from 'zustand';
 import { registerSessionTeardown } from '@/features/auth/sessionRuntime';
+
+/** How close to the latest message (in points) still counts as reading it. */
+const NEAR_BOTTOM_PX = 120;
 const SESSION_KEY = ['god-chat-session'] as const;
 /** Faster while a team member is answering, so their replies feel live. */
 const STAFF_POLL_MS = 3_000;
@@ -95,9 +104,10 @@ export function GodChatScreen(): React.JSX.Element {
   const router = useRouter();
   const queryClient = useQueryClient();
   const contentInsets = useContentInsets();
-  const keyboardVisible = useKeyboard();
   const visible = useChatVisibility();
   const listRef = useRef<FlatList<GodChatMessage>>(null);
+  /** Whether the reader is at the latest message; only then does the list follow along. */
+  const nearBottom = useRef(true);
   // The message being sent; kept after a failure so "Try again" reuses its id.
   const [pending, setPending] = useState<{ id: string; content: string } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -150,6 +160,8 @@ export function GodChatScreen(): React.JSX.Element {
       return;
     }
     const message = { id: createClientId(), content: text };
+    // Sending always brings the conversation to the latest message.
+    nearBottom.current = true;
     setPending(message);
     setFailure(null);
     ask.mutate(message);
@@ -179,8 +191,14 @@ export function GodChatScreen(): React.JSX.Element {
   const onContentSizeChange = useCallback(() => {
     if (scrolledFor.current === contentKey) return;
     scrolledFor.current = contentKey;
-    listRef.current?.scrollToEnd({ animated: true });
+    // Someone reading earlier messages stays where they are when a reply arrives.
+    if (nearBottom.current) listRef.current?.scrollToEnd({ animated: true });
   }, [contentKey]);
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    nearBottom.current =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height) < NEAR_BOTTOM_PX;
+  }, []);
 
   return (
     <KeyboardAvoidingScreen>
@@ -225,7 +243,13 @@ export function GodChatScreen(): React.JSX.Element {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
             onContentSizeChange={onContentSizeChange}
-            onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
+            onScroll={onScroll}
+            scrollEventThrottle={64}
+            // The keyboard or a taller input resizes the list: keep the latest message in
+            // view only for someone already reading it.
+            onLayout={() => {
+              if (nearBottom.current) listRef.current?.scrollToEnd({ animated: false });
+            }}
             ListHeaderComponent={
               <View style={styles.intro}>
                 <Text variant="caption" color="muted" center style={styles.notice}>
@@ -297,8 +321,12 @@ export function GodChatScreen(): React.JSX.Element {
           onSend={send}
           canSendMessages
           disabled={unavailable || ask.isPending || fresh.isPending}
-          bottomInset={keyboardVisible || contentInsets.inTabs ? 0 : contentInsets.bottom}
+          bottomInset={0}
           placeholder={withTeam ? 'Message the team…' : 'Share what’s on your mind…'}
+        />
+        <KeyboardInsetSpacer
+          inset={contentInsets.inTabs ? 0 : contentInsets.bottom}
+          color={theme.colors.chatBackground}
         />
       </Screen>
     </KeyboardAvoidingScreen>

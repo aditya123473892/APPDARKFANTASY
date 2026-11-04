@@ -22,7 +22,7 @@ import { ErrorState } from '@/components/feedback/ErrorState';
 import { OfflineBanner } from '@/components/feedback/OfflineBanner';
 import { Header, Screen, KeyboardAvoidingScreen, useSafeBack } from '@/components/layout';
 import { Avatar, Button, EmptyState, IconButton, Loader, Skeleton, Text } from '@/components/ui';
-import { useKeyboard } from '@/hooks/useKeyboard';
+import { KeyboardInsetSpacer } from '@/components/layout/KeyboardInsetSpacer';
 import { isServiceError, describeError } from '@/services/errors';
 import { radius, spacing, typography } from '@/theme';
 import { TypingDots } from '../components/TypingDots';
@@ -103,7 +103,6 @@ export function ChatRoomScreen(): React.JSX.Element {
   const goBack = useSafeBack('/chats');
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboard();
   const myId = useMyId();
   const block = useBlock();
   const blockedDirect = useBlockState(
@@ -268,6 +267,8 @@ export function ChatRoomScreen(): React.JSX.Element {
   const firstUnread = useConversationState((state) => state.rooms[conversationId]?.firstUnread);
   const [editing, setEditing] = useState<ChatMessage>();
   const [editText, setEditText] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
   useEffect(
     () =>
       registerSessionTeardown(() => {
@@ -382,32 +383,30 @@ export function ChatRoomScreen(): React.JSX.Element {
     },
     [myId, canSendMessages, conversationId, renderScope, confirmBlock, router],
   );
+  // Tapping "Save edit" in the editor is the confirmation. A second dialog (and an error
+  // toast) cannot appear over this modal on iOS, so feedback stays inside the editor.
   const saveEdit = () => {
-    if (!editing || !editText.trim() || !isSessionCurrent(renderScope)) return;
+    if (!editing || !editText.trim() || editSaving || !isSessionCurrent(renderScope)) return;
     const scope = renderScope;
     const id = editing.id,
       text = editText;
-    dialog.alert('Save edit?', 'Replace this message for all participants?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Save',
-        onPress: () => {
-          if (!isSessionCurrent(scope)) return;
-          void chatService
-            .editMessage(conversationId, id, text)
-            .then(() => {
-              if (isSessionCurrent(scope)) {
-                setEditing(undefined);
-                setEditText('');
-              }
-            })
-            .catch(() => {
-              if (isSessionCurrent(scope))
-                toast.error('Could not confirm edit. Refresh history before trying again.');
-            });
-        },
-      },
-    ]);
+    if (text.trim() === editing.text.trim()) return closeEdit();
+    setEditSaving(true);
+    setEditError('');
+    void chatService
+      .editMessage(conversationId, id, text)
+      .then(() => {
+        if (!isSessionCurrent(scope)) return;
+        setEditing(undefined);
+        setEditText('');
+      })
+      .catch(() => {
+        if (isSessionCurrent(scope))
+          setEditError("Couldn't save your edit. Check your connection and try again.");
+      })
+      .finally(() => {
+        if (isSessionCurrent(scope)) setEditSaving(false);
+      });
   };
   const [jumpTarget, setJumpTarget] = useState<string>();
   const jumpFirstUnread = () => {
@@ -506,6 +505,7 @@ export function ChatRoomScreen(): React.JSX.Element {
   const closeEdit = () => {
     setEditing(undefined);
     setEditText('');
+    setEditError('');
   };
 
   return (
@@ -623,6 +623,11 @@ export function ChatRoomScreen(): React.JSX.Element {
                   { color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted },
                 ]}
               />
+              {editError ? (
+                <Text accessibilityRole="alert" color="danger" variant="caption">
+                  {editError}
+                </Text>
+              ) : null}
               <View style={styles.editActions}>
                 <Button
                   label="Cancel"
@@ -636,7 +641,8 @@ export function ChatRoomScreen(): React.JSX.Element {
                   label="Save edit"
                   size="sm"
                   fullWidth={false}
-                  disabled={!editText.trim()}
+                  loading={editSaving}
+                  disabled={!editText.trim() || editSaving}
                   onPress={saveEdit}
                   style={styles.editAction}
                 />
@@ -782,9 +788,10 @@ export function ChatRoomScreen(): React.JSX.Element {
               (!messagesQuery.data || !isServiceError(messagesQuery.error, 'NETWORK'))) ||
             attach.isPending
           }
-          bottomInset={keyboardVisible ? 0 : insets.bottom}
+          bottomInset={0}
           placeholder={participant ? `Message ${participant.name}…` : 'Write a message…'}
         />
+        <KeyboardInsetSpacer inset={insets.bottom} color={theme.colors.chatBackground} />
         {picker}
         <MessageActionPopup actions={actionButtons} onClose={closeActionPopup} />
         <TimerSheet

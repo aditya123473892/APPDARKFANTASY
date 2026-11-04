@@ -31,9 +31,12 @@ export function FitImage({
   onError?: ImageProps['onError'];
 }): React.JSX.Element {
   const { theme } = useTheme();
-  const [loaded, setLoaded] = useState<{ uri: string; ratio: number }>();
+  // Remembered by the image, not its signed URL: a re-signed URL for the same photo
+  // kept collapsing the frame to a square until it loaded again.
+  const imageKey = imageCacheKey(uri) ?? uri;
+  const [loaded, setLoaded] = useState<{ key: string; ratio: number }>();
   const ratio =
-    (loaded?.uri === uri ? loaded.ratio : undefined) ??
+    (loaded?.key === imageKey ? loaded.ratio : undefined) ??
     imageAspectRatio(imageWidth, imageHeight) ??
     1;
   return (
@@ -49,7 +52,7 @@ export function FitImage({
       accessibilityLabel={accessibilityLabel}
     >
       <Image
-        source={{ uri, cacheKey: imageCacheKey(uri) }}
+        source={{ uri, cacheKey: imageKey }}
         contentFit="contain"
         transition={150}
         cachePolicy={cachePolicy}
@@ -59,7 +62,9 @@ export function FitImage({
           const next = imageAspectRatio(event.source.width, event.source.height);
           if (next)
             setLoaded((current) =>
-              current?.uri === uri && current.ratio === next ? current : { uri, ratio: next },
+              current?.key === imageKey && current.ratio === next
+                ? current
+                : { key: imageKey, ratio: next },
             );
           onLoad?.(event);
         }}

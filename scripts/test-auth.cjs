@@ -1672,6 +1672,9 @@ test('deep links discard external destinations, encoded routes, params and retur
     '/discover',
   );
   assert.equal(redirect({ path: '/login?token=secret', initial: true }), '/login');
+  // A plain launch reaches the index route, which shows Welcome to signed-out users.
+  assert.equal(redirect({ path: 'darkfantasy:///', initial: true }), '/');
+  assert.equal(redirect({ path: '/', initial: true }), '/');
 });
 
 test('synchronous duplicate-submit guard and logout during pending login prevent resurrection', async () => {

@@ -53,6 +53,8 @@ type BackendComment = {
   content?: string;
   user?: string | UserSummary;
   createdAt?: string;
+  likeCount?: number;
+  likedByMe?: boolean;
 };
 /** Posts per feed request. */
 export const FEED_PAGE = 20;
@@ -77,6 +79,8 @@ export function mapComment(comment: BackendComment): PostComment | null {
     content: comment.content,
     author: author(comment.user),
     createdAt: comment.createdAt,
+    likeCount: Number.isFinite(comment.likeCount) ? Math.max(0, comment.likeCount!) : 0,
+    likedByMe: comment.likedByMe === true,
   };
 }
 /** 0 width/height means "unknown"; the gallery then measures the loaded image. */
@@ -195,6 +199,63 @@ export function mapLikeResponse(body: unknown, requested: boolean): LikeState {
   throw new ServiceError('UNKNOWN');
 }
 
+/** People who liked a post, newest first. */
+export async function listLikers(
+  postId: string,
+  before?: string,
+): Promise<{ users: PostAuthor[]; nextCursor?: string }> {
+  const page = await getData<{ users: unknown[]; nextCursor?: string }>(
+    `/posts/${encodeURIComponent(postId)}/likes`,
+    before ? { before } : undefined,
+  );
+  if (!Array.isArray(page?.users)) throw new ServiceError('UNKNOWN');
+  const users = page.users.flatMap((user) =>
+    user && typeof user === 'object' && /^[a-f\d]{24}$/i.test(String((user as UserSummary)._id))
+      ? [author(user as UserSummary)]
+      : [],
+  );
+  return { users, nextCursor: typeof page.nextCursor === 'string' ? page.nextCursor : undefined };
+}
+/** Sets (never flips) whether the viewer likes a comment. */
+export async function setCommentLiked(
+  postId: string,
+  commentId: string,
+  liked: boolean,
+): Promise<{ liked: boolean; likeCount: number }> {
+  try {
+    const result = unwrap<{ liked: boolean; likeCount: number }>(
+      (
+        await apiClient.put(
+          `/posts/${encodeURIComponent(postId)}/comment/${encodeURIComponent(commentId)}/like`,
+          { liked },
+        )
+      ).data,
+    );
+    return { liked: result.liked === true, likeCount: Math.max(0, Number(result.likeCount) || 0) };
+  } catch (error) {
+    throw serviceError(error);
+  }
+}
+/** The viewer's saved posts, newest saved first. */
+export async function listSavedPosts(): Promise<Post[]> {
+  const data = await getData<{ bookMark: { postId?: BackendPost | null }[] }>('/posts/book-mark');
+  if (!Array.isArray(data?.bookMark)) throw new ServiceError('UNKNOWN');
+  return data.bookMark.flatMap((row) => {
+    try {
+      return row?.postId ? [mapPost(row.postId)] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+/** Sets (never flips) whether a post is saved, so a retry cannot undo it. */
+export async function setPostSaved(postId: string, saved: boolean): Promise<void> {
+  try {
+    unwrap((await apiClient.put(`/posts/book-mark/status/${encodeURIComponent(postId)}`, { saved })).data);
+  } catch (error) {
+    throw serviceError(error);
+  }
+}
 export async function getPost(id: string): Promise<Post> {
   return mapPost(await getData<BackendPost>(`/posts/${encodeURIComponent(id)}`));
 }

@@ -71,7 +71,8 @@ function RootNavigator(): React.JSX.Element {
       !inAuth &&
       !['vault', 'about'].includes((segments as string[])[0] ?? '')
     )
-      router.replace('/login');
+      // Welcome offers both sign-in and sign-up; Login alone hid account creation.
+      router.replace('/welcome');
     else if (
       ['blocked', 'unverified', 'expired'].includes(status) &&
       segments[0] !== 'account-state' &&

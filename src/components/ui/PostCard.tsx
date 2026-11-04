@@ -19,7 +19,7 @@ import { PostActions } from './PostActions';
 import { PostCarousel } from './PostCarousel';
 import { Pressable } from './Pressable';
 import { Text } from './Text';
-import { useRefreshPost } from '@/features/feed/hooks/useFeed';
+import { useRefreshPost, useToggleSaved } from '@/features/feed/hooks/useFeed';
 import { dialog } from '@/components/ui/dialogStore';
 export const PostCard = memo(function PostCard({
   post,
@@ -43,7 +43,7 @@ export const PostCard = memo(function PostCard({
   const [truncated, setTruncated] = useState(false);
   const [comments, setComments] = useState(false);
   const [likes, setLikes] = useState(false);
-  const [hidden, setHidden] = useState(false);
+  const hidden = usePostPresentation((state) => Boolean(state.hidden[post.id]));
   const [localLiked, setLocalLiked] = useState(post.liked);
   const [viewing, setViewing] = useState<number | null>(null);
   // The viewer pages through photos only; videos keep their inline player.
@@ -51,7 +51,7 @@ export const PostCard = memo(function PostCard({
     (item) => !post.locked && !item.locked && item.uri && !isVideo(item),
   );
   const saved = usePostPresentation((state) => Boolean(state.saved[post.id]));
-  const toggleSaved = usePostPresentation((state) => state.toggleSaved);
+  const toggleSaved = useToggleSaved();
   const media = singleMedia(post);
   const liked = onToggleLike ? post.liked : localLiked;
   const count =
@@ -103,7 +103,7 @@ export const PostCard = memo(function PostCard({
           onPress={() =>
             dialog.alert('Post options', undefined, [
               { text: 'Copy link', onPress: () => void Clipboard.setStringAsync(link) },
-              { text: 'Hide post', onPress: () => setHidden(true) },
+              { text: 'Hide post', onPress: () => usePostPresentation.getState().hide(post.id) },
               ...(post.user.id !== me
                 ? [
                     {
@@ -227,7 +227,7 @@ export const PostCard = memo(function PostCard({
         </Text>
       </View>
       {comments ? <CommentsSheet post={post} visible onClose={() => setComments(false)} /> : null}
-      {likes ? <LikesSheet visible onClose={() => setLikes(false)} /> : null}
+      {likes ? <LikesSheet postId={post.id} visible onClose={() => setLikes(false)} /> : null}
     </View>
   );
 });

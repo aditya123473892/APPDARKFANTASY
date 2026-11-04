@@ -292,12 +292,14 @@ test('the native PIN derivation is used when present and matches the JavaScript 
 });
 
 test('App Lock persists PIN-only mode, verifies changes, protects settings and handles enrollment changes', async () => {
-  const data = new Map(); let enrolled = true;
+  const data = new Map(); let enrolled = true, prompts = 0, cancel = false; const reads = [];
   const secure = { WHEN_UNLOCKED_THIS_DEVICE_ONLY:1,
-    getItemAsync:async k=>data.get(k) ?? null,setItemAsync:async(k,v)=>data.set(k,v),deleteItemAsync:async k=>data.delete(k),canUseBiometricAuthentication:()=>enrolled };
+    getItemAsync:async(k,o)=>{ if(o?.requireAuthentication){ reads.push(o); if(cancel) throw new Error('cancelled'); } return data.get(k) ?? null; },
+    setItemAsync:async(k,v)=>data.set(k,v),deleteItemAsync:async k=>data.delete(k),canUseBiometricAuthentication:()=>enrolled };
   const service = load('src/features/app-lock/service.ts',{
     'expo-secure-store':secure, 'expo-crypto':{getRandomBytes:n=>crypto.randomBytes(n)},
-    'expo-local-authentication':{hasHardwareAsync:async()=>true,isEnrolledAsync:async()=>enrolled,authenticateAsync:async()=>({success:enrolled})},
+    'expo-local-authentication':{hasHardwareAsync:async()=>true,isEnrolledAsync:async()=>enrolled,authenticateAsync:async()=>{ prompts++; return {success:enrolled}; }},
+    'react-native':{Platform:{OS:'android'}},
     './credentials':credentials,
   });
   const owner='507f1f77bcf86cd799439011';
@@ -311,6 +313,10 @@ test('App Lock persists PIN-only mode, verifies changes, protects settings and h
   await service.changeLockSettings(owner,'234567',{timeout:60000,biometric:true});
   assert.equal((await service.readAppLock(owner)).timeout,60000);
   await service.biometricUnlock(owner);
+  // One system prompt each: the keystore's own, never a second biometric check first.
+  assert.equal(prompts, 0);
+  assert.equal(reads.at(-1).authenticationPrompt, 'Unlock DARKFANTASY');
+  cancel = true; await assert.rejects(service.biometricUnlock(owner),/PIN/); cancel = false;
   data.delete('darkfantasy.app-lock.'+owner+'.biometric');
   await assert.rejects(service.biometricUnlock(owner),/changed/);
   enrolled=false; await assert.rejects(service.biometricUnlock(owner),/PIN/);
@@ -397,8 +403,11 @@ test('App Lock does not mount protected content before hydration, on account mis
   const auth={session:{userId:owner},currentUser:{username:'test@example.test'}};
   const hook=selector=>selector(auth);hook.getState=()=>auth;
   const lockHook=()=>state; lockHook.setState=()=>{};
+  // State that survives re-renders, so the boundary can remember an unlocked account.
+  const slots=[]; let slot=0;
+  const useState=v=>{const k=slot++; if(!(k in slots)) slots[k]=v; return [slots[k],x=>{slots[k]=typeof x==='function'?x(slots[k]):x;}];};
   const {AppLockBoundary}=load('src/features/app-lock/AppLockBoundary.tsx',{
-    react:{useEffect:fn=>effects.push(fn),useRef:v=>({current:v}),useState:v=>[v,()=>{}]},
+    react:{useEffect:fn=>effects.push(fn),useRef:v=>({current:v}),useState},
     'react-native':{AppState:{currentState:'active',addEventListener:()=>({remove(){}})},Platform:{OS:'android'},View:'View'},
     '@/components/ui':{Button:'Button',Text:'Text',TextField:'TextField'},
     '@/features/auth/store/authStore':{useAuthStore:hook},
@@ -408,12 +417,16 @@ test('App Lock does not mount protected content before hydration, on account mis
     '@/theme/useTheme':{useTheme:()=>({theme:{colors:{}}})},'@/theme':{spacing:{}},
     './credentials':credentials,'./service':{readAppLock:async()=>null},'./state':{useAppLock:lockHook},
   });
-  const render=()=>JSON.stringify(AppLockBoundary({children:'PROTECTED-CONTENT'}));
+  const render=()=>{slot=0;return JSON.stringify(AppLockBoundary({children:'PROTECTED-CONTENT'}));};
   assert.doesNotMatch(render(),/PROTECTED-CONTENT/);
   effects.length=0;
   state={...state,owner,ready:true};assert.doesNotMatch(render(),/PROTECTED-CONTENT/);
   effects.forEach(fn=>fn());assert.equal(splashHidden,1,'native splash must not cover PIN entry');
   state={...state,locked:false};assert.match(render(),/PROTECTED-CONTENT/);
+  // Relocking covers the unlocked app instead of unmounting it, and shows the lock.
+  state={...state,locked:true};const relocked=render();
+  assert.match(relocked,/PROTECTED-CONTENT/);assert.match(relocked,/App Lock/);
+  assert.match(relocked,/no-hide-descendants/,'covered content is hidden from accessibility');
   state={...state,owner:'another-account'};assert.doesNotMatch(render(),/PROTECTED-CONTENT/);
 });
 

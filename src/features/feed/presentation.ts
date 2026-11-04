@@ -6,9 +6,14 @@ import { FEED_MIN_RATIO, feedFrame, type ImageFit } from '@/utils/imageLayout';
 /** Presentation state only; the backend post shape remains unchanged. */
 export const usePostPresentation = create<{
   saved: Record<string, Post>;
+  /** Posts the viewer hid this session; kept outside the card so a recycled row stays hidden. */
+  hidden: Record<string, true>;
   toggleSaved: (post: Post) => void;
+  hide: (postId: string) => void;
 }>((set) => ({
   saved: {},
+  hidden: {},
+  hide: (postId) => set(({ hidden }) => ({ hidden: { ...hidden, [postId]: true } })),
   toggleSaved: (post) =>
     set(({ saved }) => {
       const next = { ...saved };
@@ -55,6 +60,6 @@ export const durationLabel = (seconds = 0) =>
     .toString()
     .padStart(2, '0')}`;
 registerSessionTeardown(() => {
-  usePostPresentation.setState({ saved: {} });
+  usePostPresentation.setState({ saved: {}, hidden: {} });
   mediaPreviews.clear();
 });

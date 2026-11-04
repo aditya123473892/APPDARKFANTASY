@@ -1,9 +1,11 @@
+import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { getRandomBytes } from 'expo-crypto';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 import { checkCredential, createCredential, type PinCredential } from './credentials';
+import { whileExternal } from '@/services/externalActivity';
 
 export const LOCK_TIMEOUTS = [0, 30_000, 60_000, 300_000] as const;
 export type LockConfig = { version: 1; pin: PinCredential; biometric: boolean; biometricHash?: string;
@@ -75,11 +77,24 @@ export function changeLockSettings(owner: string, pin: string, change: { biometr
     if (change.biometric === true) {
       if (!await LocalAuthentication.hasHardwareAsync() || !await LocalAuthentication.isEnrolledAsync() || !SecureStore.canUseBiometricAuthentication())
         throw new Error('Biometric unlock is unavailable. Your PIN still works.');
-      const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Enable biometric unlock',
-        disableDeviceFallback: true, biometricsSecurityLevel: 'strong' });
-      if (!result.success) throw new Error('Biometric authentication cancelled.');
       const secret = getRandomBytes(32);
-      await SecureStore.setItemAsync(name(owner)+'.biometric', bytesToHex(secret), { ...options, requireAuthentication: true });
+      try {
+        // A prompt the app opened itself: it must not count as leaving the app and relock it.
+        await whileExternal(async () => {
+          // Android's keystore asks for the biometric when this key is written; iOS writes
+          // silently, so it confirms once first. Either way the user sees one prompt.
+          if (Platform.OS !== 'android') {
+            const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Enable biometric unlock',
+              disableDeviceFallback: true, biometricsSecurityLevel: 'strong' });
+            if (!result.success) throw new Error('Biometric authentication cancelled.');
+          }
+          await SecureStore.setItemAsync(name(owner)+'.biometric', bytesToHex(secret),
+            { ...options, requireAuthentication: true, authenticationPrompt: 'Enable biometric unlock' });
+        });
+      } catch {
+        secret.fill(0);
+        throw new Error('Biometric authentication cancelled.');
+      }
       next.biometricHash = bytesToHex(sha256(secret)); secret.fill(0); next.biometric = true;
     } else if (change.biometric === false) {
       next.biometric = false; delete next.biometricHash;
@@ -92,10 +107,15 @@ export function biometricUnlock(owner: string) {
   return serial(async () => {
     const config = await readAppLock(owner);
     if (!config?.biometric || !await LocalAuthentication.isEnrolledAsync()) throw new Error('Use your app PIN.');
-    const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock DARKFANTASY',
-      disableDeviceFallback: true, biometricsSecurityLevel: 'strong' });
-    if (!result.success) throw new Error('Use your app PIN.');
-    const secret = await SecureStore.getItemAsync(name(owner)+'.biometric', { requireAuthentication: true });
+    // The keychain/keystore prompt is the proof: the secret is only released after it.
+    // A separate authenticateAsync first made every unlock ask twice.
+    let secret: string | null;
+    try {
+      secret = await SecureStore.getItemAsync(name(owner)+'.biometric',
+        { requireAuthentication: true, authenticationPrompt: 'Unlock DARKFANTASY' });
+    } catch {
+      throw new Error('Use your app PIN.');
+    }
     if (!secret || bytesToHex(sha256(hexToBytes(secret))) !== config.biometricHash)
       throw new Error('Biometrics changed. Unlock with your PIN and enable biometrics again.');
     return config;

@@ -38,6 +38,8 @@ export type PostComment = {
   createdAt?: string;
   /** Local only: shown while the server has not confirmed it yet. */
   pending?: boolean;
+  likeCount?: number;
+  likedByMe?: boolean;
 };
 
 export type Post = {

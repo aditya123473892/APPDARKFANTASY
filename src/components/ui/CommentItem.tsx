@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { PostComment } from '@/features/feed/types';
@@ -11,20 +11,28 @@ import { Pressable } from './Pressable';
 import { Text } from './Text';
 
 import { dialog } from '@/components/ui/dialogStore';
-export function CommentItem({
+const NO_REPLIES: PostComment[] = [];
+
+/** Memoised: pass stable callbacks so a keystroke or one change does not redraw every row. */
+export const CommentItem = memo(function CommentItem({
   comment,
   onReply,
   onDelete,
-  replies = [],
+  onLike,
+  replies = NO_REPLIES,
 }: {
   comment: PostComment;
   onReply: (name: string) => void;
-  onDelete?: () => void;
+  onDelete?: (comment: PostComment) => void;
+  /** Saves the like on the server; without it (preview posts) the heart is local. */
+  onLike?: (comment: PostComment) => void;
   replies?: PostComment[];
 }) {
   const { theme } = useTheme();
   const router = useRouter();
-  const [liked, setLiked] = useState(false);
+  const [localLiked, setLocalLiked] = useState(false);
+  const liked = onLike ? Boolean(comment.likedByMe) : localLiked;
+  const likeCount = onLike ? (comment.likeCount ?? 0) : localLiked ? 1 : 0;
   const [expanded, setExpanded] = useState(false);
   return (
     <View style={{ paddingHorizontal: spacing.lg, paddingVertical: spacing.sm }}>
@@ -67,7 +75,7 @@ export function CommentItem({
                 onPress={() =>
                   dialog.alert('Comment options', undefined, [
                     onDelete
-                      ? { text: 'Delete', style: 'destructive', onPress: onDelete }
+                      ? { text: 'Delete', style: 'destructive', onPress: () => onDelete(comment) }
                       : {
                           text: 'Report',
                           onPress: () =>
@@ -89,7 +97,8 @@ export function CommentItem({
         <Pressable
           accessibilityLabel={liked ? 'Unlike comment' : 'Like comment'}
           accessibilityState={{ selected: liked }}
-          onPress={() => setLiked(!liked)}
+          disabled={comment.pending}
+          onPress={() => (onLike ? onLike(comment) : setLocalLiked(!localLiked))}
           style={{ alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-start' }}
         >
           <Ionicons
@@ -98,7 +107,7 @@ export function CommentItem({
             color={liked ? theme.colors.primary : theme.colors.textMuted}
           />
           <Text variant="caption" weight="regular" color="muted">
-            {liked ? '1' : ''}
+            {likeCount ? likeCount.toLocaleString() : ''}
           </Text>
         </Pressable>
       </View>
@@ -122,4 +131,4 @@ export function CommentItem({
       ) : null}
     </View>
   );
-}
+});

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
-import { AppState, Platform, View } from 'react-native';
+import { AppState, Keyboard, Platform, View } from 'react-native';
 import { Button, Text, TextField } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { sessionIdentity } from '@/features/auth/sessionRuntime';
@@ -13,7 +13,13 @@ import { biometricUnlock, readAppLock, verifyAppPin } from './service';
 import { useAppLock } from './state';
 import { EXTERNAL_GRACE_MS, inExternalActivity } from '@/services/externalActivity';
 
-/** Protected navigation never mounts until secure storage has been read and the lock is satisfied. */
+const cover = { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } as const;
+
+/**
+ * Protected navigation never mounts for an account until secure storage has been read and
+ * the lock is satisfied. After that first unlock, relocking covers the app instead of
+ * unmounting it, so unsent text, scroll positions and open screens survive.
+ */
 export function AppLockBoundary({ children }: PropsWithChildren) {
   const owner = useAuthStore((s) => s.session?.userId ?? null);
   const email = useAuthStore((s) => s.currentUser?.username ?? '');
@@ -28,6 +34,10 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
   // Left for a picker, camera or share sheet the app opened itself.
   const external = useRef(false);
   const [active, setActive] = useState(AppState.currentState === 'active');
+  /** The account whose protected screens have been unlocked (and mounted) once. */
+  const [mountedFor, setMountedFor] = useState<string | null>(null);
+  /** Shows the reading message only when secure storage is slow, not on every sign-in. */
+  const [slowFor, setSlowFor] = useState<string | null>(null);
   useEffect(() => {
     if (owner && state.owner === owner && state.ready && state.locked)
       void SplashScreen.hideAsync().catch(() => undefined);
@@ -64,7 +74,9 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
       setActive(next === 'active');
       const current = useAppLock.getState();
       if (next !== 'active') {
-        if (!prompt.current && background.current === null) {
+        // Only real backgrounding starts the timer. iOS reports "inactive" for Control
+        // Center, notifications and Face ID, which made "Immediately" relock after them.
+        if (next === 'background' && !prompt.current && background.current === null) {
           background.current = Date.now();
           external.current = inExternalActivity();
         }
@@ -75,8 +87,10 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
           current.config && external.current
             ? Math.max(current.config.timeout, EXTERNAL_GRACE_MS)
             : (current.config?.timeout ?? 0);
-        if (current.config && lockExpired(background.current, timeout))
+        if (current.config && lockExpired(background.current, timeout)) {
+          Keyboard.dismiss();
           useAppLock.setState({ locked: true });
+        }
         background.current = null;
         external.current = false;
       }
@@ -160,26 +174,28 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
     offered.current = true;
     void latestUnlock.current(true);
   }, [biometricScreen, state.locked]);
+  const ready = Boolean(owner) && state.owner === owner && state.ready;
+  const open = ready && !state.locked;
+  // Derived during render (React's sanctioned pattern), so the first unlock mounts at once.
+  if (open && owner && mountedFor !== owner) setMountedFor(owner);
+  useEffect(() => {
+    if (ready || !owner) return;
+    const timer = setTimeout(() => setSlowFor(owner), 800);
+    return () => clearTimeout(timer);
+  }, [ready, owner]);
+  const slowRead = !ready && slowFor === owner;
   if (!owner) return <>{children}</>;
-  const ready = state.owner === owner && state.ready;
-  if (ready && !state.locked)
+  // Never while the lock state belongs to another account (it resets after a switch).
+  const mounted = state.owner === owner && (mountedFor === owner || open);
+  if (!mounted && !ready)
+    // Reading secure storage: a plain screen, not an "App Lock" heading on every sign-in.
     return (
-      <View style={{ flex: 1 }}>
-        <View
-          style={{ flex: 1 }}
-          accessibilityElementsHidden={!active}
-          importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}
-        >
-          {children}
-        </View>
-        {!active ? (
-          <View
-            style={{ position: 'absolute', inset: 0, backgroundColor: theme.colors.background }}
-          />
-        ) : null}
+      <View style={{ flex: 1, justifyContent: 'center', backgroundColor: theme.colors.background }}>
+        {slowRead && active ? <Text center>Reading App Lock…</Text> : null}
       </View>
     );
-  return (
+  const covered = !open || !active;
+  const lockScreen = (
     <View
       style={{
         flex: 1,
@@ -277,6 +293,22 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
           ) : null}
         </>
       )}
+    </View>
+  );
+  if (!mounted) return lockScreen;
+  return (
+    <View style={{ flex: 1 }}>
+      <View
+        style={{ flex: 1 }}
+        accessibilityElementsHidden={covered}
+        importantForAccessibility={covered ? 'no-hide-descendants' : 'auto'}
+      >
+        {children}
+      </View>
+      {open && !active ? (
+        <View style={{ ...cover, backgroundColor: theme.colors.background }} />
+      ) : null}
+      {!open ? <View style={cover}>{lockScreen}</View> : null}
     </View>
   );
 }

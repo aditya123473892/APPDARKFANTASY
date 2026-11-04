@@ -1,18 +1,20 @@
 import { Header, Screen } from '@/components/layout';
-import { EmptyState } from '@/components/ui';
+import { EmptyState, Loader } from '@/components/ui';
 import { PostList } from '@/components/ui/PostList';
 import { usePostPresentation } from '@/features/feed/presentation';
-import { useToggleLike } from '@/features/feed/hooks/useFeed';
+import { useSavedPostsSync, useToggleLike } from '@/features/feed/hooks/useFeed';
 import { isPreviewPost } from '@/features/feed/mockSocial';
 
 export default function SavedScreen() {
   const saved = usePostPresentation((state) => state.saved);
   const toggle = useToggleLike();
+  const sync = useSavedPostsSync();
+  const posts = Object.values(saved);
   return (
     <Screen padded={false}>
       <Header title="Saved" back backFallback="/profile" />
       <PostList
-        posts={Object.values(saved)}
+        posts={posts}
         onToggleLike={(post) => {
           if (isPreviewPost(post))
             usePostPresentation.setState({
@@ -28,11 +30,19 @@ export default function SavedScreen() {
           else toggle.mutate({ postId: post.id, liked: !post.liked });
         }}
         ListEmptyComponent={
-          <EmptyState
-            icon="bookmark-outline"
-            title="Saved items"
-            message="Tap the bookmark on a post to save it for this session."
-          />
+          sync.isPending ? (
+            <Loader />
+          ) : (
+            <EmptyState
+              icon="bookmark-outline"
+              title={sync.isError ? 'Saved posts unavailable' : 'Saved items'}
+              message={
+                sync.isError
+                  ? 'Check your connection, then reopen this screen.'
+                  : 'Tap the bookmark on a post to save it here.'
+              }
+            />
+          )
         }
       />
     </Screen>
