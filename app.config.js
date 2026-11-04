@@ -5,7 +5,15 @@ module.exports = ({ config }) => {
     process.env.APP_VARIANT === 'development' &&
     !['production', 'preview', 'apk'].includes(process.env.EAS_BUILD_PROFILE || '') &&
     (process.env.NODE_ENV !== 'production' || process.env.EAS_BUILD_PROFILE === 'development');
-  validateAuthBuild(process.env, { development });
+  // Android Studio/direct Gradle do not load EAS profile variables. With no explicit
+  // profile or endpoint, use the checked-in internal release defaults for both the
+  // native manifest and Metro. Explicit URLs still go through strict validation.
+  if (!development && !process.env.EAS_BUILD_PROFILE && !process.env.EXPO_PUBLIC_API_URL) {
+    const defaults = require('./eas.json').build.apk.env;
+    for (const [key, value] of Object.entries(defaults))
+      if (process.env[key] === undefined || key === 'EXPO_PUBLIC_API_URL') process.env[key] = value;
+  }
+  const authBuild = validateAuthBuild(process.env, { development });
   const encryption = process.env.IOS_USES_NON_EXEMPT_ENCRYPTION;
   if (encryption !== undefined && !['true', 'false'].includes(encryption))
     throw new Error('IOS_USES_NON_EXEMPT_ENCRYPTION must be true or false when provided');
@@ -14,6 +22,7 @@ module.exports = ({ config }) => {
     platforms: development ? ['android', 'ios', 'web'] : ['android', 'ios'],
     extra: {
       ...config.extra,
+      apiUrl: authBuild.url,
       publicPages: {
         privacy: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL,
         terms: process.env.EXPO_PUBLIC_TERMS_URL,

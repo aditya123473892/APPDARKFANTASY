@@ -6,7 +6,9 @@ const metroHost = Constants.expoConfig?.hostUri;
 const apiUrl =
   localApiProxy && metroHost
     ? `http://${metroHost}/api`
-    : (process.env.EXPO_PUBLIC_API_URL ?? (__DEV__ ? 'http://localhost:9000/api' : ''));
+    : (process.env.EXPO_PUBLIC_API_URL ??
+      Constants.expoConfig?.extra?.apiUrl ??
+      (__DEV__ ? 'http://localhost:9000/api' : ''));
 const parsed = new URL(apiUrl);
 if (
   !['http:', 'https:'].includes(parsed.protocol) ||

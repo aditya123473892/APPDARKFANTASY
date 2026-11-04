@@ -17,18 +17,32 @@ function releaseEnvironment(env = process.env) {
   };
 }
 
-function main() {
-  const env = releaseEnvironment();
-  validateAuthBuild(env);
+function nativeBuildEnvironment(env, { platform = process.platform, exists = existsSync } = {}) {
+  const next = { ...env };
+  // Android Studio ships a supported JDK. A stale JAVA_HOME should not prevent a
+  // local build when that JDK is installed; keep valid custom JDKs unchanged.
   if (
-    process.platform === 'win32' &&
-    !env.ANDROID_HOME &&
-    !env.ANDROID_SDK_ROOT &&
-    env.LOCALAPPDATA
+    platform === 'win32' &&
+    (!next.JAVA_HOME || !exists(path.join(next.JAVA_HOME, 'bin', 'java.exe')))
   ) {
-    const sdk = path.join(env.LOCALAPPDATA, 'Android', 'Sdk');
-    if (existsSync(sdk)) env.ANDROID_HOME = sdk;
+    const studioJdk = path.join(
+      next.ProgramFiles || 'C:\\Program Files',
+      'Android',
+      'Android Studio',
+      'jbr',
+    );
+    if (exists(path.join(studioJdk, 'bin', 'java.exe'))) next.JAVA_HOME = studioJdk;
   }
+  if (platform === 'win32' && !next.ANDROID_HOME && !next.ANDROID_SDK_ROOT && next.LOCALAPPDATA) {
+    const sdk = path.join(next.LOCALAPPDATA, 'Android', 'Sdk');
+    if (exists(sdk)) next.ANDROID_HOME = sdk;
+  }
+  return next;
+}
+
+function main() {
+  const env = nativeBuildEnvironment(releaseEnvironment());
+  validateAuthBuild(env);
   const android = path.join(root, 'android');
   if (!existsSync(path.join(android, 'gradlew.bat'))) {
     console.error(
@@ -56,4 +70,4 @@ function main() {
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = { releaseEnvironment };
+module.exports = { releaseEnvironment, nativeBuildEnvironment };

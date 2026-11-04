@@ -15,13 +15,19 @@ rtk npm run android:apk -- --verify
 
 The launcher supplies the existing EAS `apk` profile environment to Gradle,
 including the HTTPS API URL, and disables development dotenv loading. Direct
-`gradlew assembleRelease` does not load `eas.json` or `.env.mobile`; without an
-explicit release environment, Expo config fails with
-`EXPO_PUBLIC_API_URL must be configured`.
+`gradlew assembleRelease` does not load EAS profile variables or `.env.mobile`.
+When no profile or API URL is supplied, app config now uses the checked-in `apk`
+profile's public release defaults, including its HTTPS API URL. It also embeds
+the validated endpoint in the native manifest as a runtime fallback. Explicit
+API URLs are still validated; an HTTP release endpoint fails the build.
+The launcher remains preferred because it disables unrelated root dotenv loading
+and supplies the full release environment before Gradle starts.
 
 Use an installed Android SDK and a supported JDK through `ANDROID_HOME` and
 `JAVA_HOME` (or Android Studio's SDK/Gradle configuration). The launcher also
-detects the default Windows SDK at `%LOCALAPPDATA%/Android/Sdk`. If `android/` has not
+detects the default Windows SDK at `%LOCALAPPDATA%/Android/Sdk` and uses Android
+Studio's bundled JDK when `JAVA_HOME` is missing or points to a deleted installation.
+These defaults apply only to the build process, without changing system settings. If `android/` has not
 been generated, set the release environment before running Expo prebuild:
 
 ```powershell
