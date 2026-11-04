@@ -27,6 +27,7 @@ export function VaultScreen(): React.JSX.Element {
   const colors = theme.colors;
   const offline = useVaultNetwork((s) => s.offline);
   const syncing = useVaultNetwork((s) => s.syncing);
+  const syncError = useVaultNetwork((s) => s.error);
   const { unlocked, revision, owner: unlockedOwner } = useVaultLock();
   const [owner, setOwner] = useState('');
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
@@ -188,11 +189,18 @@ export function VaultScreen(): React.JSX.Element {
   const pending = photos.filter(
     (photo) => photo.syncState !== 'synced' && photo.syncState !== 'rejected',
   ).length;
+  const backedUp = photos.filter(
+    (photo) => photo.syncState === 'synced' && photo.status === 'approved' && !!photo.s3Key,
+  ).length;
   const data = visiblePhotos(photos, hidden);
   const refresh = () => {
     if (refreshing) return;
     setRefreshing(true);
-    void retrySync(owner).finally(() => setRefreshing(false));
+    void retrySync(owner)
+      .catch((cause) =>
+        setError(vaultError(cause, 'Could not start backup. Unlock your vault and try again.')),
+      )
+      .finally(() => setRefreshing(false));
   };
 
   return (
@@ -264,15 +272,40 @@ export function VaultScreen(): React.JSX.Element {
               </View>
             )}
           </View>
-          {pending > 0 && !failed && (
+          <View
+            style={{
+              gap: spacing.sm,
+              padding: spacing.md,
+              borderRadius: radius.md,
+              backgroundColor: colors.surfaceMuted,
+            }}
+          >
+            <Text variant="label">Cloud backup</Text>
             <Text variant="caption" color="secondary" accessibilityLiveRegion="polite">
               {offline
-                ? `${pending} photos waiting for connection`
+                ? `${pending} items waiting for a connection`
                 : syncing
-                  ? `Backing up ${pending} photos…`
-                  : `${pending} photos waiting for backup`}
+                  ? `Backing up… ${backedUp} of ${photos.length} items saved to cloud`
+                  : failed
+                    ? backupError || 'Some items need another backup attempt.'
+                    : pending
+                      ? `${pending} items waiting for backup`
+                      : `${backedUp} of ${photos.length} items saved to cloud`}
             </Text>
-          )}
+            {!!syncError && (
+              <Text variant="caption" color="danger" accessibilityRole="alert">
+                {syncError}
+              </Text>
+            )}
+            <Button
+              label={syncing ? 'Backing up…' : failed ? 'Retry backup' : 'Back up now'}
+              icon="cloud-upload-outline"
+              variant="secondary"
+              loading={syncing || refreshing}
+              disabled={offline || syncing || refreshing || !photos.length}
+              onPress={refresh}
+            />
+          </View>
           <View style={[styles.tabs, { backgroundColor: colors.surfaceMuted }]}>
             {[false, true].map((hiddenOnly) => (
               <Pressable
@@ -303,17 +336,6 @@ export function VaultScreen(): React.JSX.Element {
               </Text>
               <IconButton icon="close" label="Dismiss message" onPress={() => setError('')} />
             </View>
-          )}
-          {failed && !offline && (
-            <Pressable accessibilityRole="button" onPress={refresh} style={styles.notice}>
-              <Ionicons name="cloud-upload-outline" size={18} color={colors.textMuted} />
-              <Text variant="caption" color="secondary" style={styles.grow}>
-                {backupError || 'Some photos could not be backed up.'}
-              </Text>
-              <Text variant="label" color="primary">
-                Retry
-              </Text>
-            </Pressable>
           )}
           <Text variant="caption" color="secondary">
             Wait for backup to finish before deleting originals in Gallery / Photos. Use Download to

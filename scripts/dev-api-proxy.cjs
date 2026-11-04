@@ -24,7 +24,7 @@ function createDevApiProxy(next, port = 9000, hostname = '127.0.0.1') {
         incoming.on('error', () => response.destroy());
       },
     );
-    const timeout = /^\/api\/god-chat\/messages(?:[/?]|$)/.test(request.url || '') ? 135_000 : 60_000;
+    const timeout = /^\/api\/god-chat(?:\/messages)?(?:[/?]|$)/.test(request.url || '') ? 165_000 : 60_000;
     upstream.setTimeout(timeout, () => upstream.destroy(new Error('Backend timeout')));
     upstream.on('error', () => {
       if (response.headersSent) return response.destroy();

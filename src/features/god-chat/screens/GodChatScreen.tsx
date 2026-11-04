@@ -48,7 +48,7 @@ const GREETING: GodChatMessage = {
   by: 'ai',
   at: '',
   content:
-    'We can talk about your fantasies, desires, sex life, intimacy, or the feelings behind them, without judgment. Share only what feels comfortable. What would you like to explore?',
+    'This space is for adult fantasies, desires, sex life, intimacy and sexual wellbeing, without judgment. Share only what feels comfortable. What would you like to explore?',
 };
 
 const TOPICS = [
@@ -322,7 +322,7 @@ export function GodChatScreen(): React.JSX.Element {
           canSendMessages
           disabled={unavailable || ask.isPending || fresh.isPending}
           bottomInset={0}
-          placeholder={withTeam ? 'Message the team…' : 'Share what’s on your mind…'}
+          placeholder={withTeam ? 'Message the team…' : 'Explore your fantasies or desires…'}
         />
         <KeyboardInsetSpacer
           inset={contentInsets.inTabs ? 0 : contentInsets.bottom}

@@ -216,7 +216,7 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
             {recover
               ? 'Verify your account password to reset App Lock. Your vault PIN stays separate.'
               : state.config?.biometric
-                ? 'Use your fingerprint or enter your app PIN.'
+                ? 'Use fingerprint, Face ID or your backup PIN.'
                 : 'Enter your app PIN to continue.'}
           </Text>
           {recover ? (
@@ -255,7 +255,7 @@ export function AppLockBoundary({ children }: PropsWithChildren) {
           />
           {!recover && state.config?.biometric ? (
             <Button
-              label="Unlock with Biometrics"
+              label="Use fingerprint or Face ID"
               variant="secondary"
               disabled={busy}
               onPress={() => void unlock(true)}

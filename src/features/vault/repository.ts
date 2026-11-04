@@ -28,10 +28,14 @@ export function database(owner: string): Promise<SQLite.SQLiteDatabase> {
       await db
         .execAsync("ALTER TABLE photos ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'")
         .catch(() => undefined);
-      for (const column of ['localEncrypted INTEGER NOT NULL DEFAULT 0', 'remoteEncrypted INTEGER NOT NULL DEFAULT 0'])
+      for (const column of [
+        'localEncrypted INTEGER NOT NULL DEFAULT 0',
+        'remoteEncrypted INTEGER NOT NULL DEFAULT 0',
+      ])
         await db.execAsync('ALTER TABLE photos ADD COLUMN ' + column).catch(() => undefined);
       // Recover interrupted work after process death.
       await db.runAsync("UPDATE photos SET syncState='pending' WHERE syncState='syncing'");
+      await repairQueueIn(db);
       return db;
     })();
     databases.set(owner, current);
@@ -39,14 +43,29 @@ export function database(owner: string): Promise<SQLite.SQLiteDatabase> {
   }
   return current;
 }
+/** Repair work left without a queue entry by an older build or interrupted migration. */
+async function repairQueueIn(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.runAsync(`INSERT OR IGNORE INTO queue (id,photoId,operation)
+    SELECT id || ':' || CASE WHEN deletedAt IS NOT NULL THEN 'delete' WHEN s3Key IS NULL THEN 'upload' ELSE 'patch' END,
+      id, CASE WHEN deletedAt IS NOT NULL THEN 'delete' WHEN s3Key IS NULL THEN 'upload' ELSE 'patch' END
+    FROM photos WHERE syncState NOT IN ('synced','rejected')
+      AND (deletedAt IS NOT NULL OR s3Key IS NOT NULL OR localPath IS NOT NULL)`);
+}
+export async function repairQueue(owner: string): Promise<void> {
+  await repairQueueIn(await database(owner));
+}
 export async function list(owner: string): Promise<VaultPhoto[]> {
-  const rows = await (await database(owner)).getAllAsync<VaultPhoto>(
+  const rows = await (
+    await database(owner)
+  ).getAllAsync<VaultPhoto>(
     'SELECT * FROM photos WHERE deletedAt IS NULL ORDER BY sortOrder,createdAt DESC',
   );
-  return rows.map(row => ({ ...row, remoteEncrypted: !!row.remoteEncrypted }));
+  return rows.map((row) => ({ ...row, remoteEncrypted: !!row.remoteEncrypted }));
 }
 export async function get(owner: string, id: string): Promise<VaultPhoto | null> {
-  const row = await (await database(owner)).getFirstAsync<VaultPhoto>('SELECT * FROM photos WHERE id=?', id);
+  const row = await (
+    await database(owner)
+  ).getFirstAsync<VaultPhoto>('SELECT * FROM photos WHERE id=?', id);
   return row ? { ...row, remoteEncrypted: !!row.remoteEncrypted } : null;
 }
 export async function save(
@@ -75,7 +94,12 @@ export async function save(
       photo.syncState,
       photo.error,
     );
-    await tx.runAsync('UPDATE photos SET localEncrypted=?, remoteEncrypted=? WHERE id=?', photo.localEncrypted === 1 ? 1 : 0, photo.remoteEncrypted ? 1 : 0, photo.id);
+    await tx.runAsync(
+      'UPDATE photos SET localEncrypted=?, remoteEncrypted=? WHERE id=?',
+      photo.localEncrypted === 1 ? 1 : 0,
+      photo.remoteEncrypted ? 1 : 0,
+      photo.id,
+    );
     if (operation)
       await tx.runAsync(
         `INSERT OR IGNORE INTO queue (id,photoId,operation) VALUES (?,?,?)`,

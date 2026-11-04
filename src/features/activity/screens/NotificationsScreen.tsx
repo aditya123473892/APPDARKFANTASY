@@ -1,5 +1,12 @@
 import { FlashList } from '@shopify/flash-list';
-import { ActivityIndicator, RefreshControl, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Platform,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -14,6 +21,7 @@ import { notificationTarget } from '../notificationTarget';
 import { NotificationRow } from '../components/NotificationRow';
 import { useMarkNotificationsRead, useNotifications } from '../hooks/useActivity';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import { retryPushRegistration, usePushStatus } from '../pushStatus';
 
 export function NotificationsScreen({ embedded = false }: { embedded?: boolean }) {
   const query = useNotifications();
@@ -21,10 +29,35 @@ export function NotificationsScreen({ embedded = false }: { embedded?: boolean }
   const read = useMarkNotificationsRead();
   const router = useRouter();
   const { theme } = useTheme();
+  const push = usePushStatus();
   return (
     <Screen padded={false} edges={embedded ? [] : ['top', 'left', 'right', 'bottom']}>
       <View style={{ paddingHorizontal: spacing.screen }}>
         {!embedded && <Header title="Notifications" back backFallback="/home" />}
+        {Platform.OS !== 'web' && push.status !== 'ready' && (
+          <View style={{ gap: spacing.sm, paddingVertical: spacing.md }}>
+            <Text variant="label">Phone notifications</Text>
+            <Text variant="caption" color="secondary" accessibilityLiveRegion="polite">
+              {push.message}
+            </Text>
+            {push.status !== 'checking' && (
+              <Button
+                label={push.status === 'denied' ? 'Open phone settings' : 'Retry setup'}
+                variant="secondary"
+                icon={push.status === 'denied' ? 'settings-outline' : 'refresh-outline'}
+                onPress={() => {
+                  if (push.status === 'denied')
+                    void Linking.openSettings().catch(() =>
+                      toast.error(
+                        'Open your phone settings and enable notifications for DARKFANTASY.',
+                      ),
+                    );
+                  else retryPushRegistration();
+                }}
+              />
+            )}
+          </View>
+        )}
         <View style={styles.toolbar}>
           <Text variant="label" color="secondary" style={{ flex: 1 }}>
             {query.data?.unreadCount ? `${query.data.unreadCount} unread` : 'Notifications'}

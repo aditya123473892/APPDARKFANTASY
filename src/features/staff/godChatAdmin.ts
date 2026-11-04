@@ -7,13 +7,14 @@ import type { GodChatMessage } from '@/features/god-chat/godChatService';
 export type GodSessionFilter = 'open' | 'live' | 'staff' | 'flagged' | 'ended' | 'all';
 /** Why the server's guardrails flagged a message or chat. */
 export type GodChatFlag =
-  'self_harm' | 'unsafe' | 'injection' | 'sensitive_data' | 'output_blocked';
+  'self_harm' | 'unsafe' | 'injection' | 'sensitive_data' | 'output_blocked' | 'off_topic';
 export const flagLabels: Record<GodChatFlag, string> = {
   self_harm: 'Self-harm',
   unsafe: 'Harmful request',
   injection: 'Tried to break the rules',
   sensitive_data: 'Shared a secret (removed)',
   output_blocked: 'AI reply blocked',
+  off_topic: 'Outside adult intimacy topics',
 };
 type Person = { id: string; name: string; username: string; avatar: string };
 export type AdminGodSession = {

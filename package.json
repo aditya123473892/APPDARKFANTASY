@@ -19,6 +19,7 @@
     "test:vault": "node --test scripts/test-vault.cjs",
     "test:chat-cache": "node --test scripts/test-chat-cache.cjs",
     "test:reliability": "node --test scripts/test-reliability.cjs",
+    "test:device-features": "node --test scripts/test-device-features.cjs",
     "test:release": "node --test scripts/test-release.cjs",
     "release:check": "node scripts/check-release.cjs",
     "release:check-native": "node scripts/check-native-release.cjs",

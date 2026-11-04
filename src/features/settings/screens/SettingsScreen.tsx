@@ -147,6 +147,12 @@ export function SettingsScreen(): React.JSX.Element {
         </SettingsGroup>
         <SettingsGroup title="Account">
           <SettingsRow
+            icon="notifications-outline"
+            title="Notifications"
+            subtitle="Phone alerts and connection status"
+            onPress={() => router.push('/notifications' as Href)}
+          />
+          <SettingsRow
             icon="lock-closed-outline"
             title="App Lock"
             subtitle="Custom PIN and optional biometrics"

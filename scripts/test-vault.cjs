@@ -21,6 +21,8 @@ function load(file, modules = {}) {
             : require(name)),
       Buffer,
       Uint8Array,
+      URL,
+      AbortController,
       console,
       Date,
       Math,
@@ -1022,6 +1024,78 @@ test('library refresh runs before queued work and identical server rows do not r
   await sync.syncVault();
   assert.equal(writes, 2);
   assert.equal(local.hidden, 0);
+});
+
+test('backup requested during a running queue snapshot runs again and keeps the phone copy', async () => {
+  let release, snapshotReady;
+  const started = new Promise(resolve => { snapshotReady = resolve; });
+  let first = true, jobs = [], uploads = 0;
+  let row = { id: 'video', kind: 'video', localPath: 'file:///private/video.mp4', s3Key: null,
+    sha256: 'md5:abc', size: 100, status: 'local', updatedAt: 1, syncState: 'pending_upload', hidden: 0 };
+  const remote = { ...row, localPath: undefined, s3Key: 'vault/cloud.mp4', status: 'approved', remoteEncrypted: true };
+  const db = {
+    getAllAsync: async () => {
+      if (first) { first = false; snapshotReady(); await new Promise(resolve => { release = resolve; }); return []; }
+      return [...jobs];
+    },
+    runAsync: async sql => { if (sql.startsWith('DELETE FROM queue')) jobs = []; },
+  };
+  const sync = load('src/features/vault/sync.ts', {
+    'react-native': { AppState: { currentState: 'active', addEventListener() {} } },
+    // Unknown connectivity must allow the actual upload attempt.
+    'expo-network': { getNetworkStateAsync: async () => ({ isConnected: null, isInternetReachable: null }) },
+    'expo-file-system/legacy': { FileSystemUploadType: { MULTIPART: 1 }, createUploadTask: () => ({
+      uploadAsync: async () => { uploads++; return { status: 204 }; }, cancelAsync: async () => {},
+    }) },
+    zustand: store(), axios: { isAxiosError: () => false },
+    '@/services/api/apiClient': { apiClient: {
+      get: async () => ({ data: { data: { items: [], cursor: null } } }),
+      post: async url => ({ data: { data: url.endsWith('upload-url')
+        ? { status: 'pending', url: 'https://storage.example/upload', fields: { key: 'upload' } } : remote } }),
+      patch: async () => ({ data: { data: remote } }),
+    } },
+    '@/services/api/backend': { unwrap: value => value.data },
+    '@/features/auth/sessionRuntime': { sessionIdentity: { userId: 'owner', generation: 1 }, assertSessionCurrent() {}, registerSessionTeardown() {} },
+    './repository': { database: async () => db, get: async () => row, save: async (owner, value) => { row = value; }, setting: async () => '', setSetting: async () => {} },
+    './files': {}, './crypto': crypto, './conflicts': load('src/features/vault/conflicts.ts'),
+    './vaultService': { serial: work => work() },
+    './lock': { useVaultLock: { getState: () => ({ unlocked: true, owner: 'owner' }) }, refreshVault() {} },
+  });
+  const work = sync.syncVault();
+  await started;
+  jobs.push({ id: 'video:upload', photoId: 'video', operation: 'upload', attempts: 0 });
+  const requested = sync.syncVault();
+  release();
+  await Promise.all([work, requested]);
+  assert.equal(uploads, 1);
+  assert.equal(row.syncState, 'synced');
+  assert.equal(row.localPath, 'file:///private/video.mp4');
+  assert.equal(row.s3Key, 'vault/cloud.mp4');
+  assert.equal(sync.useVaultNetwork.getState().offline, false);
+});
+
+test('retry repairs missing upload, patch and deletion jobs without duplicating work or retrying rejected items', async () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const sqlite = new DatabaseSync(':memory:');
+  const db = { execAsync: async sql => sqlite.exec(sql), runAsync: async (sql, ...args) => sqlite.prepare(sql).run(...args) };
+  const repo = load('src/features/vault/repository.ts', {
+    'expo-file-system/legacy': { documentDirectory: 'file:///private/', makeDirectoryAsync: async () => {} },
+    'expo-sqlite': { openDatabaseAsync: async () => db },
+  });
+  const owner = '0123456789abcdef01234567';
+  await repo.database(owner);
+  const add = sqlite.prepare(`INSERT INTO photos (id,s3Key,localPath,sha256,size,status,createdAt,updatedAt,deletedAt,syncState)
+    VALUES (?, ?, 'file:///saved', 'abc', 1, 'local', 1, 1, ?, ?)`);
+  add.run('upload', null, null, 'failed');
+  add.run('patch', 'cloud', null, 'pending');
+  add.run('delete', 'cloud', 2, 'pending');
+  add.run('rejected', null, null, 'rejected');
+  await repo.repairQueue(owner);
+  await repo.repairQueue(owner);
+  assert.deepEqual(sqlite.prepare('SELECT photoId,operation FROM queue ORDER BY photoId').all().map(r => ({ ...r })), [
+    { photoId: 'delete', operation: 'delete' }, { photoId: 'patch', operation: 'patch' }, { photoId: 'upload', operation: 'upload' },
+  ]);
+  sqlite.close();
 });
 
 function store() {

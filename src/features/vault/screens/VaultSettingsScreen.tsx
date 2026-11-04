@@ -7,7 +7,7 @@ import { Button, Text, TextField } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
 import { SettingsGroup, SettingsRow } from '@/features/settings/components/SettingsRow';
-import { noDeviceLock, setUnlockMethod, unlockMethod, useVaultLock } from '../lock';
+import { noDeviceLock, setUnlockMethod, unlock, unlockMethod, useVaultLock } from '../lock';
 import { PIN_PATTERN, type UnlockMethod } from '../pin';
 import { initializeVaultOwner } from '../vaultService';
 import { vaultError } from '../presentation';
@@ -71,32 +71,46 @@ export function VaultSettingsScreen(): React.JSX.Element {
     <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
       <Header title="Vault security" back backFallback={'/vault' as Href} />
       {!open ? (
-        <Text color="secondary" center style={styles.locked}>
-          Unlock your vault to change how it opens.
-        </Text>
+        <View style={[styles.form, styles.locked]}>
+          <Text color="secondary" center>
+            {noLock && method !== 'pin'
+              ? 'Set up a screen lock on your phone, then unlock your vault to choose its security settings.'
+              : 'Unlock your vault to choose how it opens.'}
+          </Text>
+          <Button
+            label="Unlock vault"
+            icon="lock-open-outline"
+            loading={busy}
+            disabled={!owner || (noLock && method !== 'pin')}
+            onPress={() => void run(() => unlock(owner), 'Vault unlocked')}
+          />
+          {!!error && (
+            <Text color="danger" accessibilityRole="alert">
+              {error}
+            </Text>
+          )}
+        </View>
       ) : (
         <View style={styles.content}>
           <SettingsGroup title="Open vault with">
             <SettingsRow
-              icon="finger-print"
-              title="Biometrics"
+              icon={method === 'device' ? 'checkmark-circle' : 'finger-print'}
+              title="Phone lock (recommended)"
               subtitle={
                 noLock
                   ? 'Set up a phone screen lock first'
-                  : 'Fingerprint or face, with your screen lock as backup'
+                  : 'Fingerprint, Face ID or your phone passcode'
               }
-              value={method === 'device'}
-              onValueChange={() => {
+              onPress={() => {
                 if (method === 'device') return;
                 void run(() => setUnlockMethod(owner, 'device'), 'Vault now opens with biometrics');
               }}
             />
             <SettingsRow
-              icon="keypad-outline"
+              icon={method === 'pin' ? 'checkmark-circle' : 'keypad-outline'}
               title="Vault PIN"
               subtitle="A separate 4–8 digit PIN just for the vault"
-              value={method === 'pin'}
-              onValueChange={() => {
+              onPress={() => {
                 if (method !== 'pin') setEditingPin(true);
               }}
               last

@@ -20,11 +20,15 @@ import { retryDelay, remoteWins, sameRemotePhoto } from './conflicts';
 import type { VaultPhoto, RemotePhoto, QueueJob } from './types';
 import { inExternalActivity } from '@/services/externalActivity';
 
-export const useVaultNetwork = create<{ offline: boolean; syncing: boolean }>(() => ({
-  offline: false,
-  syncing: false,
-}));
+export const useVaultNetwork = create<{ offline: boolean; syncing: boolean; error: string | null }>(
+  () => ({
+    offline: false,
+    syncing: false,
+    error: null,
+  }),
+);
 let running: Promise<void> | null = null;
+let rerunRequested = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const cancelTransfers = new Set<() => void>();
 export function cancelVaultTransfers(): void {
@@ -417,12 +421,12 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
           status: rejected ? 'rejected' : latest.status,
           error: rejected
             ? `${latest.kind === 'video' ? 'Video' : 'Photo'} did not pass moderation. Delete it to remove it.`
-            : safeLocal
-              ? backupStatus({ ...latest, localEncrypted: 1, syncState: 'failed' })
-              : status === 401
-                ? 'Sign in again to back up this photo.'
-                : status === 403
-                  ? 'Backup was denied. Check your account and storage permissions.'
+            : status === 401
+              ? 'Sign in again to back up this photo.'
+              : status === 403
+                ? 'Cloud backup was denied. Check your sign-in method and account permissions. Your phone copy has been kept.'
+                : status === 429
+                  ? 'Cloud backup is busy. It will retry automatically. Your phone copy has been kept.'
                   : status === 503
                     ? 'Photo storage is unavailable. Try backup again later.'
                     : backupStatus({
@@ -486,8 +490,11 @@ async function pull(owner: string, valid: () => void): Promise<void> {
   } while (cursor);
 }
 export function syncVault(): Promise<void> {
-  if (running) return running;
-  running = (async () => {
+  if (running) {
+    rerunRequested = true;
+    return running;
+  }
+  const pass = async () => {
     const owner = sessionIdentity.userId;
     if (!owner || AppState.currentState !== 'active') return;
     const lockState = useVaultLock.getState();
@@ -495,8 +502,9 @@ export function syncVault(): Promise<void> {
     // Leaving the vault locks it, but saved items must still reach the cloud. A locked
     // vault only finishes its queue; the library refresh waits for the next unlock.
     if (!open && !(await repo.hasDueJobs(owner))) return;
-    const network = await Network.getNetworkStateAsync();
-    const offline = !network.isConnected || network.isInternetReachable === false;
+    // An unknown connectivity result is not proof of being offline. Let the transfer try.
+    const network = await Network.getNetworkStateAsync().catch(() => null);
+    const offline = network?.isConnected === false || network?.isInternetReachable === false;
     useVaultNetwork.setState({ offline });
     if (offline) return;
     const session = sessionIdentity.generation;
@@ -504,7 +512,7 @@ export function syncVault(): Promise<void> {
       assertSessionCurrent(session);
       if (sessionIdentity.userId !== owner) throw new Error('Vault owner changed');
     };
-    useVaultNetwork.setState({ syncing: true });
+    useVaultNetwork.setState({ syncing: true, error: null });
     try {
       // Restore the library before potentially slow queued uploads.
       if (open)
@@ -518,15 +526,25 @@ export function syncVault(): Promise<void> {
     } finally {
       useVaultNetwork.setState({ syncing: false });
     }
-  })()
-    .catch(() => undefined)
-    .finally(() => {
-      running = null;
-    });
+  };
+  running = (async () => {
+    do {
+      rerunRequested = false;
+      await pass().catch(() => {
+        useVaultNetwork.setState({
+          error:
+            'Could not finish cloud sync. Your saved phone copies have been kept. Try Back up now.',
+        });
+      });
+    } while (rerunRequested);
+  })().finally(() => {
+    running = null;
+  });
   return running;
 }
 export async function retrySync(owner: string): Promise<void> {
   assertUnlocked(owner);
+  await repo.repairQueue(owner);
   await (await repo.database(owner)).runAsync('UPDATE queue SET nextAttemptAt=0');
   await syncVault();
 }
@@ -534,7 +552,7 @@ export function startSync(): () => void {
   void Network.getNetworkStateAsync()
     .then((state) =>
       useVaultNetwork.setState({
-        offline: !state.isConnected || state.isInternetReachable === false,
+        offline: state.isConnected === false || state.isInternetReachable === false,
       }),
     )
     .catch(() => undefined);
@@ -548,15 +566,15 @@ export function startSync(): () => void {
   tick();
   const network = Network.addNetworkStateListener((state) => {
     useVaultNetwork.setState({
-      offline: !state.isConnected || state.isInternetReachable === false,
+      offline: state.isConnected === false || state.isInternetReachable === false,
     });
     if (state.isConnected) void syncVault();
   });
   const app = AppState.addEventListener('change', (state) => {
     if (state === 'active') void syncVault();
   });
-  const unlockSub = useVaultLock.subscribe((state) => {
-    if (state.unlocked) void syncVault();
+  const unlockSub = useVaultLock.subscribe((state, previous) => {
+    if (state.unlocked && (!previous.unlocked || state.owner !== previous.owner)) void syncVault();
   });
   return () => {
     disposed = true;
