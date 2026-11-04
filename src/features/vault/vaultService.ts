@@ -255,25 +255,3 @@ export async function initializeVaultOwner(): Promise<string> {
   }
   return owner;
 }
-
-/** Publish a separate approved copy; vault keys never attach to public resources. */
-export async function publishPhoto(
-  asset: { uri: string; type: string; name: string },
-  transport: (prepared: { uri: string; type: string; name: string }) => Promise<string>,
-): Promise<string> {
-  const owner = sessionIdentity.userId;
-  if (!owner) throw new Error('Sign in before publishing a photo.');
-  const session = sessionIdentity.generation;
-  if (!useVaultLock.getState().unlocked || useVaultLock.getState().owner !== owner)
-    await unlock(owner);
-  const photo = await importPhoto(owner, asset.uri);
-  void import('./sync').then(({ syncVault }) => syncVault()).catch(() => undefined);
-  let temp: string | undefined;
-  try {
-    assertSessionCurrent(session);
-    temp = await viewPhoto(owner, photo.id);
-    return await transport({ ...asset, uri: temp, type: 'image/jpeg', name: 'photo.jpg' });
-  } finally {
-    if (temp) await files.removeTemp(temp);
-  }
-}

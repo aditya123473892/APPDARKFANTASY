@@ -117,6 +117,18 @@ export async function unsynced(owner: string): Promise<number> {
     await legacy.closeAsync();
   }
 }
+/** Whether queued backup work is due. Never creates a vault for an account that has none. */
+export async function hasDueJobs(owner: string): Promise<boolean> {
+  if (!databases.has(owner) && !(await FS.getInfoAsync(`${directory(owner)}vault.db`)).exists)
+    return false;
+  const row = await (
+    await database(owner)
+  ).getFirstAsync<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM queue WHERE nextAttemptAt<=?',
+    Date.now(),
+  );
+  return (row?.count ?? 0) > 0;
+}
 export async function close(owner: string): Promise<void> {
   const db = databases.get(owner);
   databases.delete(owner);

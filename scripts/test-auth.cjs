@@ -3030,7 +3030,7 @@ test('Android post photos skip the vault, upload without API credentials, confir
   assert.equal(uploads[0].options.parameters.key, 'temp/owner/server.jpg');
   assert.ok(requests.every((row) => row.auth?.startsWith('Bearer ')));
   assert.equal(JSON.stringify(requests).includes('file:///'), false);
-  assert.equal(JSON.stringify(resize), JSON.stringify([{ width: 1080 }]), 'the uploader itself resizes the photo');
+  assert.equal(JSON.stringify(resize), JSON.stringify([{ width: 1080, height: 675 }]), 'the uploader itself resizes the photo');
   assert.equal(saves.length, 1, 'one temporary JPEG copy');
   assert.deepEqual(deleted, ['file:///cache/sanitized.jpg']);
   h.runtime.teardownSession();

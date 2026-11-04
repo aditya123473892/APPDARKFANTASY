@@ -43,7 +43,8 @@ export async function pickMedia(): Promise<UploadAsset[]> {
       mediaTypes: ['images', 'videos'],
       videoMaxDuration: 60,
       allowsMultipleSelection: false,
-      quality: 0.85,
+      // Photos are re-encoded once before upload; compressing here too loses quality twice.
+      quality: 1,
       base64: false,
       exif: false,
     }),

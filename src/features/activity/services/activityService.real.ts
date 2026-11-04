@@ -15,6 +15,14 @@ type Row = {
   navigation?: import('../notificationTarget').NotificationNavigation;
 };
 const objectId = (value?: string) => typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
+const kinds: Record<string, AppNotification['kind']> = {
+  follow_request: 'request',
+  new_follower: 'request',
+  follow_accepted: 'connection',
+  direct_message: 'message',
+  post_like: 'like',
+  post_comment: 'reply',
+};
 export const realActivityService: ActivityService = {
   async list(before) {
     const page = await getData<{ notifications: Row[]; nextCursor?: string; unreadCount: number }>(
@@ -38,7 +46,7 @@ export const realActivityService: ActivityService = {
         throw new ServiceError('UNKNOWN');
       return {
         id: row._id,
-        kind: row.type === 'follow_request' ? 'request' : row.type === 'follow_accepted' ? 'connection' : row.type === 'direct_message' ? 'message' : 'system',
+        kind: kinds[row.type] ?? 'system',
         actor: {
           id: objectId(row.sender?._id) ? row.sender!._id : '',
           name: row.sender?.displayname || 'DARKFANTASY',

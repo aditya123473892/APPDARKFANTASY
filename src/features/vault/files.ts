@@ -82,7 +82,7 @@ export async function clearTemps(): Promise<void> {
 export async function cleanupStartup(): Promise<void> {
   await clearTemps();
   if (!FS.cacheDirectory) return;
-  for (const name of ['ImagePicker', 'ImageManipulator'])
+  for (const name of ['ImagePicker', 'ImageManipulator', 'vault-upload'])
     await FS.deleteAsync(`${FS.cacheDirectory}${name}/`, { idempotent: true });
 }
 export async function temporaryFile(bytes: Uint8Array): Promise<string> {
@@ -94,6 +94,22 @@ export async function temporaryFile(bytes: Uint8Array): Promise<string> {
 }
 export async function removeTemp(uri: string): Promise<void> {
   if (!uri.startsWith(tempDirectory())) return;
+  await FS.deleteAsync(uri, { idempotent: true });
+}
+/** Backup copies live outside vault-temp: locking the vault must not delete a file mid-upload. */
+const uploadDirectory = () => {
+  if (!FS.cacheDirectory) throw new Error('Vault requires Android');
+  return `${FS.cacheDirectory}vault-upload/`;
+};
+export async function uploadFile(bytes: Uint8Array): Promise<string> {
+  const dir = uploadDirectory();
+  await FS.makeDirectoryAsync(dir, { intermediates: true });
+  const uri = `${dir}${uuid()}.jpg`;
+  await new File(uri).write(bytes);
+  return uri;
+}
+export async function removeUpload(uri: string): Promise<void> {
+  if (!uri.startsWith(uploadDirectory())) return;
   await FS.deleteAsync(uri, { idempotent: true });
 }
 export async function plaintext(owner: string, id: string, path: string): Promise<Uint8Array> {

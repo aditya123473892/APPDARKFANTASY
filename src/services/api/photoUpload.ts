@@ -110,9 +110,16 @@ async function performUpload(
     if (prepared) clean = { uri: asset.uri };
     else {
       const context = ImageManipulator.manipulate(asset.uri);
-      const source = await context.renderAsync();
-      if (source.width > 1080) context.resize({ width: 1080 });
-      const rendered = await context.renderAsync();
+      let rendered = await context.renderAsync();
+      // Bound both edges so tall panoramas are not uploaded at full height.
+      const ratio = Math.min(1080 / rendered.width, 2160 / rendered.height);
+      if (ratio < 1) {
+        context.resize({
+          width: Math.round(rendered.width * ratio),
+          height: Math.round(rendered.height * ratio),
+        });
+        rendered = await context.renderAsync();
+      }
       clean = await rendered.saveAsync({
         compress: 0.8,
         format: SaveFormat.JPEG,

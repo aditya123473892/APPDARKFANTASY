@@ -50,12 +50,10 @@ async function remoteRequest<T>(fn: () => Promise<{ data: unknown }>): Promise<T
   return unwrap<T>(body);
 }
 async function canonicalBytes(
-  owner: string,
   id: string,
+  valid: () => void,
 ): Promise<{ bytes: Uint8Array; photo: RemotePhoto }> {
-  const scope = assertUnlocked(owner),
-    session = sessionIdentity.generation;
-  assertSessionCurrent(session);
+  valid();
   const { url, photo } = await remoteRequest<{ url: string; photo: RemotePhoto }>(() =>
     apiClient.get(`/vault/${id}/download-url`),
   );
@@ -73,8 +71,7 @@ async function canonicalBytes(
     if (Number(response.headers.get('content-length')) > 5 * 1024 * 1024)
       throw new Error('Photo exceeds size limit');
     const bytes = new Uint8Array(await response.arrayBuffer());
-    assertSessionCurrent(session);
-    assertEpoch(owner, scope);
+    valid();
     if (
       bytes.length > 5 * 1024 * 1024 ||
       bytes.length !== photo.size ||
@@ -137,7 +134,10 @@ export async function downloadPhoto(owner: string, id: string): Promise<void> {
   if ((await repo.get(owner, id))?.kind === 'video') return downloadVideo(owner, id);
   const scope = assertUnlocked(owner),
     session = sessionIdentity.generation;
-  const { bytes, photo } = await canonicalBytes(owner, id);
+  const { bytes, photo } = await canonicalBytes(id, () => {
+    assertSessionCurrent(session);
+    assertEpoch(owner, scope);
+  });
   try {
     await serial(async () => {
       assertEpoch(owner, scope);
@@ -223,7 +223,7 @@ async function upload(owner: string, photo: VaultPhoto, valid: () => void): Prom
       valid();
       if (bytes.length !== photo.size || (await hash(bytes)) !== photo.sha256)
         throw new Error('Local photo verification failed');
-      uri = await files.temporaryFile(bytes);
+      uri = await files.uploadFile(bytes);
       valid();
       if (!signed.fields?.key) throw new Error('Invalid upload response');
       const task = FS.createUploadTask(signedURL(signed.url!), uri, {
@@ -249,7 +249,7 @@ async function upload(owner: string, photo: VaultPhoto, valid: () => void): Prom
       }
     } finally {
       bytes.fill(0);
-      if (uri) await files.removeTemp(uri);
+      if (uri) await files.removeUpload(uri);
     }
   }
   valid();
@@ -328,7 +328,7 @@ export async function processQueue(owner: string, valid: () => void): Promise<vo
         // Videos are stored unchanged and keep their local file.
         const canonical =
           job.operation === 'upload' && !remote.deletedAt && photo.kind !== 'video'
-            ? await canonicalBytes(owner, photo.id)
+            ? await canonicalBytes(photo.id, valid)
             : null;
         try {
           await serial(async () => {
@@ -488,34 +488,33 @@ async function pull(owner: string, valid: () => void): Promise<void> {
 export function syncVault(): Promise<void> {
   if (running) return running;
   running = (async () => {
-    const { owner, unlocked } = useVaultLock.getState();
-    if (
-      !owner ||
-      !unlocked ||
-      AppState.currentState !== 'active' ||
-      sessionIdentity.userId !== owner
-    )
-      return;
+    const owner = sessionIdentity.userId;
+    if (!owner || AppState.currentState !== 'active') return;
+    const lockState = useVaultLock.getState();
+    const open = lockState.unlocked && lockState.owner === owner;
+    // Leaving the vault locks it, but saved items must still reach the cloud. A locked
+    // vault only finishes its queue; the library refresh waits for the next unlock.
+    if (!open && !(await repo.hasDueJobs(owner))) return;
     const network = await Network.getNetworkStateAsync();
     const offline = !network.isConnected || network.isInternetReachable === false;
     useVaultNetwork.setState({ offline });
     if (offline) return;
-    const scope = assertUnlocked(owner),
-      session = sessionIdentity.generation;
+    const session = sessionIdentity.generation;
     const valid = () => {
-      assertEpoch(owner, scope);
       assertSessionCurrent(session);
+      if (sessionIdentity.userId !== owner) throw new Error('Vault owner changed');
     };
     useVaultNetwork.setState({ syncing: true });
     try {
       // Restore the library before potentially slow queued uploads.
-      try {
-        await pull(owner, valid);
-      } catch {
-        valid();
-      } // A failed library refresh must not block saved uploads/deletes.
+      if (open)
+        try {
+          await pull(owner, valid);
+        } catch {
+          valid();
+        } // A failed library refresh must not block saved uploads/deletes.
       await processQueue(owner, valid);
-      await pull(owner, valid);
+      if (open) await pull(owner, valid);
     } finally {
       useVaultNetwork.setState({ syncing: false });
     }
