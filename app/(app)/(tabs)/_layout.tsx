@@ -50,11 +50,12 @@ export default function TabsLayout(): React.JSX.Element {
         tabBarBadgeStyle: {
           backgroundColor: theme.colors.primary,
           color: theme.colors.onPrimary,
-          width: spacing.sm,
-          minWidth: spacing.sm,
-          height: spacing.sm,
-          paddingHorizontal: spacing.none,
-          borderRadius: spacing.xs,
+          minWidth: 20,
+          height: 20,
+          paddingHorizontal: spacing.xs,
+          borderRadius: 10,
+          fontSize: typography.size.xs,
+          fontFamily: typography.family.semibold,
         },
         tabBarIcon: ({ focused }) => (
           <Ionicons
@@ -72,7 +73,7 @@ export default function TabsLayout(): React.JSX.Element {
         name="chats"
         options={{
           title: 'Messages',
-          tabBarBadge: unread > 0 ? '' : undefined,
+          tabBarBadge: unread > 99 ? '99+' : unread > 0 ? unread : undefined,
           tabBarAccessibilityLabel: unread ? `Messages, ${unread} unread` : 'Messages',
         }}
       />

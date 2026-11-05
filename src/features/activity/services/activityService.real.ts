@@ -17,10 +17,11 @@ type Row = {
 const objectId = (value?: string) => typeof value === 'string' && /^[a-f\d]{24}$/i.test(value);
 const kinds: Record<string, AppNotification['kind']> = {
   follow_request: 'request',
-  new_follower: 'request',
+  new_follower: 'connection',
   follow_accepted: 'connection',
   direct_message: 'message',
   post_like: 'like',
+  comment_like: 'like',
   post_comment: 'reply',
 };
 export const realActivityService: ActivityService = {
