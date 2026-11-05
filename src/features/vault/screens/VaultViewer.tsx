@@ -7,7 +7,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { Text, Button, IconButton } from '@/components/ui';
 import { useTheme } from '@/theme/useTheme';
 import { useScreenshotProtection } from '@/hooks/useScreenshotProtection';
-import { backupStatus } from '../backupStatus';
+import { hasCloudBackup, privateImagesMessage } from '../backupStatus';
 import { useVaultLock, unlock } from '../lock';
 import { editPhoto, initializeVaultOwner } from '../vaultService';
 import { get } from '../repository';
@@ -168,7 +168,9 @@ export function VaultViewer(): React.JSX.Element {
             'Couldn’t update this photo.',
           ),
       },
-      ...(photo?.localPath ? [{ text: 'Remove device copy', onPress: removeLocal }] : []),
+      ...(photo?.localPath && hasCloudBackup(photo) && photo.syncState === 'synced'
+        ? [{ text: 'Remove device copy', onPress: removeLocal }]
+        : []),
       { text: 'Delete from vault', style: 'destructive', onPress: remove },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -244,14 +246,9 @@ export function VaultViewer(): React.JSX.Element {
                 Hidden photo
               </Text>
             ) : null}
-            <Text variant="caption" color="secondary" center>
-              {photo ? backupStatus(photo) : 'Keep the phone copy until backup completes'}
+            <Text variant="caption" color="secondary" center accessibilityLiveRegion="polite">
+              {privateImagesMessage(photo ? [photo] : [])}
             </Text>
-            {photo?.status === 'rejected' && (
-              <Text color="danger" accessibilityRole="alert">
-                This photo wasn’t accepted for backup. You can keep it here, export it or delete it.
-              </Text>
-            )}
             <View style={[styles.actions, { borderTopColor: colors.border }]}>
               <Button
                 label="Share"

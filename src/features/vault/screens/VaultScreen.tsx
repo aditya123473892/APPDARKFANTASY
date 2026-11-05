@@ -18,6 +18,7 @@ import { exportPhotos } from '../export';
 import { removeDeviceCopies } from '../deviceStorage';
 import { visiblePhotos, vaultError } from '../presentation';
 import { VaultPhotoTile } from '../components/VaultPhotoTile';
+import { hasCloudBackup, privateImagesMessage } from '../backupStatus';
 
 import { dialog } from '@/components/ui/dialogStore';
 export function VaultScreen(): React.JSX.Element {
@@ -26,8 +27,6 @@ export function VaultScreen(): React.JSX.Element {
   const { theme } = useTheme();
   const colors = theme.colors;
   const offline = useVaultNetwork((s) => s.offline);
-  const syncing = useVaultNetwork((s) => s.syncing);
-  const syncError = useVaultNetwork((s) => s.error);
   const { unlocked, revision, owner: unlockedOwner } = useVaultLock();
   const [owner, setOwner] = useState('');
   const [photos, setPhotos] = useState<VaultPhoto[]>([]);
@@ -184,14 +183,11 @@ export function VaultScreen(): React.JSX.Element {
   const allHidden =
     selected.length > 0 &&
     photos.filter((photo) => selected.includes(photo.id)).every((photo) => photo.hidden);
-  const failed = photos.some((photo) => photo.syncState === 'failed');
-  const backupError = photos.find((photo) => photo.syncState === 'failed')?.error;
-  const pending = photos.filter(
-    (photo) => photo.syncState !== 'synced' && photo.syncState !== 'rejected',
-  ).length;
-  const backedUp = photos.filter(
-    (photo) => photo.syncState === 'synced' && photo.status === 'approved' && !!photo.s3Key,
-  ).length;
+  const canRemoveDeviceCopies =
+    selected.length > 0 &&
+    photos
+      .filter((photo) => selected.includes(photo.id))
+      .every((photo) => hasCloudBackup(photo) && photo.syncState === 'synced');
   const data = visiblePhotos(photos, hidden);
   const refresh = () => {
     if (refreshing) return;
@@ -260,8 +256,8 @@ export function VaultScreen(): React.JSX.Element {
       ) : (
         <View style={styles.library}>
           <View style={styles.topLine}>
-            <Text color="secondary" variant="caption">
-              Only you can see these photos and videos
+            <Text color="secondary" variant="caption" accessibilityLiveRegion="polite">
+              {privateImagesMessage(photos)}
             </Text>
             {offline && (
               <View style={[styles.offline, { backgroundColor: colors.surfaceMuted }]}>
@@ -271,40 +267,6 @@ export function VaultScreen(): React.JSX.Element {
                 </Text>
               </View>
             )}
-          </View>
-          <View
-            style={{
-              gap: spacing.sm,
-              padding: spacing.md,
-              borderRadius: radius.md,
-              backgroundColor: colors.surfaceMuted,
-            }}
-          >
-            <Text variant="label">Cloud backup</Text>
-            <Text variant="caption" color="secondary" accessibilityLiveRegion="polite">
-              {offline
-                ? `${pending} items waiting for a connection`
-                : syncing
-                  ? `Backing up… ${backedUp} of ${photos.length} items saved to cloud`
-                  : failed
-                    ? backupError || 'Some items need another backup attempt.'
-                    : pending
-                      ? `${pending} items waiting for backup`
-                      : `${backedUp} of ${photos.length} items saved to cloud`}
-            </Text>
-            {!!syncError && (
-              <Text variant="caption" color="danger" accessibilityRole="alert">
-                {syncError}
-              </Text>
-            )}
-            <Button
-              label={syncing ? 'Backing up…' : failed ? 'Retry backup' : 'Back up now'}
-              icon="cloud-upload-outline"
-              variant="secondary"
-              loading={syncing || refreshing}
-              disabled={offline || syncing || refreshing || !photos.length}
-              onPress={refresh}
-            />
           </View>
           <View style={[styles.tabs, { backgroundColor: colors.surfaceMuted }]}>
             {[false, true].map((hiddenOnly) => (
@@ -337,10 +299,6 @@ export function VaultScreen(): React.JSX.Element {
               <IconButton icon="close" label="Dismiss message" onPress={() => setError('')} />
             </View>
           )}
-          <Text variant="caption" color="secondary">
-            Wait for backup to finish before deleting originals in Gallery / Photos. Use Download to
-            phone to save a new copy later.
-          </Text>
           <FlatList
             data={data}
             numColumns={3}
@@ -424,12 +382,14 @@ export function VaultScreen(): React.JSX.Element {
                   }, 'Couldn’t export. Check permissions and storage.')
                 }
               />
-              <IconButton
-                icon="cloud-done-outline"
-                label="Remove device copies, keep cloud backups"
-                disabled={busy}
-                onPress={removeSelectedDeviceCopies}
-              />
+              {canRemoveDeviceCopies && (
+                <IconButton
+                  icon="cloud-done-outline"
+                  label="Remove device copies, keep cloud backups"
+                  disabled={busy}
+                  onPress={removeSelectedDeviceCopies}
+                />
+              )}
               <IconButton
                 icon="trash-outline"
                 label="Delete selected items from vault"
