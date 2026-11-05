@@ -211,6 +211,14 @@ export function SettingsScreen(): React.JSX.Element {
             )}
             {canAdmin && (
               <SettingsRow
+                icon="diamond-outline"
+                title="Premium members"
+                subtitle="Move members between normal and premium"
+                onPress={() => router.push('/admin/members' as Href)}
+              />
+            )}
+            {canAdmin && (
+              <SettingsRow
                 icon="sparkles-outline"
                 title="God chat sessions"
                 subtitle="Watch members' chats with God and take over to answer"

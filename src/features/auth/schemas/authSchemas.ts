@@ -11,7 +11,8 @@ export const registerSchema = z.object({
   age: z
     .string()
     .regex(/^\d{1,3}$/, 'Enter your age')
-    .refine((value) => Number(value) > 0 && Number(value) <= 120, 'Enter a valid age'),
+    .refine((value) => Number(value) > 0 && Number(value) <= 120, 'Enter a valid age')
+    .refine((value) => Number(value) >= 18, 'You must be 18 or older to join DARKFANTASY'),
   gender: z.string().trim().min(1, 'Enter your gender').max(50),
   email: z.email('Enter a valid email address').transform((value) => value.trim().toLowerCase()),
   password: z

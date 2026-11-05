@@ -19,6 +19,7 @@ import { emailSignupSchema, type EmailSignupValues } from '../schemas/authSchema
 import { useEmailRegister } from '../hooks/useEmailRegister';
 import { AuthPrompt } from './AuthScaffold';
 import { CountryPicker } from './CountryPicker';
+import { CONSENT_REQUIRED, ConsentCheckbox } from '@/features/legal/ConsentCheckbox';
 
 const PROFILE_FIELDS = ['name', 'lastName', 'age', 'gender'] as const;
 const GENDERS = ['Woman', 'Man', 'Non-binary', 'Prefer not to say'];
@@ -30,6 +31,8 @@ export function RegisterForm(): React.JSX.Element {
   const { width, fontScale } = useWindowDimensions();
   const { register, error, isLoading, success, emailVerificationRequired } = useEmailRegister();
   const [step, setStep] = useState(0);
+  const [consent, setConsent] = useState(false);
+  const [consentError, setConsentError] = useState<string>();
   const [country, setCountry] = useState<CountryCode>(DEFAULT_COUNTRY);
   const [national, setNational] = useState('');
   const scroll = useRef<KeyboardAwareScrollViewRef>(null);
@@ -73,6 +76,10 @@ export function RegisterForm(): React.JSX.Element {
   const submit = () =>
     handleSubmit(
       async (values) => {
+        if (!consent) {
+          setConsentError(CONSENT_REQUIRED);
+          return;
+        }
         const completed = await register({ ...values });
         if (completed) {
           Keyboard.dismiss();
@@ -387,6 +394,15 @@ export function RegisterForm(): React.JSX.Element {
                           onSubmitEditing={() => void submit()}
                         />
                       )}
+                    />
+                    <ConsentCheckbox
+                      checked={consent}
+                      disabled={isLoading}
+                      error={consentError}
+                      onChange={(value) => {
+                        setConsent(value);
+                        if (value) setConsentError(undefined);
+                      }}
                     />
                     {error ? (
                       <View style={[styles.alert, { backgroundColor: theme.colors.dangerSoft }]}>

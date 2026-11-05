@@ -38,11 +38,35 @@ export type PastGodChat = {
 /** Mirrors the backend limit so requests are never rejected for size. */
 export const GOD_CHAT_MAX_CHARS = 1000;
 
+/** Free members' daily allowance of AI messages; premium members and staff are unlimited. */
+export type GodChatQuota = {
+  unlimited: boolean;
+  limit: number;
+  used: number;
+  remaining: number;
+  /** Next UTC midnight, when the free count starts again. */
+  resetsAt: string;
+};
+export type GodChatStatus = { available: boolean; quota: GodChatQuota | null };
+
+/** Thrown when today's free AI messages are used up. */
+export class GodChatLimitError extends ServiceError {
+  constructor() {
+    super('VALIDATION', 'You’ve used all your free messages for today.');
+    this.name = 'GodChatLimitError';
+  }
+}
+
 function godChatError(error: unknown): Error {
   if (axios.isAxiosError(error)) {
     const status = error.response?.status;
     if (status === 503)
       return new ServiceError('VALIDATION', 'God is resting right now. Please try again later.');
+    if (
+      status === 429 &&
+      (error.response?.data as { error?: string })?.error === 'GOD_CHAT_DAILY_LIMIT'
+    )
+      return new GodChatLimitError();
     if (status === 429)
       return new ServiceError('VALIDATION', 'Too many messages. Wait a moment, then try again.');
     if (error.code === 'ECONNABORTED')
@@ -51,9 +75,11 @@ function godChatError(error: unknown): Error {
   return serviceError(error);
 }
 
-export async function godChatAvailable(): Promise<boolean> {
-  const data = await getData<{ available?: boolean }>('/god-chat/status');
-  return data.available === true;
+export async function godChatStatus(): Promise<GodChatStatus> {
+  const data = await getData<{ available?: boolean; quota?: GodChatQuota | null }>(
+    '/god-chat/status',
+  );
+  return { available: data.available === true, quota: data.quota ?? null };
 }
 
 export async function loadGodSession(): Promise<GodChatSession | null> {

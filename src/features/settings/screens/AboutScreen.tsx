@@ -1,58 +1,43 @@
-import { Linking, View } from 'react-native';
+import { View } from 'react-native';
 import Constants from 'expo-constants';
+import { useRouter, type Href } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
 import { BrandLogo } from '@/components/BrandLogo';
 import { Text } from '@/components/ui';
-import { toast } from '@/components/ui/Toast';
-import { publicPageUrl, type PublicPage } from '@/config/publicPages';
 import { spacing } from '@/theme';
 import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
 
 export function AboutScreen() {
-  const open = async (page: PublicPage) => {
-    const url = publicPageUrl(page);
-    if (!url) {
-      toast.error('This page is unavailable right now. Please try again later.');
-      return;
-    }
-    try {
-      await Linking.openURL(url);
-    } catch {
-      toast.error('Could not open this page. Please try again.');
-    }
-  };
+  const router = useRouter();
+  const open = (path: string) => router.push(path as Href);
   return (
     <Screen scroll edges={['top', 'left', 'right', 'bottom']}>
       <Header title="About DARKFANTASY" back backFallback="/welcome" />
       <View style={{ gap: spacing.xl, paddingVertical: spacing.xl }}>
         <BrandLogo size={88} wordmark />
         <Text center color="muted">
-          Version {Constants.expoConfig?.version ?? '1.0.0'}
+          Version {Constants.expoConfig?.version ?? '1.0.0'} · For adults 18+ only
         </Text>
         <SettingsGroup title="Information and support">
           <SettingsRow
             icon="shield-checkmark-outline"
             title="Privacy policy"
-            external
-            onPress={() => void open('privacy')}
+            onPress={() => open('/legal/privacy')}
           />
           <SettingsRow
             icon="document-text-outline"
             title="Terms of use"
-            external
-            onPress={() => void open('terms')}
+            onPress={() => open('/legal/terms')}
           />
           <SettingsRow
             icon="help-circle-outline"
             title="Contact support"
-            external
-            onPress={() => void open('support')}
+            onPress={() => open('/legal/support')}
           />
           <SettingsRow
             icon="trash-outline"
             title="Account deletion information"
-            external
-            onPress={() => void open('deletion')}
+            onPress={() => open('/legal/account-deletion')}
             last
           />
         </SettingsGroup>

@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { Header, Screen } from '@/components/layout';
 import { ListRow, Text } from '@/components/ui';
 import { spacing } from '@/theme';
@@ -26,6 +26,21 @@ export default function HelpScreen() {
             icon="flag-outline"
             title="My reports"
             onPress={() => router.push('/settings/my-reports')}
+          />
+          <ListRow
+            icon="mail-outline"
+            title="Contact support"
+            onPress={() => router.push('/legal/support' as Href)}
+          />
+          <ListRow
+            icon="shield-outline"
+            title="Privacy policy"
+            onPress={() => router.push('/legal/privacy' as Href)}
+          />
+          <ListRow
+            icon="document-text-outline"
+            title="Terms of use"
+            onPress={() => router.push('/legal/terms' as Href)}
             divider={false}
           />
         </View>

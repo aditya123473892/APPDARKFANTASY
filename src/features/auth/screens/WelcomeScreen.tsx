@@ -51,7 +51,25 @@ export function WelcomeScreen(): React.JSX.Element {
           style={styles.pill}
         />
         <Text variant="caption" color="muted" center style={styles.legal}>
-          By continuing, you agree to our Terms and Privacy Policy.
+          For adults 18+ only. By continuing, you agree to our{' '}
+          <Text
+            variant="caption"
+            color="primary"
+            accessibilityRole="link"
+            onPress={() => router.push('/legal/terms' as Href)}
+          >
+            Terms of Use
+          </Text>{' '}
+          and{' '}
+          <Text
+            variant="caption"
+            color="primary"
+            accessibilityRole="link"
+            onPress={() => router.push('/legal/privacy' as Href)}
+          >
+            Privacy Policy
+          </Text>
+          .
         </Text>
       </View>
     </Screen>

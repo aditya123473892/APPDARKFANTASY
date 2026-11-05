@@ -23,7 +23,8 @@ import { useTheme } from '@/theme/useTheme';
 import { createClientId } from '@/utils/clientId';
 import { GodChatBubble } from '../components/GodChatBubble';
 import {
-  godChatAvailable,
+  godChatStatus,
+  GodChatLimitError,
   GOD_CHAT_MAX_CHARS,
   loadGodSession,
   sendToGod,
@@ -113,10 +114,13 @@ export function GodChatScreen(): React.JSX.Element {
   const [failure, setFailure] = useState<string | null>(null);
   const status = useQuery({
     queryKey: ['god-chat-status'],
-    queryFn: godChatAvailable,
+    queryFn: godChatStatus,
     staleTime: 60_000,
     retry: 1,
   });
+  const [limitHit, setLimitHit] = useState(false);
+  const quota = status.data?.quota;
+  const freeLeft = quota && !quota.unlimited ? quota.remaining : null;
   const session = useQuery({
     queryKey: SESSION_KEY,
     queryFn: loadGodSession,
@@ -125,7 +129,10 @@ export function GodChatScreen(): React.JSX.Element {
   });
   const withTeam = session.data?.mode === 'staff';
   // Only a confirmed "not configured" disables the chat; a team member can still answer then.
-  const unavailable = status.data === false && !withTeam;
+  const unavailable = status.data?.available === false && !withTeam;
+  // Free members who used today's messages can still write to a team member who took over.
+  // The server's count wins once known, so the prompt clears by itself on a new day.
+  const outOfMessages = !withTeam && (freeLeft === null ? limitHit : freeLeft === 0);
 
   const ask = useMutation({
     mutationFn: (message: { id: string; content: string }) =>
@@ -134,8 +141,17 @@ export function GodChatScreen(): React.JSX.Element {
       setFailure(null);
       setPending(null);
       queryClient.setQueryData(SESSION_KEY, next);
+      void status.refetch();
     },
     onError: (error) => {
+      if (error instanceof GodChatLimitError) {
+        // The message was not stored; drop it and show the upgrade prompt instead.
+        setLimitHit(true);
+        setPending(null);
+        setFailure(null);
+        void status.refetch();
+        return;
+      }
       setFailure(describeError(error));
       // The message itself may have been stored even though the reply failed.
       void session.refetch();
@@ -255,6 +271,11 @@ export function GodChatScreen(): React.JSX.Element {
                 <Text variant="caption" color="muted" center style={styles.notice}>
                   Chats are saved. The DARKFANTASY team can read them and may join to help you.
                 </Text>
+                {freeLeft !== null && !outOfMessages && quota ? (
+                  <Text variant="caption" color="secondary" center>
+                    {freeLeft} of {quota.limit} free messages left today
+                  </Text>
+                ) : null}
                 {stored.length === 0 && !pending && !withTeam ? (
                   <View style={styles.topics}>
                     {TOPICS.map((topic) => (
@@ -301,6 +322,33 @@ export function GodChatScreen(): React.JSX.Element {
                     onPress={() => ask.mutate(pending)}
                   />
                 </View>
+              ) : outOfMessages ? (
+                <View
+                  style={[
+                    styles.teamBanner,
+                    styles.limitBanner,
+                    { borderColor: theme.colors.gold, backgroundColor: theme.colors.overlay },
+                  ]}
+                >
+                  <Text weight="semibold" center style={{ color: theme.colors.gold }}>
+                    You’ve used your {quota?.limit ?? 10} free messages for today
+                  </Text>
+                  <Text variant="caption" color="secondary" center>
+                    Go premium for unlimited chats with God, or come back after{' '}
+                    {quota
+                      ? new Date(quota.resetsAt).toLocaleTimeString([], {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })
+                      : 'midnight UTC'}
+                    .
+                  </Text>
+                  <Button
+                    label="Go premium"
+                    icon="sparkles-outline"
+                    onPress={() => router.push('/subscribe' as Href)}
+                  />
+                </View>
               ) : withTeam ? (
                 <View
                   style={[
@@ -320,9 +368,15 @@ export function GodChatScreen(): React.JSX.Element {
           minimal
           onSend={send}
           canSendMessages
-          disabled={unavailable || ask.isPending || fresh.isPending}
+          disabled={unavailable || outOfMessages || ask.isPending || fresh.isPending}
           bottomInset={0}
-          placeholder={withTeam ? 'Message the team…' : 'Explore your fantasies or desires…'}
+          placeholder={
+            withTeam
+              ? 'Message the team…'
+              : outOfMessages
+                ? 'No free messages left today'
+                : 'Explore your fantasies or desires…'
+          }
         />
         <KeyboardInsetSpacer
           inset={contentInsets.inTabs ? 0 : contentInsets.bottom}
@@ -351,6 +405,7 @@ const styles = StyleSheet.create({
   notice: { paddingHorizontal: spacing.lg },
   typing: { alignSelf: 'flex-start', marginTop: spacing.sm },
   failure: { gap: spacing.sm, marginTop: spacing.md },
+  limitBanner: { gap: spacing.sm, padding: spacing.md },
   teamBanner: {
     borderWidth: 1,
     borderRadius: radius.md,

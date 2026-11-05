@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { spacing } from '@/theme';
+import { CONSENT_REQUIRED, ConsentCheckbox } from '@/features/legal/ConsentCheckbox';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { StyleSheet, View } from 'react-native';
@@ -19,6 +21,8 @@ export function VerifiedPhoneRegisterForm({
   onSignupExpired: () => void;
 }): React.JSX.Element {
   const { register, error, isLoading, success } = useRegister(signupToken, onSignupExpired);
+  const [consent, setConsent] = useState(false);
+  const [consentError, setConsentError] = useState<string>();
   const {
     control,
     handleSubmit,
@@ -89,6 +93,15 @@ export function VerifiedPhoneRegisterForm({
           />
         )}
       />
+      <ConsentCheckbox
+        checked={consent}
+        disabled={isLoading}
+        error={consentError}
+        onChange={(value) => {
+          setConsent(value);
+          if (value) setConsentError(undefined);
+        }}
+      />
       {error ? (
         <Text color="danger" accessibilityRole="alert">
           {error}
@@ -98,6 +111,10 @@ export function VerifiedPhoneRegisterForm({
         label="Create account"
         loading={isLoading}
         onPress={handleSubmit(async ({ email, password }) => {
+          if (!consent) {
+            setConsentError(CONSENT_REQUIRED);
+            return;
+          }
           const request = register({ email, password });
           resetField('password');
           resetField('confirmPassword');
