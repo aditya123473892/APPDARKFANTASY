@@ -4,7 +4,7 @@ const { getPngInfo } = require('@expo/image-utils');
 const { validateAuthBuild } = require('./auth-build-config.cjs');
 
 const root = path.resolve(__dirname, '..');
-const pageKeys = ['privacy', 'terms', 'support', 'deletion'];
+const legalRoutes = ['privacy', 'terms', 'support', 'account-deletion'];
 function publicHttps(value) {
   try {
     const url = new URL(value);
@@ -103,18 +103,26 @@ async function checkRelease({ env = process.env, platform = 'all', assets = true
       }
     }
   }
-  const keys = {
-    privacy: 'EXPO_PUBLIC_PRIVACY_POLICY_URL',
-    terms: 'EXPO_PUBLIC_TERMS_URL',
-    support: 'EXPO_PUBLIC_SUPPORT_URL',
-    deletion: 'EXPO_PUBLIC_ACCOUNT_DELETION_URL',
-  };
-  for (const key of pageKeys)
-    if (!publicHttps(config.extra.publicPages[key]))
-      ownerRequirements.push(`Publish and configure ${keys[key]}`);
+  // Legal pages ship inside the app; the backend serves the same text publicly for the
+  // Play Console privacy policy and account deletion fields.
+  check(
+    legalRoutes.every((route) => fs.existsSync(path.join(root, 'app', 'legal', `${route}.tsx`))) &&
+      fs.existsSync(path.join(root, 'app', 'age-check.tsx')),
+    'In-app privacy policy, terms, support, account deletion and 18+ check',
+  );
+  const legalPages = Object.fromEntries(
+    legalRoutes.map((route) => [route, `${config.extra.apiUrl.replace(/\/$/, '')}/legal/${route}`]),
+  );
+  check(
+    Object.values(legalPages).every(publicHttps),
+    'Public HTTPS legal pages for the store listing',
+  );
+  // The backend source is a separate repository and is absent from EAS build workers.
+  if (fs.existsSync(path.join(root, 'dfbackend', 'package.json')))
+    check(require('./sync-legal.cjs').isCurrent(), 'Backend legal pages match the app text');
   if (platform !== 'ios' && !config.android.googleServicesFile)
     ownerRequirements.push(
-      'Configure GOOGLE_SERVICES_JSON and EAS FCM credentials for Android push notifications',
+      'Add google-services.json as the EAS file variable GOOGLE_SERVICES_JSON (production environment) and upload the FCM V1 key in EAS credentials, or Android push notifications will not work. See store/PLAY_STORE.md.',
     );
   if (assets && config.android.googleServicesFile) {
     try {
@@ -140,6 +148,7 @@ async function checkRelease({ env = process.env, platform = 'all', assets = true
     checks,
     errors,
     ownerRequirements,
+    legalPages,
     identifiers: { android: config.android.package, ios: config.ios.bundleIdentifier },
     platforms: config.platforms,
   };
@@ -155,6 +164,8 @@ if (require.main === module) {
         for (const message of report.checks) console.log(`PASS ${message}`);
         for (const message of report.errors) console.error(`FAIL ${message}`);
         for (const message of report.ownerRequirements) console.log(`REQUIRED ${message}`);
+        for (const [page, url] of Object.entries(report.legalPages))
+          console.log(`PAGE ${page}: ${url}`);
         console.log(
           'Native device checks, store credentials and console declarations remain separate release checks.',
         );

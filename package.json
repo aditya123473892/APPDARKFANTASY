@@ -28,7 +28,11 @@
     "verify:vault-config": "node scripts/verify-vault-config.cjs",
     "lint": "eslint app src",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "release:android": "eas build --platform android --profile production",
+    "release:android:apk": "eas build --platform android --profile apk",
+    "legal:sync": "node scripts/sync-legal.cjs",
+    "legal:check": "node scripts/sync-legal.cjs --check"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

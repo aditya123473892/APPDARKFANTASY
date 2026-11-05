@@ -22,24 +22,16 @@ and iOS. EAS project ownership and remote signing credentials are preserved.
 
 ## Owner configuration required
 
-Publish real HTTPS pages and set these **public** EAS production environment values:
+**Google Play:** follow [PLAY_STORE.md](PLAY_STORE.md) for the one-time setup, the build
+command and copy-ready Play Console answers.
 
-```text
-EXPO_PUBLIC_PRIVACY_POLICY_URL
-EXPO_PUBLIC_TERMS_URL
-EXPO_PUBLIC_SUPPORT_URL
-EXPO_PUBLIC_ACCOUNT_DELETION_URL
-```
-
-No URLs are invented or replaced with an example policy. The development preview
-shows a recoverable message until they are supplied; store preflight fails if
-they are missing or use placeholders. Verify the pages are publicly reachable
-without sign-in. The external deletion page should explain how users can request
-deletion; the app already has Settings > Account > Delete account.
+The Privacy Policy, Terms of Use, Contact support and Account deletion pages are bundled in
+the app. The backend serves the same text publicly at `/api/legal/<page>` for the store
+listings; `npm run legal:sync` regenerates it from the app.
 
 The EAS post-install hook automatically runs the strict gate for the `production`
-profile. Internal APKs run the code/asset checks without requiring published store
-pages, so local and internal testing can continue before submission setup is done.
+profile. Internal APKs run the code/asset checks without requiring push setup, so local and
+internal testing can continue before submission setup is done.
 
 For Android push, configure `GOOGLE_SERVICES_JSON` as an EAS **file** environment
 variable for this exact Android package, then configure the matching FCM v1

@@ -23,12 +23,6 @@ module.exports = ({ config }) => {
     extra: {
       ...config.extra,
       apiUrl: authBuild.url,
-      publicPages: {
-        privacy: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL,
-        terms: process.env.EXPO_PUBLIC_TERMS_URL,
-        support: process.env.EXPO_PUBLIC_SUPPORT_URL,
-        deletion: process.env.EXPO_PUBLIC_ACCOUNT_DELETION_URL,
-      },
     },
     android: {
       ...config.android,

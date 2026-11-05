@@ -124,24 +124,24 @@ test('release branding, native targets, permissions and store profiles validate'
   assert.ok(report.platforms.includes('ios') && report.platforms.includes('android'));
 });
 
-test('store preflight reports missing owner URLs and encryption declaration instead of claiming readiness', async () => {
+test('store preflight reports missing push and encryption setup, and lists public legal pages', async () => {
   const env = { ...process.env };
   for (const key of Object.keys(env))
-    if (
-      /PRIVACY_POLICY_URL|TERMS_URL|SUPPORT_URL|ACCOUNT_DELETION_URL|NON_EXEMPT_ENCRYPTION/.test(
-        key,
-      )
-    )
-      delete env[key];
+    if (/GOOGLE_SERVICES_JSON|NON_EXEMPT_ENCRYPTION/.test(key)) delete env[key];
   const report = await checkRelease({ env, assets: false });
-  assert.ok(report.ownerRequirements.some((value) => value.includes('PRIVACY_POLICY_URL')));
+  assert.deepEqual(report.errors, []);
+  assert.ok(report.ownerRequirements.some((value) => value.includes('GOOGLE_SERVICES_JSON')));
   assert.ok(report.ownerRequirements.some((value) => value.includes('NON_EXEMPT_ENCRYPTION')));
+  // An Android-only store build needs only the Firebase file.
+  const android = await checkRelease({ env, assets: false, platform: 'android' });
+  assert.equal(android.ownerRequirements.length, 1);
+  assert.equal(report.legalPages.privacy, 'https://dfbackend.onrender.com/api/legal/privacy');
+  assert.equal(
+    report.legalPages['account-deletion'],
+    'https://dfbackend.onrender.com/api/legal/account-deletion',
+  );
   const configured = {
     ...env,
-    EXPO_PUBLIC_PRIVACY_POLICY_URL: 'https://darkfantasy.app/privacy',
-    EXPO_PUBLIC_TERMS_URL: 'https://darkfantasy.app/terms',
-    EXPO_PUBLIC_SUPPORT_URL: 'https://darkfantasy.app/support',
-    EXPO_PUBLIC_ACCOUNT_DELETION_URL: 'https://darkfantasy.app/account-deletion',
     IOS_USES_NON_EXEMPT_ENCRYPTION: 'true',
     GOOGLE_SERVICES_JSON: './test-firebase.json',
   };
@@ -149,6 +149,12 @@ test('store preflight reports missing owner URLs and encryption declaration inst
     (await checkRelease({ env: configured, assets: false })).ownerRequirements.length,
     0,
   );
+});
+
+test('store builds sign in with email and password, like the tested APK', () => {
+  const eas = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+  assert.equal(eas.build.production.env.EXPO_PUBLIC_PHONE_AUTH_REQUIRED, 'false');
+  assert.equal(eas.build.production.android.buildType, 'app-bundle');
 });
 
 test('public store links reject placeholders, credentials and insecure or malformed URLs', () => {
@@ -213,41 +219,15 @@ test('release runtime uses the validated native endpoint when no public variable
   assert.throws(() => evaluate(undefined));
 });
 
-test('About links sanitize manifest data and recover from missing pages and browser failures', async () => {
-  const manifest = {
-    expoConfig: {
-      version: '1.0.0',
-      extra: {
-        publicPages: {
-          privacy: 'https://darkfantasy.app/privacy',
-          terms: 'javascript:alert(1)',
-          support: 'https://darkfantasy.app/support',
-        },
-      },
-    },
-  };
-  const pages = load('src/config/publicPages.ts', {
-    'expo-constants': { __esModule: true, default: manifest },
-  });
-  assert.equal(pages.publicPageUrl('terms'), undefined);
-  const opened = [],
-    errors = [];
+test('About opens the bundled legal and support pages inside the app', () => {
+  const opened = [];
   const { AboutScreen } = load('src/features/settings/screens/AboutScreen.tsx', {
-    'react-native': {
-      View: 'View',
-      Linking: {
-        openURL: async (url) => {
-          opened.push(url);
-          if (url.endsWith('support')) throw Error('offline');
-        },
-      },
-    },
-    'expo-constants': { __esModule: true, default: manifest },
+    'react-native': { View: 'View' },
+    'expo-constants': { __esModule: true, default: { expoConfig: { version: '1.0.0' } } },
+    'expo-router': { useRouter: () => ({ push: (path) => opened.push(path) }) },
     '@/components/layout': { Header: 'Header', Screen: 'Screen' },
     '@/components/BrandLogo': { BrandLogo: 'BrandLogo' },
     '@/components/ui': { Text: 'Text' },
-    '@/components/ui/Toast': { toast: { error: (message) => errors.push(message) } },
-    '@/config/publicPages': pages,
     '@/theme': { spacing: {} },
     '../components/SettingsRow': { SettingsGroup: 'Group', SettingsRow: 'Row' },
   });
@@ -257,15 +237,20 @@ test('About links sanitize manifest data and recover from missing pages and brow
       : value && typeof value === 'object'
         ? [value, ...nodes(value.props?.children)]
         : [];
-  const rows = nodes(AboutScreen()).filter((node) => node.type === 'Row');
-  rows[0].props.onPress();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(opened[0], 'https://darkfantasy.app/privacy');
-  rows[1].props.onPress();
-  rows[2].props.onPress();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(opened.length, 2);
-  assert.equal(errors.length, 2);
+  for (const row of nodes(AboutScreen()).filter((node) => node.type === 'Row')) row.props.onPress();
+  assert.deepEqual(opened, [
+    '/legal/privacy',
+    '/legal/terms',
+    '/legal/support',
+    '/legal/account-deletion',
+  ]);
+  for (const route of ['privacy', 'terms', 'support', 'account-deletion'])
+    assert.ok(fs.existsSync(`app/legal/${route}.tsx`), route);
+});
+
+test('the backend serves the same legal text as the app', () => {
+  if (!fs.existsSync('dfbackend/package.json')) return;
+  assert.ok(require('./sync-legal.cjs').isCurrent(), 'run npm run legal:sync');
 });
 
 test('Android media picking does not request broad gallery access', () => {

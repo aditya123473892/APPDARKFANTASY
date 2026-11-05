@@ -30,7 +30,7 @@
       "env": {
         "APP_VARIANT": "production",
         "EXPO_PUBLIC_API_URL": "https://dfbackend.onrender.com/api",
-        "EXPO_PUBLIC_PHONE_AUTH_REQUIRED": "true",
+        "EXPO_PUBLIC_PHONE_AUTH_REQUIRED": "false",
         "EXPO_PUBLIC_DEV_API_PROXY": "false",
         "EXPO_DEV_API_PROXY": "false"
       },
