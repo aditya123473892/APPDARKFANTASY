@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { Pressable } from '@/components/ui/Pressable';
-import { Avatar, IconButton } from '@/components/ui';
+import { Avatar } from '@/components/ui';
+import { NotificationBell } from '@/features/activity/components/NotificationBell';
 import { useAuthStore } from '@/features/auth/store/authStore';
 import { spacing } from '@/theme';
 import { Header } from './Header';
@@ -16,11 +17,7 @@ export function BrandHeader(): React.JSX.Element {
         title="Dark"
         action={
           <View style={styles.actions}>
-            <IconButton
-              icon="notifications-outline"
-              label="Notifications"
-              onPress={() => router.push('/notifications')}
-            />
+            <NotificationBell />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Your profile"

@@ -14,6 +14,7 @@ import { useFeed, useToggleLike } from '../hooks/useFeed';
 import type { Post } from '../types';
 import { Pressable } from '@/components/ui/Pressable';
 import { PendingPosts } from '@/features/create-post/PendingPosts';
+import { NotificationBell } from '@/features/activity/components/NotificationBell';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 
 export function FeedScreen() {
@@ -53,11 +54,7 @@ export function FeedScreen() {
                 label="Create post"
                 onPress={() => router.push('/create')}
               />
-              <IconButton
-                icon="notifications-outline"
-                label="Notifications"
-                onPress={() => router.push('/notifications')}
-              />
+              <NotificationBell />
               <SettingsButton />
             </View>
           }

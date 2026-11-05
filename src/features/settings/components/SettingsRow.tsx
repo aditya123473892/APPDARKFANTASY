@@ -40,6 +40,7 @@ export function SettingsRow({
   loading = false,
   last = false,
   external = false,
+  badge = 0,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
@@ -52,13 +53,16 @@ export function SettingsRow({
   /** Hides the divider under the final row of a group. */
   last?: boolean;
   external?: boolean;
+  /** Unread count shown as a pill before the chevron; hidden at 0. */
+  badge?: number;
 }): React.JSX.Element {
   const { theme } = useTheme();
   const toggle = typeof value === 'boolean';
+  const label = `${title}${badge > 0 ? `, ${badge} new` : ''}`;
   return (
     <Pressable
       accessibilityRole={toggle ? 'switch' : 'button'}
-      accessibilityLabel={subtitle ? `${title}. ${subtitle}` : title}
+      accessibilityLabel={subtitle ? `${label}. ${subtitle}` : label}
       accessibilityState={toggle ? { checked: value } : { busy: loading }}
       disabled={loading}
       onPress={toggle ? () => onValueChange?.(!value) : onPress}
@@ -98,6 +102,13 @@ export function SettingsRow({
             </Text>
           ) : null}
         </View>
+        {badge > 0 && !toggle ? (
+          <View style={[styles.badge, { backgroundColor: theme.colors.primary }]}>
+            <Text variant="caption" weight="semibold" style={{ color: theme.colors.onPrimary }}>
+              {badge > 99 ? '99+' : badge}
+            </Text>
+          </View>
+        ) : null}
         {loading ? (
           <ActivityIndicator color={theme.colors.primary} />
         ) : toggle ? (
@@ -147,4 +158,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   copy: { flex: 1, gap: spacing.xs },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

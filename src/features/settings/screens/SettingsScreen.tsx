@@ -14,6 +14,7 @@ import { SettingsGroup, SettingsRow } from '../components/SettingsRow';
 import { EditProfileForm } from '@/features/profile/components/EditProfileForm';
 
 import { dialog } from '@/components/ui/dialogStore';
+import { useUnreadNotificationCount } from '@/features/activity/hooks/useActivity';
 const morePages = [
   { icon: 'compass-outline', title: 'Discover', href: '/discover' },
   { icon: 'people-outline', title: 'Matches', href: '/matches' },
@@ -34,6 +35,7 @@ export function SettingsScreen(): React.JSX.Element {
   const [editingProfile, setEditingProfile] = useState(false);
   const canModerate = useCan('canModerate');
   const canAdmin = useCan('canViewAdminScreens');
+  const unreadNotifications = useUnreadNotificationCount();
   const canMessage = useCan('canSendMessages');
   const canCreateGroups = useCan('canCreateGroups');
 
@@ -89,6 +91,7 @@ export function SettingsScreen(): React.JSX.Element {
               key={page.href}
               icon={page.icon}
               title={page.title}
+              badge={page.href === '/notifications' ? unreadNotifications : 0}
               onPress={() => router.push(page.href)}
               last={index === morePages.length - 1}
             />
@@ -150,6 +153,7 @@ export function SettingsScreen(): React.JSX.Element {
             icon="notifications-outline"
             title="Notifications"
             subtitle="Phone alerts and connection status"
+            badge={unreadNotifications}
             onPress={() => router.push('/notifications' as Href)}
           />
           <SettingsRow
