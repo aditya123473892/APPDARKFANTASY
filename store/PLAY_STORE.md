@@ -10,7 +10,7 @@ This builds a signed Android App Bundle (`.aab`) on EAS with:
 
 - package `com.aditya123473892.darkfantasy`, signed with the upload key EAS stores for this project;
 - a `versionCode` that EAS increments automatically, so every upload is accepted;
-- the production API `https://dfbackend.onrender.com/api` over HTTPS only;
+- the production API `https://api.darkfantasy.club/api` over HTTPS only;
 - email and password sign-in (the same as the tested APK);
 - in-app Privacy Policy, Terms of Use, Contact support, Account deletion and the 18+ age check.
 
@@ -50,10 +50,16 @@ stopped by the release check.
    Choose the `production` profile, then **Google Service Account › Manage your Google Service
    Account Key for Push Notifications (FCM V1) › Upload a new service account key**.
 
-### 2. Backend (Render)
+### 2. Backend at api.darkfantasy.club (Docker)
 
-Redeploy `dfbackend` from branch `3112026`, so the public legal pages, admin premium tools
-and the daily AI limit are live. Check these environment values on Render:
+Deploy the backend on your Docker server first, following the "Docker server at
+api.darkfantasy.club" section of `dfbackend/DEPLOYMENT.md` (`sh deploy/deploy.sh`).
+
+**Do not build the AAB until <https://api.darkfantasy.club/api/health/ready> opens with
+HTTPS.** The app's API address is fixed at build time, so a build made earlier cannot connect,
+and Google's reviewers reject apps that fail to load.
+
+`.env.production.example` already has the right values for these settings:
 
 | Variable | Value |
 | --- | --- |
@@ -61,9 +67,7 @@ and the daily AI limit are live. Check these environment values on Render:
 | `MOBILE_OTP_ONLY_ROUTES` | `off` (otherwise Photo Vault backup is refused) |
 | `GOD_CHAT_FREE_DAILY_MESSAGES` | `10` |
 
-Render's free plan sleeps when idle, and the first request can take about 40 seconds. Google's
-reviewers may report the app as broken during that wait. Use a paid instance, or an uptime
-monitor, before submitting for review.
+Keep the old Render service running until people using earlier app builds have updated.
 
 ### 3. Play Console app record
 
@@ -79,10 +83,10 @@ uploaded by hand: **Testing › Internal testing › Create new release**.
 
 | Field | Value |
 | --- | --- |
-| Privacy policy | https://dfbackend.onrender.com/api/legal/privacy |
-| Account deletion (Data safety) | https://dfbackend.onrender.com/api/legal/account-deletion |
-| Terms (optional, description) | https://dfbackend.onrender.com/api/legal/terms |
-| Support website | https://dfbackend.onrender.com/api/legal/support |
+| Privacy policy | https://api.darkfantasy.club/api/legal/privacy |
+| Account deletion (Data safety) | https://api.darkfantasy.club/api/legal/account-deletion |
+| Terms (optional, description) | https://api.darkfantasy.club/api/legal/terms |
+| Support website | https://api.darkfantasy.club/api/legal/support |
 | Support email | support@darkfantasy.com |
 
 The pages are generated from the in-app text. After changing

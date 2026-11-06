@@ -135,10 +135,10 @@ test('store preflight reports missing push and encryption setup, and lists publi
   // An Android-only store build needs only the Firebase file.
   const android = await checkRelease({ env, assets: false, platform: 'android' });
   assert.equal(android.ownerRequirements.length, 1);
-  assert.equal(report.legalPages.privacy, 'https://dfbackend.onrender.com/api/legal/privacy');
+  assert.equal(report.legalPages.privacy, 'https://api.darkfantasy.club/api/legal/privacy');
   assert.equal(
     report.legalPages['account-deletion'],
-    'https://dfbackend.onrender.com/api/legal/account-deletion',
+    'https://api.darkfantasy.club/api/legal/account-deletion',
   );
   const configured = {
     ...env,
@@ -206,11 +206,11 @@ test('release runtime uses the validated native endpoint when no public variable
     return exports.env;
   };
   assert.equal(
-    evaluate('https://dfbackend.onrender.com/api').apiUrl,
-    'https://dfbackend.onrender.com/api',
+    evaluate('https://api.darkfantasy.club/api').apiUrl,
+    'https://api.darkfantasy.club/api',
   );
   assert.equal(
-    evaluate('https://dfbackend.onrender.com/api', {
+    evaluate('https://api.darkfantasy.club/api', {
       EXPO_PUBLIC_API_URL: 'https://staging.example.test/api',
     }).apiUrl,
     'https://staging.example.test/api',

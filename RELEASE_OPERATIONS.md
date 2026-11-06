@@ -32,7 +32,7 @@ been generated, set the release environment before running Expo prebuild:
 
 ```powershell
 $env:APP_VARIANT = 'production'
-$env:EXPO_PUBLIC_API_URL = 'https://dfbackend.onrender.com/api'
+$env:EXPO_PUBLIC_API_URL = 'https://api.darkfantasy.club/api'
 $env:NODE_ENV = 'production'
 $env:EXPO_NO_DOTENV = '1'
 rtk proxy node node_modules/expo/bin/cli prebuild --platform android
